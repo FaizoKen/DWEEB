@@ -31,6 +31,8 @@ import { GlobeIcon, PuzzleIcon } from "@/ui/Icon";
 import type { PluginManifest, PluginPreset } from "@/core/plugins/manifest";
 import type { LinkPluginManifest } from "@/core/plugins/linkManifest";
 import { presetsForTarget, type PluginTarget } from "@/core/plugins/targets";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { PluginIcon } from "./PluginIcon";
 import styles from "./PluginLibraryModal.module.css";
 
@@ -71,6 +73,13 @@ export function PluginLibraryModal({
   onClose,
 }: Props) {
   const [query, setQuery] = useState("");
+  // Whether the connected server already has the DWEEB bot. Unknown (signed
+  // out, no server, the Activity's own auth) reads as false, which keeps the
+  // "Needs bot" tag on — the status quo — until the picker's list says otherwise.
+  const connectedGuildId = useGuildStore((s) => s.guildId);
+  const connectedBotPresent = useAuthStore(
+    (s) => !!connectedGuildId && s.guilds.some((g) => g.id === connectedGuildId && g.bot_present),
+  );
   // Which plugin groups have their templates expanded. Collapsed by default so the
   // list reads as one row per plugin; the toggle reveals that plugin's templates.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -133,8 +142,12 @@ export function PluginLibraryModal({
                 <span className={styles.rowName}>{manifest.name}</span>
                 {/* Flags the plugins that drive the shared DWEEB bot — the user has
                     to log in and invite it before the setup works. The rest run over
-                    webhooks and carry no tag. */}
-                {manifest.requiresBot ? <span className={styles.loginTag}>Needs bot</span> : null}
+                    webhooks and carry no tag. Once the connected server is known to
+                    have the bot the tag comes off: a standing warning on a server
+                    that is already set up only teaches people to ignore it. */}
+                {manifest.requiresBot && !connectedBotPresent ? (
+                  <span className={styles.loginTag}>Needs bot</span>
+                ) : null}
               </span>
               {manifest.description ? (
                 <span className={styles.rowDesc}>{manifest.description}</span>

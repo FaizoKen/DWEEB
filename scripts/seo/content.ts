@@ -53,13 +53,15 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-09-18";
+export const TEMPLATES_LASTMOD = "2026-09-22";
 
 // 2026-09-11: every detail page gained its source-derived JSON and compatibility
 // reference. 2026-09-16: every detail page gained the "Read next" guide row.
 // 2026-09-18: every detail page gained generated discord.js / discord.py code.
+// 2026-09-22: every preview renders the real sample images instead of the
+// placeholder glyph that read as a broken picture.
 // Future individual edits should use an override instead of refreshing this baseline.
-const DEFAULT_TEMPLATE_LASTMOD = "2026-09-18";
+const DEFAULT_TEMPLATE_LASTMOD = "2026-09-22";
 const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
 
 /** Meaningful content date for one generated template page. */
@@ -788,7 +790,7 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     },
     {
       q: `How do I use this ${template.name} template?`,
-      a: "Click “Open in DWEEB” to load it into the visual editor, change the text, colours and links to fit your server, then paste your Discord webhook URL and hit Send. You can also share it as a single link or export the message JSON.",
+      a: "Click “Use this template free” to load it into the visual editor, change the text, colours and links to fit your server, then pick a channel or paste your Discord webhook URL and hit Send. You can also share it as a single link or export the message JSON.",
     },
     {
       q: "Is DWEEB free?",

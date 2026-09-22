@@ -90,7 +90,7 @@ export function identityLd(): object[] {
 const HOWTO_START = [
   {
     name: "Open it in DWEEB",
-    text: "Click “Open in DWEEB” to load the template into the visual editor — no sign-up, no install.",
+    text: "Click “Use this template free” to load the template into the visual editor — no sign-up, no install.",
   },
   {
     name: "Make it yours",
@@ -882,7 +882,8 @@ tbody tr:last-child td{border-bottom:0}
 .dwx-section-text{min-width:0;flex:1}
 .dwx-section-text>*+*{margin-top:6px}
 .dwx-section-accessory{flex:0 0 auto}
-.dwx-thumb{width:74px;height:74px;border-radius:8px;background:#1e1f22;display:flex;align-items:center;justify-content:center;font-size:26px}
+.dwx-thumb{width:74px;height:74px;border-radius:8px;background:#1e1f22;display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden}
+.dwx-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .dwx-section-action .dwx-btn{white-space:nowrap}
 
 .dwx-gallery{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin:2px 0}
@@ -890,7 +891,12 @@ tbody tr:last-child td{border-bottom:0}
 .dwx-media{margin:0;background:#1e1f22;border-radius:8px;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:14px;text-align:center}
 .dwx-media-glyph{font-size:30px;opacity:.85}
 .dwx-media figcaption{font-size:12px;color:var(--dim)}
-.dwx-media-spoiler{filter:blur(2px)}
+.dwx-media-img{display:block;min-height:0;padding:0;overflow:hidden;position:relative}
+.dwx-media-img img{width:100%;height:auto;display:block}
+.dwx-media-img figcaption{padding:6px 8px}
+.dwx-media-spoiler:not(.dwx-media-img){filter:blur(2px)}
+.dwx-media-spoiler img{filter:blur(16px);transform:scale(1.08)}
+.dwx-media-spoiler.dwx-media-img::after{content:"SPOILER";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px}
 
 .dwx-sep{border:none;border-top:1px solid var(--border);margin:10px 0}
 .dwx-sep-lg{margin:14px 0}

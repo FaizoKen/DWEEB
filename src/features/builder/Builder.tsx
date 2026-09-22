@@ -56,7 +56,10 @@ import { ComponentTree } from "./components/ComponentTree";
 import { SaveMessageDialog } from "./components/SaveMessageDialog";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
-import { PlanBadge } from "@/features/plan/PlanBadge";
+import { PlanBadge, type PlanUsage } from "@/features/plan/PlanBadge";
+import { useLibraryStore } from "@/core/library/libraryStore";
+import { useGuildCustomBotsStore } from "@/core/guild/useGuildCustomBots";
+import { useAiUsageStore } from "@/core/ai/usageStore";
 import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { useFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
@@ -222,6 +225,38 @@ function ActionBar({
   const planVisible = !!plan && !!connectedGuildId;
 
   // ── Destination channel (mirrors the Activity bar) ────────────────────────
+  // Usage for the plan popover's limit rows, from stores that are already
+  // loaded — never a fetch of its own. Posted history is left as a cap only:
+  // its `used` counts never-expire messages that sit above the rolling window,
+  // and the directory subtracts those with data this bar doesn't have.
+  const libGuildId = useLibraryStore((s) => s.guildId);
+  const libLoaded = useLibraryStore((s) => s.loaded);
+  const libDraftsUsed = useLibraryStore((s) => s.drafts.used);
+  const botsGuildId = useGuildCustomBotsStore((s) => s.guildId);
+  const botsFetched = useGuildCustomBotsStore((s) => s.fetchedAt > 0);
+  const botsCount = useGuildCustomBotsStore((s) => s.items.length);
+  const aiRequestsUsed = useAiUsageStore((s) => s.usage?.requests_used ?? null);
+  const planUsage = useMemo<PlanUsage>(() => {
+    const usage: PlanUsage = {};
+    if (connectedGuildId && libGuildId === connectedGuildId && libLoaded) {
+      usage.library = libDraftsUsed;
+    }
+    if (connectedGuildId && botsGuildId === connectedGuildId && botsFetched) {
+      usage.custom_bots = botsCount;
+    }
+    if (aiRequestsUsed != null) usage.ai_requests = aiRequestsUsed;
+    return usage;
+  }, [
+    aiRequestsUsed,
+    botsCount,
+    botsFetched,
+    botsGuildId,
+    connectedGuildId,
+    libDraftsUsed,
+    libGuildId,
+    libLoaded,
+  ]);
+
   // The chip next to the account control says where the next post lands. It
   // only exists where it can actually steer a send — the channel-first flow,
   // which needs a signed-in user with Manage Webhooks in the connected server;
@@ -536,6 +571,7 @@ function ActionBar({
             <>
               <PlanBadge
                 plan={plan}
+                usage={planUsage}
                 serverName={connectedGuildName}
                 onSeePlans={() => openPricing(connectedGuildId)}
               />

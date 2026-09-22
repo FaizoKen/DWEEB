@@ -960,7 +960,8 @@ export function resolveAllFeatures(): ResolvedFeature[] {
   return FEATURES.map(resolveFeature);
 }
 
-/** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-09-18";
+/** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`.
+ *  2026-09-22: the embedded template previews render real sample images. */
+export const FEATURES_LASTMOD = "2026-09-22";
 
 export { ACCENT_BLURPLE };

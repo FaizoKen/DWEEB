@@ -11,10 +11,13 @@
  * the template actually says, while a compact Discord-flavoured skin keeps it
  * recognisable to a human who arrives from a search result.
  *
- * Images are rendered as captioned placeholders rather than fetched: the
- * template media are random stand-ins (picsum seeds), so the caption is the only
- * thing worth indexing, and skipping the fetch keeps the page fast and
- * self-contained.
+ * Images: DWEEB's own sample media (`/media/defaults/*.jpg`, the only images a
+ * shipped template uses) render as real `<img>` tags pointing at the committed
+ * WebP display variants, with `width`/`height` read from the file headers so
+ * nothing shifts while they load — the preview is the page's hero, and the
+ * captioned glyph it used to show read as a broken picture. Any other URL
+ * (a user's own image in a shared message) keeps the captioned placeholder:
+ * nothing is fetched at build time, so the page stays self-contained.
  */
 
 import {
@@ -34,6 +37,7 @@ import {
   type TopLevelComponent,
   type WebhookMessage,
 } from "@/core/schema/types";
+import { defaultMediaSize } from "./media-dimensions";
 
 const SELECT_TYPES: ReadonlySet<number> = new Set([
   ComponentType.StringSelect,
@@ -206,7 +210,8 @@ function renderButton(b: ButtonComponent): string {
   const emoji = "emoji" in b && b.emoji?.name ? `${b.emoji.name} ` : "";
   const label =
     "label" in b && b.label ? b.label : b.style === ButtonStyle.Premium ? "Premium" : "Button";
-  const ext = b.style === ButtonStyle.Link ? ' <span class="dwx-btn-ext" aria-hidden="true">↗</span>' : "";
+  const ext =
+    b.style === ButtonStyle.Link ? ' <span class="dwx-btn-ext" aria-hidden="true">↗</span>' : "";
   return `<span class="${buttonClass(b.style)}">${escapeHtml(emoji)}${escapeHtml(label)}${ext}</span>`;
 }
 
@@ -249,16 +254,57 @@ function renderActionRow(row: ActionRowComponent): string {
   return `<div class="dwx-row">${(comps as ButtonComponent[]).map(renderButton).join("")}</div>`;
 }
 
+/**
+ * `/media/defaults/<name>.jpg` on any origin — the app stamps its own origin
+ * onto these URLs (`core/media/defaultMedia.ts`), so a template built against
+ * localhost, a self-host, or dweeb.faizo.net all name the same shipped file.
+ */
+const DEFAULT_MEDIA_URL = /^(?:https?:\/\/[^/]+)?\/media\/defaults\/([A-Za-z0-9._-]+)\.jpe?g$/;
+
+interface StaticImage {
+  src: string;
+  width: number;
+  height: number;
+}
+
+/** The shipped WebP display variant for one of DWEEB's sample images, or null for any other URL. */
+function staticImageFor(url: string | undefined): StaticImage | null {
+  if (!url) return null;
+  const match = DEFAULT_MEDIA_URL.exec(url);
+  if (!match) return null;
+  const file = `${match[1]}.webp`;
+  const size = defaultMediaSize(file);
+  return size ? { src: `/media/defaults/${file}`, ...size } : null;
+}
+
+/** Images emitted so far in the current document — the first one is the hero and loads eagerly. */
+let imagesEmitted = 0;
+
+function imgTag(img: StaticImage, alt: string): string {
+  const eager = imagesEmitted++ === 0;
+  return `<img src="${img.src}" width="${img.width}" height="${img.height}" alt="${escapeHtml(alt)}"${
+    eager ? "" : ' loading="lazy"'
+  } decoding="async">`;
+}
+
 function renderThumb(t: ThumbnailComponent): string {
   const cap = t.description ? escapeHtml(t.description) : "Image";
+  const img = staticImageFor(t.media?.url);
+  if (img) return `<div class="dwx-thumb">${imgTag(img, t.description ?? "")}</div>`;
   return `<div class="dwx-thumb" role="img" aria-label="${cap}"><span class="dwx-media-glyph" aria-hidden="true">🖼️</span></div>`;
 }
 
 function renderGallery(g: MediaGalleryComponent): string {
   const items = g.items
     .map((it) => {
-      const caption = it.description ? `<figcaption>${renderInline(it.description)}</figcaption>` : "";
+      const caption = it.description
+        ? `<figcaption>${renderInline(it.description)}</figcaption>`
+        : "";
       const spoiler = it.spoiler ? " dwx-media-spoiler" : "";
+      const img = staticImageFor(it.media?.url);
+      if (img) {
+        return `<figure class="dwx-media dwx-media-img${spoiler}">${imgTag(img, it.description ?? "")}${caption}</figure>`;
+      }
       const label = it.description ? ` aria-label="${escapeHtml(it.description)}"` : "";
       return `<figure class="dwx-media${spoiler}"${label}><span class="dwx-media-glyph" aria-hidden="true">🖼️</span>${caption}</figure>`;
     })
@@ -312,8 +358,13 @@ function renderContainer(c: ContainerComponent): string {
 
 /** Render a whole message to a Discord-style card. */
 export function renderMessageHtml(message: WebhookMessage): string {
+  imagesEmitted = 0;
   const author = message.username ? escapeHtml(message.username) : "DWEEB";
-  const initial = author.replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "D";
+  const initial =
+    author
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 1)
+      .toUpperCase() || "D";
   const body = message.components.map(renderChild).join("");
   return `<article class="dwx-msg">
   <div class="dwx-avatar" aria-hidden="true">${initial}</div>
@@ -334,7 +385,9 @@ export function renderMessageHtml(message: WebhookMessage): string {
 export function collectComponentKinds(message: WebhookMessage): string[] {
   const found = new Set<string>();
 
-  const visit = (c: TopLevelComponent | ContainerChild | SelectComponent | ButtonComponent): void => {
+  const visit = (
+    c: TopLevelComponent | ContainerChild | SelectComponent | ButtonComponent,
+  ): void => {
     switch (c.type) {
       case ComponentType.Container:
         found.add("Container with accent stripe");
@@ -342,7 +395,8 @@ export function collectComponentKinds(message: WebhookMessage): string[] {
         break;
       case ComponentType.Section:
         found.add("Section");
-        if ((c as SectionComponent).accessory.type === ComponentType.Thumbnail) found.add("Thumbnail");
+        if ((c as SectionComponent).accessory.type === ComponentType.Thumbnail)
+          found.add("Thumbnail");
         else found.add("Button");
         break;
       case ComponentType.TextDisplay:
@@ -360,7 +414,8 @@ export function collectComponentKinds(message: WebhookMessage): string[] {
       case ComponentType.ActionRow: {
         const inner = (c as ActionRowComponent).components;
         const first = inner[0];
-        if (first && SELECT_TYPES.has(first.type)) inner.forEach((x) => visit(x as SelectComponent));
+        if (first && SELECT_TYPES.has(first.type))
+          inner.forEach((x) => visit(x as SelectComponent));
         else found.add("Buttons");
         break;
       }

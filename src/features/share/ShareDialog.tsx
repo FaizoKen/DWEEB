@@ -149,7 +149,9 @@ export function ShareDialog({
   }, [open]);
 
   return (
-    <Modal open={open} onClose={onClose} title={TAB_TITLES[tab]}>
+    // Top-anchored: picking "Schedule" adds a date field, and a centred dialog
+    // would shift every control by half that growth under a resting cursor.
+    <Modal open={open} onClose={onClose} title={TAB_TITLES[tab]} anchor="top">
       <div
         className={styles.tabs}
         role="tablist"

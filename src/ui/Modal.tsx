@@ -14,6 +14,9 @@ interface ModalProps {
   footer?: ReactNode;
   /** "sm" renders a compact centered dialog that stays small on mobile. */
   size?: "sm" | "md";
+  /** "top" pins the dialog's top edge instead of centring it — for dialogs
+   *  whose height changes while open, so controls never move under the cursor. */
+  anchor?: "center" | "top";
   /** Inline overrides for the backdrop — e.g. a raised `zIndex` so the dialog
    *  clears another full-screen overlay it's opened on top of. */
   backdropStyle?: CSSProperties;
@@ -132,6 +135,7 @@ export function Modal({
   ariaLabel,
   footer,
   size = "md",
+  anchor = "center",
   backdropStyle,
   children,
 }: ModalProps) {
@@ -249,7 +253,11 @@ export function Modal({
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : titleId}
         tabIndex={-1}
-        className={cn(styles.dialog, size === "sm" && styles.dialogSm)}
+        className={cn(
+          styles.dialog,
+          size === "sm" && styles.dialogSm,
+          anchor === "top" && styles.dialogTop,
+        )}
       >
         <header className={styles.header}>
           <h2 id={titleId} className={styles.title}>

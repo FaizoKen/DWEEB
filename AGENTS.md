@@ -1862,6 +1862,29 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   hint, and the friendly update-404 text. The modal title follows the tab ("Send message", "Update
   a posted message", …) instead of "Share / Send / Export", and the send receipt's Done closes the
   dialog on the new-post path so the first send doesn't end on the Send panel.
+- **Second UX batch (2026-09-22, from a signed-in walkthrough of prod).** (1) **Static template
+  and feature previews render the real sample images** (`scripts/seo/render-message.ts` +
+  `media-dimensions.ts`): any `/media/defaults/<name>.jpg` URL on any origin becomes an `<img>`
+  for the committed `.webp` variant with `width`/`height` read from the WebP header (no image
+  library, no fetch); every other URL keeps the captioned placeholder. The old "picsum stand-ins"
+  rationale for placeholders predates the shipped samples, and the glyph read as a broken picture
+  on the page's hero. The first image per document loads eagerly, the rest lazily. Template and
+  feature `lastmod` baselines were bumped for it. (2) **A dialog whose height changes while open
+  is top-anchored** (`Modal anchor="top"`, `.dialogTop`): the Send dialog grows by a date field
+  when Schedule is picked, and a centred dialog shifts every control by half that growth under a
+  resting cursor — an audit click landed on the wrong row because of it. Use it for any dialog
+  with expanding sections; leave confirmations centred. (3) **Library cards are named by their
+  message** (`core/schema/headline.ts` — first text line, markdown stripped; next line as the
+  description): posted history stores no title, so four posts to `#test` were four identical
+  cards. Metadata-only cards fall back to the destination until hydrated. (4) **The Collab dialog
+  defaults to the toolbar's picked channel** (`sendTargetStore`) and only then the first channel —
+  the alphabetical default put invites in the wrong room. (5) **The plugin library's "Needs bot"
+  tag is gated on the connected server's `bot_present`**; unknown still shows it. (6) **The plan
+  popover shows `used / cap` for rows whose store is already loaded** (saved messages, custom
+  bots, AI requests) and never fetches for it; posted history stays a bare cap because its `used`
+  counts never-expire messages that sit above the rolling window (the directory subtracts them
+  with data the bar doesn't have). (7) Template-page copy names the real CTA ("Use this template
+  free"), not the retired "Open in DWEEB".
 
 ## CI
 

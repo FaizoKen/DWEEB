@@ -29,6 +29,7 @@ import { pushToast } from "@/ui/Toast";
 import { copyText } from "@/core/serialization/clipboard";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import {
   createActivityInvite,
   GuildApiError,
@@ -75,12 +76,28 @@ export function CollaborateDialog() {
   const [error, setError] = useState<string | null>(null);
   const [invite, setInvite] = useState<ActivityInvite | null>(null);
 
-  // Default to the first channel once the list resolves, and keep the selection
-  // valid if the connected server (and its channels) changes.
+  // The toolbar's picked channel, when it belongs to this server. Defaulting to
+  // the alphabetically-first channel put an invite in "#ds" for someone whose
+  // whole session was aimed at "#logs" — the room the message is for is the
+  // room to build it in.
+  const sendTargetGuildId = useSendTargetStore((s) => s.guildId);
+  const sendTargetChannelId = useSendTargetStore((s) => s.channelId);
+  const preferredChannelId =
+    connectedId && sendTargetGuildId === connectedId ? sendTargetChannelId : null;
+
+  // Default to the toolbar's channel (else the first) once the list resolves,
+  // and keep the selection valid if the connected server (and its channels)
+  // changes.
   useEffect(() => {
     if (!channels.length) return;
-    setChannelId((cur) => (channels.some((c) => c.id === cur) ? cur : channels[0]!.id));
-  }, [channels]);
+    setChannelId((cur) => {
+      if (channels.some((c) => c.id === cur)) return cur;
+      if (preferredChannelId && channels.some((c) => c.id === preferredChannelId)) {
+        return preferredChannelId;
+      }
+      return channels[0]!.id;
+    });
+  }, [channels, preferredChannelId]);
 
   const selectedChannel = channels.find((c) => c.id === channelId) ?? null;
 

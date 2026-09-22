@@ -27,6 +27,19 @@
   animation: rise 160ms ease-out;
 }
 
+/* Top-anchored variant for dialogs whose height changes while they are open —
+   the Send dialog grows by a date field when Schedule is picked. A centred
+   dialog re-positions by half of every growth, so the card the user just
+   clicked slides out from under the cursor; anchored at the top, growth only
+   extends downward and nothing already on screen moves. The margin keeps the
+   fixed top edge off the viewport's edge; the height rule keeps it clear of
+   the bottom padding. */
+.dialogTop {
+  align-self: start;
+  margin-top: min(6vh, 48px);
+  max-height: calc(100dvh - 32px - min(6vh, 48px) - var(--app-sait) - var(--app-saib));
+}
+
 /* Compact variant: small centered card for confirmations and short forms.
  * Keeps the same look on mobile rather than expanding to full-screen. */
 .dialogSm {

@@ -43,12 +43,29 @@ function limitText(v: number | null | undefined): string {
   return v == null ? "Unlimited" : String(v);
 }
 
+/** How much of each limit this server is using, for the rows the caller can answer. */
+export type PlanUsage = Partial<Record<keyof PlanInfo["limits"], number>>;
+
+/**
+ * "used / cap" once the usage is known, else the cap alone. A bare cap ("3")
+ * reads like a count — "Scheduled posts 3" was taken for three scheduled
+ * posts — so the rows that can say what is used do.
+ */
+function limitRowText(cap: number | null | undefined, used: number | undefined): string {
+  if (used === undefined) return limitText(cap);
+  return cap == null ? `${used} used` : `${used} / ${cap}`;
+}
+
 export function PlanBadge({
   plan,
+  usage,
   serverName,
   onSeePlans,
 }: {
   plan: PlanInfo;
+  /** Current usage per limit where the caller already knows it (loaded
+   *  stores only — the popover never fetches). Omitted rows show the cap. */
+  usage?: PlanUsage;
   serverName?: string;
   /** Open the plan comparison — the pricing modal on web, a web hand-off in
    *  the Activity. */
@@ -87,7 +104,9 @@ export function PlanBadge({
             {LIMIT_ROWS.filter((r) => plan.limits[r.key] !== undefined).map((r) => (
               <li key={r.key} className={styles.limitRow}>
                 <span className={styles.limitLabel}>{r.label}</span>
-                <span className={styles.limitVal}>{limitText(plan.limits[r.key])}</span>
+                <span className={styles.limitVal}>
+                  {limitRowText(plan.limits[r.key], usage?.[r.key])}
+                </span>
               </li>
             ))}
           </ul>

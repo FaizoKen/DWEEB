@@ -68,6 +68,7 @@ import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
 import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
 import { formatInstant } from "@/core/schedule/recurrence";
 import { validateMessage } from "@/core/schema/validation";
+import { messageHeadline } from "@/core/schema/headline";
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
 import { isRegisteredPluginId } from "@/core/plugins/registry";
@@ -475,8 +476,16 @@ export function TemplateGallery() {
       ) {
         tags.push({ text: "Buttons may be expired", tone: "warn" });
       }
+      // Posted history stores no title, so four posts to #test used to be four
+      // cards named "#test" — the message's own first line names it instead,
+      // and its next line stands in for the description. Metadata-only cards
+      // (not hydrated yet) keep the destination until the body arrives.
+      const headline = message ? messageHeadline(message) : null;
       const displayName =
-        entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
+        entry.title?.trim() ||
+        headline?.title ||
+        entry.dest_label ||
+        (isPosted ? "Posted message" : "Server draft");
       // The pin chip: ONE control that both shows never-expire state and
       // toggles it. A held slot (even a plan-paused one) opens a confirm before
       // freeing; an interactive message without a slot claims one on tap
@@ -506,13 +515,17 @@ export function TemplateGallery() {
           };
         }
       }
+      // One short line per card: where it went, then what it says. The shelf's
+      // meter tooltip already explains how the rolling history and never-expire
+      // work, so the card doesn't repeat that sentence ten times over.
+      const postedTo = entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted";
       const description = isPosted
         ? holdsSlot
-          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
-          : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
-              connectedGuildName ?? "server"
-            } history — it rolls off as newer posts land. Load it and save it to keep it.`
-        : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`;
+          ? `${postedTo} · never-expire slot held${headline?.snippet ? ` · ${headline.snippet}` : ""}`
+          : `${postedTo}${headline?.snippet ? ` · ${headline.snippet}` : " · in the rolling history — save it to keep it"}`
+        : headline?.snippet
+          ? `Server draft · ${headline.snippet}`
+          : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`;
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
         key: `lib:${entry.id}`,
