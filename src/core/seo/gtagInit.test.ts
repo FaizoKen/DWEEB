@@ -81,18 +81,28 @@ describe("analytics page-location privacy", () => {
     expect(runLoader("https://dweeb.faizo.net/", { appShell: true }).delays).toContain(8000);
   });
 
-  it("opts the tag out of Google signals and ad personalization before config", () => {
-    // The privacy policy promises no advertising or cross-site tracking; the
-    // page opts out itself rather than trusting the property's admin toggles.
+  it("starts from analytics-only consent, before the tag is configured", () => {
+    // The privacy policy allows analytics cookies and promises no advertising
+    // or cross-site tracking. The denied ad defaults are what stop gtag's
+    // stats.g.doubleclick.net ping; they must precede `js` and `config`.
     const { calls } = runLoader("https://dweeb.faizo.net/guides/discord-components-v2/");
-    const setIndex = calls.findIndex(
-      (args) =>
-        args[0] === "set" &&
-        (args[1] as Record<string, unknown>).allow_google_signals === false &&
-        (args[1] as Record<string, unknown>).allow_ad_personalization_signals === false,
-    );
-    expect(setIndex).toBeGreaterThanOrEqual(0);
-    expect(setIndex).toBeLessThan(calls.findIndex((args) => args[0] === "config"));
+    const consentIndex = calls.findIndex((args) => args[0] === "consent" && args[1] === "default");
+    expect(calls[consentIndex]?.[2]).toEqual({
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+      analytics_storage: "granted",
+    });
+    expect(consentIndex).toBeLessThan(calls.findIndex((args) => args[0] === "js"));
+    expect(consentIndex).toBeLessThan(calls.findIndex((args) => args[0] === "config"));
+  });
+
+  it("opts the tag out of Google signals and ad personalization in its config", () => {
+    const { calls } = runLoader("https://dweeb.faizo.net/guides/discord-components-v2/");
+    expect(calls.find((args) => args[0] === "config")?.[2]).toMatchObject({
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false,
+    });
   });
 
   it("keeps only the HTTP referrer's origin", () => {

@@ -23,18 +23,20 @@
   window.gtag = function () {
     window.dataLayer.push(arguments);
   };
-  window.gtag("js", new Date());
-  // The privacy policy promises no advertising or cross-site tracking, so the
-  // tag opts out of Google signals and ad personalization itself instead of
-  // relying on the property's admin toggles; set before `config` so it applies
-  // to the tag's hits (they carry npa=1 since). The stream's linked destination
-  // still attempts a stats.g.doubleclick.net beacon of its own: the generated
-  // pages' CSP refuses it (a console error when GA loads there), and the GA
-  // property's Google-signals setting is what governs it.
-  window.gtag("set", {
-    allow_google_signals: false,
-    allow_ad_personalization_signals: false,
+  // The privacy policy allows analytics cookies and promises no advertising or
+  // cross-site tracking, so the tag starts from exactly that consent state.
+  // This — not the property's Google-signals toggle (off) nor the config flags
+  // below — is what stops gtag's per-page ngs=1 ping to stats.g.doubleclick.net
+  // (verified 2026-09-23: with the flags alone it still fired and the generated
+  // pages' CSP logged a refusal; with these defaults it is gone and page views
+  // still collect, gcs=G101). Must run before `js`/`config`.
+  window.gtag("consent", "default", {
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+    analytics_storage: "granted",
   });
+  window.gtag("js", new Date());
   var pageType = document.documentElement.getAttribute("data-page-type") || "app";
   var isAppShell = document.documentElement.hasAttribute("data-app-shell");
 
@@ -72,6 +74,11 @@
         return "";
       }
     })(),
+    // Google's documented per-tag opt-outs, kept beside the consent defaults
+    // above so neither can be switched back on from the property's admin
+    // settings. On their own they did not stop the doubleclick ping.
+    allow_google_signals: false,
+    allow_ad_personalization_signals: false,
   });
 
   // Search landing pages mark their builder CTAs declaratively. Persist only

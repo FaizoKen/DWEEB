@@ -1419,15 +1419,18 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the controlled canonical plus a referrer's origin; acquisition ids and product-event fields use
   exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
   and history pageviews), because those automatic events bypass the repository's field filters.
-  `gtag-init.js` also sets `allow_google_signals: false` and `allow_ad_personalization_signals:
-  false` before `config` (2026-09-23): the privacy policy promises no advertising or cross-site
-  tracking, and the page should not depend on the property's admin toggles for that (hits carry
-  `npa=1` since). It does **not** silence everything: the web stream's linked destination
-  still attempts a `stats.g.doubleclick.net` beacon — allowed by the app shell's
-  broad `connect-src`, refused by every generated page's narrow one, which logs a CSP console
-  error whenever GA loads there (a throttled Lighthouse run scored Best Practices 93 for it). The
-  property's Google-signals setting (GA Admin → Data collection) governs that beacon; don't widen
-  the generated pages' CSP to make the error go away.
+  **`gtag-init.js` starts from analytics-only consent** (2026-09-23): `gtag("consent", "default",
+  …)` denies `ad_storage`, `ad_user_data` and `ad_personalization` and grants `analytics_storage`,
+  before `js`/`config` — exactly what the privacy policy promises (analytics cookies, no
+  advertising or cross-site tracking). It is what stops gtag's per-page `ngs=1` ping to
+  `stats.g.doubleclick.net`, which the app shell's broad `connect-src` let through and every
+  generated page's narrow one refused with a console error whenever GA loaded (Best Practices 93 in
+  a throttled Lighthouse run). Measured, not assumed: the property's Google-signals toggle was
+  already **off**, and `allow_google_signals` / `allow_ad_personalization_signals: false` — tried
+  via `set` and via `config` — did not stop the ping; the consent defaults did, with page views
+  still collected (`gcs=G101`, `npa=1`). The two flags stay in `config` as documented per-tag
+  opt-outs. Don't widen the generated pages' CSP to silence such an error, and don't drop the
+  consent defaults.
   Never add message content, webhook URLs/tokens, guild/app/message ids, share payloads, or
   free-form text to analytics. **Never name an event parameter `source`, `medium`, `campaign`,
   `term` or `content`** (2026-09-18): GA4 reads those on *any* event as a manual campaign
