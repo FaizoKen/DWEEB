@@ -223,14 +223,13 @@
   color: var(--app-text);
 }
 
-/* No-ping state — calm, reassuring. */
-.pingCalm {
-  background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-  padding: 10px 12px;
-  font-size: 13px;
-  color: var(--app-text);
+/* No-ping state — the calm, common case, so one muted line rather than a
+   bordered block competing with the warnings that do need reading. */
+.pingQuiet {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
 }
 
 /* Will-ping state — amber, attention-grabbing. */

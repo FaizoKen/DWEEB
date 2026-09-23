@@ -50,6 +50,9 @@ export interface CardData {
   metaText?: string;
   /** Saved / posted only — the small pill shown in place of a category. */
   badge?: string;
+  /** The hover call to action, when a surface's card does something other than
+   *  its kind's default (the web's scheduled cards edit the post in place). */
+  actionLabel?: string;
   /** True when this card came from the connected server's shared library. */
   storedInServerLibrary?: boolean;
   onPick: () => void;
@@ -249,11 +252,12 @@ export const GalleryCard = memo(function GalleryCard({
         ) : null}
         <div className={styles.cardHover} aria-hidden>
           <span className={styles.useBtn}>
-            {card.kind === "posted"
-              ? "Edit & update →"
-              : card.kind === "template"
-                ? "Use this template →"
-                : "Load message →"}
+            {card.actionLabel ??
+              (card.kind === "posted"
+                ? "Edit & update →"
+                : card.kind === "template"
+                  ? "Use this template →"
+                  : "Load message →")}
           </span>
         </div>
       </div>

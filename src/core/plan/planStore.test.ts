@@ -34,7 +34,7 @@ function deferred<T>() {
 
 describe("planStore", () => {
   beforeEach(() => {
-    usePlanStore.setState({ guildId: null, plan: null, status: "idle", open: false });
+    usePlanStore.setState({ guildId: null, plan: null, status: "idle", error: null, open: false });
     fetchGuildPlanMock.mockReset();
   });
 
@@ -83,6 +83,50 @@ describe("planStore", () => {
     expect(usePlanStore.getState().status).toBe("error");
   });
 
+  it("a failed load keeps the API client's reason for the pricing modal to show", async () => {
+    fetchGuildPlanMock.mockRejectedValue(
+      new Error("Couldn't reach the server. Check your connection."),
+    );
+    await usePlanStore.getState().load(G1);
+    expect(usePlanStore.getState()).toMatchObject({
+      status: "error",
+      plan: null,
+      error: "Couldn't reach the server. Check your connection.",
+    });
+  });
+
+  it("a rejection without words of its own gets a plain reason, never a blank", async () => {
+    fetchGuildPlanMock.mockRejectedValue("boom");
+    await usePlanStore.getState().load(G1);
+    expect(usePlanStore.getState().error).toBe("Try again in a moment.");
+  });
+
+  it("a retry after a failure re-reads, clears the reason while loading, and recovers", async () => {
+    fetchGuildPlanMock.mockRejectedValueOnce(new Error("Rate limited — try again in a moment."));
+    await usePlanStore.getState().load(G1);
+    expect(usePlanStore.getState().status).toBe("error");
+
+    const retry = deferred<PlanInfo>();
+    fetchGuildPlanMock.mockReturnValueOnce(retry.promise);
+    // An errored load is not "warm": even an unforced load for the same server
+    // goes back to the network.
+    const pending = usePlanStore.getState().load(G1);
+    expect(usePlanStore.getState()).toMatchObject({ status: "loading", error: null });
+    retry.resolve(PLAN);
+    await pending;
+    expect(usePlanStore.getState()).toMatchObject({ status: "ready", error: null, plan: PLAN });
+    expect(fetchGuildPlanMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a signed-out (401) read settles as ready with no plan and no error", async () => {
+    const unauthorized = Object.assign(new Error("Sign in with Discord to load server data."), {
+      status: 401,
+    });
+    fetchGuildPlanMock.mockRejectedValue(unauthorized);
+    await usePlanStore.getState().load(G1);
+    expect(usePlanStore.getState()).toMatchObject({ status: "ready", plan: null, error: null });
+  });
+
   it("openPricing(guild) opens the modal and kicks off a load", async () => {
     fetchGuildPlanMock.mockResolvedValue(PLAN);
     usePlanStore.getState().openPricing(G1);
@@ -93,12 +137,13 @@ describe("planStore", () => {
   });
 
   it("reset() clears cached state", () => {
-    usePlanStore.setState({ guildId: G1, plan: PLAN, status: "ready", open: true });
+    usePlanStore.setState({ guildId: G1, plan: PLAN, status: "error", error: "x", open: true });
     usePlanStore.getState().reset();
     expect(usePlanStore.getState()).toMatchObject({
       guildId: null,
       plan: null,
       status: "idle",
+      error: null,
       open: false,
     });
   });

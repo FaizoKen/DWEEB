@@ -18,6 +18,13 @@ import styles from "./inspectors.module.css";
 
 type Entry = { id: string; type: "user" | "role" | "channel" };
 
+/** How the editor names each kind of default, in the words the menus use. */
+const TYPE_LABEL: Record<Entry["type"], string> = {
+  user: "User",
+  role: "Role",
+  channel: "Channel",
+};
+
 interface Props {
   node: SelectComponent & { default_values?: Entry[] };
   /** Which types the snowflake may take. Single entry locks the type column. */
@@ -60,7 +67,7 @@ export function DefaultValuesEditor({ node, allowedTypes }: Props) {
     <div className={styles.subPanel}>
       <div className={styles.listHeader}>
         <span>
-          default_values ({values.length} / {LIMITS.SELECT_DEFAULT_VALUES})
+          Default selections ({values.length} / {LIMITS.SELECT_DEFAULT_VALUES})
         </span>
         <button
           type="button"
@@ -74,18 +81,18 @@ export function DefaultValuesEditor({ node, allowedTypes }: Props) {
 
       {values.length === 0 ? (
         <p className={styles.note}>
-          Pre-selects an entry when the user opens the menu. Leave empty for none.
+          Already picked when someone opens the menu. Leave empty for none.
         </p>
       ) : (
         <div className={styles.cards}>
           {values.map((entry, i) => (
             <div key={i} className={styles.card}>
               <div className={styles.cardHeader}>
-                <span className={styles.cardTitle}>Entry #{i + 1}</span>
+                <span className={styles.cardTitle}>Default #{i + 1}</span>
                 <IconButton
                   size="sm"
                   variant="danger"
-                  label="Remove"
+                  label="Remove default"
                   onClick={() => removeEntry(i)}
                 >
                   <TrashIcon size={12} />
@@ -122,7 +129,9 @@ export function DefaultValuesEditor({ node, allowedTypes }: Props) {
                 </Field>
               ) : null}
               <div className={styles.row2}>
-                <Field label="Snowflake ID">
+                {/* Discord's numeric id — "snowflake" to the API, but the client's
+                    own "Copy ID" calls it an ID, so the label does too. */}
+                <Field label={`${TYPE_LABEL[entry.type]} ID`}>
                   {(id) => (
                     <TextInput
                       id={id}
@@ -154,7 +163,7 @@ export function DefaultValuesEditor({ node, allowedTypes }: Props) {
                     >
                       {allowedTypes.map((t) => (
                         <option key={t} value={t}>
-                          {t}
+                          {TYPE_LABEL[t]}
                         </option>
                       ))}
                     </Select>

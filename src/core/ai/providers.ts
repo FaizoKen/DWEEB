@@ -159,7 +159,41 @@ function extractProviderMessage(body: unknown): string | null {
   return null;
 }
 
-function describeHttpError(status: number, body: unknown, provider?: AiProvider): string {
+/**
+ * What to do about a provider's HTTP error, by status — the plain-language lead
+ * of the message the user sees. The provider's own words come after it, as
+ * detail: leading with them ("Provider error (401): Incorrect API key provided:
+ * sk-…") said what broke in the provider's vocabulary and never what to try,
+ * and the per-status advice below it was unreachable whenever a body existed.
+ */
+function adviceForStatus(status: number): string {
+  switch (status) {
+    case 400:
+      return "The provider couldn't accept the request (400). Check the API key and model id in AI settings.";
+    case 401:
+      return "The provider didn't accept your API key (401). Check the key in AI settings — it may be incomplete, revoked, or for a different provider.";
+    case 402:
+      return "Your provider account is out of credit (402). Add credit with the provider, or switch to a free model or provider.";
+    case 403:
+      return "The provider refused the request (403). Check that your key can use this model, and your billing with the provider.";
+    case 404:
+      return "The model or endpoint wasn't found (404). Check the model id and base URL in AI settings.";
+    case 413:
+      return "The request was too large for this model (413). Clear the chat to shorten it, or pick a model that accepts longer input.";
+    default:
+      return status >= 500
+        ? `The provider had a problem on its end (${status}). Try again in a moment, or switch model or provider.`
+        : `The provider returned an unexpected ${status} response. Check your AI settings, or try another model.`;
+  }
+}
+
+/** Advice first, then the provider's own message (when it sent one) as detail. */
+function withProviderDetail(advice: string, detail: string | null): string {
+  return detail ? `${advice}\n\nThe provider said: ${detail}` : advice;
+}
+
+/** Exported for the error-copy tests; callers go through `callAI`. */
+export function describeHttpError(status: number, body: unknown, provider?: AiProvider): string {
   const providerText = extractProviderMessage(body);
 
   // Rate limits get a dedicated, actionable framing even when the provider
@@ -206,11 +240,7 @@ function describeHttpError(status: number, body: unknown, provider?: AiProvider)
     );
   }
 
-  if (providerText) return `Provider error (${status}): ${providerText}`;
-  if (status === 401) return "Provider rejected the API key (401). Double-check the key.";
-  if (status === 403) return "Provider denied the request (403). Check key permissions / billing.";
-  if (status === 404) return "Endpoint not found (404). Check the model id and base URL.";
-  return `Provider returned an unexpected ${status} response.`;
+  return withProviderDetail(adviceForStatus(status), providerText);
 }
 
 async function readJson(res: Response): Promise<unknown> {
@@ -485,11 +515,19 @@ async function callAnthropic(
           onToken(evt.delta.text);
         }
       } else if (evt.type === "error") {
-        streamError =
-          typeof evt.error?.message === "string" ? evt.error.message : "Provider streaming error.";
+        streamError = typeof evt.error?.message === "string" ? evt.error.message : "";
       }
     });
-    if (streamError) return { ok: false, error: streamError };
+    // Anthropic's mid-stream errors are terse ("Overloaded"): lead with what to do.
+    if (streamError !== null) {
+      return {
+        ok: false,
+        error: withProviderDetail(
+          "The provider stopped with an error while replying. Try again in a moment.",
+          streamError || null,
+        ),
+      };
+    }
     return full
       ? { ok: true, text: full }
       : { ok: false, error: "Provider returned an empty response." };

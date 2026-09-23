@@ -11,10 +11,13 @@
  * raise the quotas shown below.
  *
  * Self-contained: reads open/close + the target server from `planStore`; `App`
- * mounts it lazily.
+ * mounts it lazily. Every Upgrade/promo/billing control hangs off the loaded
+ * plan, so the states without one (`pricingView`) each say what's happening —
+ * loading, failed with a Retry, or a lapsed sign-in — instead of rendering the
+ * cards with a blank where the buttons go.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EmbeddedCheckout, EmbeddedCheckoutProvider } from "@stripe/react-stripe-js";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -36,6 +39,8 @@ import {
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
+import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
+import { pricingView } from "./pricingView";
 import styles from "./PricingModal.module.css";
 
 interface TierDef {
@@ -127,11 +132,30 @@ function tierName(t: PlanTier): string {
 export function PricingModal() {
   const plan = usePlanStore((s) => s.plan);
   const guildId = usePlanStore((s) => s.guildId);
+  const planStatus = usePlanStore((s) => s.status);
+  const planError = usePlanStore((s) => s.error);
   const close = usePlanStore((s) => s.closePricing);
   const reloadPlan = usePlanStore((s) => s.load);
   const guilds = useAuthStore((s) => s.guilds);
+  const authStatus = useAuthStore((s) => s.status);
+  const login = useAuthStore((s) => s.login);
 
-  const server = guildId ? (guilds.find((g) => g.id === guildId) ?? null) : null;
+  // Which server this is: the live guild list first, then the connected
+  // server's last known identity — the list costs two round-trips, and the
+  // `?plans=` deep link can open this before it lands. Unknown still means a
+  // server (the id is set), never "connect a server".
+  const server = useMemo(() => resolveGuildIdentity(guildId, guilds), [guildId, guilds]);
+  const view = pricingView(guildId, planStatus, plan);
+
+  // A plan read that answered 401 means the session lapsed server-side while
+  // this tab still thinks it's signed in. The notice below offers a fresh
+  // sign-in; once it lands (the session re-hydrates to "authed"), read again.
+  useEffect(() => {
+    if (view === "signed-out" && authStatus === "authed" && guildId) {
+      void reloadPlan(guildId, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read on an auth transition only: re-reading on every view change would loop on a 401 that persists
+  }, [authStatus]);
 
   const currentTier: PlanTier | null = plan?.tier ?? null;
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
@@ -167,12 +191,26 @@ export function PricingModal() {
   const [promoError, setPromoError] = useState<string | null>(null);
 
   // The signed-in user's premium subscriptions (the "your premium servers" block
-  // + move picker). Null until first load; [] when they own none.
+  // + move picker, and the gate on Manage billing). Null until a load succeeds;
+  // [] when they own none. A failed load clears the list and keeps the reason
+  // instead: this list gates the only in-app cancel path, so "couldn't load" has
+  // to say so rather than read as "you have none".
   const [subs, setSubs] = useState<PremiumSubscription[] | null>(null);
+  const [subsError, setSubsError] = useState<string | null>(null);
+  const [subsBusy, setSubsBusy] = useState(false);
+  // Only the newest request may land — a Retry can race a slower earlier load.
+  const subsRequest = useRef(0);
 
   const loadSubs = () => {
     if (!billing) return;
-    void fetchMySubscriptions().then(setSubs);
+    const request = ++subsRequest.current;
+    setSubsBusy(true);
+    void fetchMySubscriptions().then((res) => {
+      if (request !== subsRequest.current) return;
+      setSubsBusy(false);
+      setSubs(res.ok ? res.subscriptions : null);
+      setSubsError(res.ok ? null : res.error);
+    });
   };
 
   useEffect(() => {
@@ -214,8 +252,8 @@ export function PricingModal() {
     setStarting(tier);
     setPromoError(null);
     const res = await createCheckout(tier, period, guildId, code);
-    setStarting(null);
     if (!res.ok) {
+      setStarting(null);
       // With a *typed* code in play the failure is almost always about that
       // code, and it belongs beside the field that caused it — a toast over a
       // modal reads as unrelated. A campaign code the buyer never typed has no
@@ -227,6 +265,19 @@ export function PricingModal() {
       } else {
         pushToast(res.error, "error");
       }
+      return;
+    }
+    // Load Stripe.js before switching to the payment view, still under
+    // "Starting…". It resolves null when the script can't load (offline, or a
+    // content blocker on js.stripe.com) — say so here rather than open an empty
+    // payment form whose only control is Back.
+    const stripe = await getStripe();
+    setStarting(null);
+    if (!stripe) {
+      pushToast(
+        "Couldn’t load Stripe’s payment form. Check your connection or any content blocker, then try again.",
+        "error",
+      );
       return;
     }
     // Snapshot the tier being left behind now — by the time checkout completes the
@@ -273,6 +324,9 @@ export function PricingModal() {
         open
         onClose={close}
         title="Purchase complete"
+        // Same anchor in all three views: they're one dialog changing content,
+        // so a different anchor would make it jump between them.
+        anchor="top"
         footer={
           <Button variant="primary" onClick={close}>
             Start using {tierName(newTier)}
@@ -347,6 +401,7 @@ export function PricingModal() {
         open
         onClose={() => setCheckout(null)}
         title={`Upgrade ${server ? server.name : "server"} to ${checkout.tier === "pro" ? "Pro" : "Plus"}`}
+        anchor="top"
         footer={
           <Button variant="secondary" onClick={() => setCheckout(null)}>
             Back
@@ -372,20 +427,36 @@ export function PricingModal() {
   }
 
   const canManage = billing && subs != null && subs.length > 0;
+  // Exclusive with `canManage` (a failed load clears `subs`): the reason and a
+  // Retry take Manage billing's place, so the cancel path is never just absent.
+  const subsFailed = billing && subsError != null;
   // Whether one of *my* subscriptions covers this server. If the server is
   // already on a paid tier but none of my subs is bound to it, another member is
   // paying — surfaced below so a second mod doesn't stack a redundant sub.
   const iCoverThisServer = (subs ?? []).some((s) => s.guildId === guildId);
   const coveredByOther =
     subs != null && !!guildId && currentTier != null && currentTier !== "free" && !iCoverThisServer;
+  const loading = view === "loading";
+  // Hold the promo row's place while loading, where it will certainly appear
+  // (checkout is configured in this build), so the cards don't jump down under
+  // the cursor when the plan lands.
+  const reservePromoRow = loading && isCheckoutConfigured();
 
   return (
     <Modal
       open
       onClose={close}
       title="Plans"
+      // The content grows as the plan and subscriptions arrive — anchored, the
+      // cards don't slide around while someone is reading them.
+      anchor="top"
       footer={
         <>
+          {subsFailed ? (
+            <p className={styles.footerNote} role="alert">
+              {subsError}
+            </p>
+          ) : null}
           <Button variant="secondary" onClick={close}>
             Close
           </Button>
@@ -393,21 +464,38 @@ export function PricingModal() {
             <Button variant="secondary" onClick={() => void manageBilling()} disabled={portalBusy}>
               {portalBusy ? "Opening…" : "Manage billing"}
             </Button>
+          ) : subsFailed ? (
+            <Button variant="secondary" onClick={loadSubs} disabled={subsBusy}>
+              {subsBusy ? "Retrying…" : "Retry"}
+            </Button>
           ) : null}
         </>
       }
     >
-      {server ? (
+      {view === "no-server" ? (
+        <p className={styles.lead}>
+          Connect a server to upgrade it. Premium applies to one server; nothing is locked — paid
+          tiers only raise the limits below.
+        </p>
+      ) : (
         <div className={styles.contextBar}>
-          <GuildGlyph guild={server} />
+          {server ? (
+            <GuildGlyph guild={server} />
+          ) : (
+            <span className={cn(styles.serverIcon, styles.serverIconFallback)} aria-hidden="true">
+              ★
+            </span>
+          )}
           <span className={styles.contextText}>
-            <span className={styles.contextName}>{server.name}</span>
+            <span className={styles.contextName}>{server?.name ?? "This server"}</span>
             <span className={styles.contextSub}>
               {currentTier ? (
                 <>
                   On <strong>{tierName(currentTier)}</strong> — nothing is locked, paid tiers only
                   raise the limits below.
                 </>
+              ) : loading ? (
+                "Loading this server’s plan…"
               ) : (
                 "Nothing is locked — paid tiers only raise the limits below."
               )}
@@ -419,14 +507,39 @@ export function PricingModal() {
             >
               {tierName(currentTier)}
             </span>
+          ) : loading ? (
+            <span className={cn(styles.skeleton, styles.tierSkeleton)} aria-hidden="true" />
           ) : null}
         </div>
-      ) : (
-        <p className={styles.lead}>
-          Connect a server to upgrade it. Premium applies to one server; nothing is locked — paid
-          tiers only raise the limits below.
-        </p>
       )}
+
+      {view === "error" ? (
+        <PlanNotice
+          title="Couldn’t load this server’s plan."
+          detail={planError ?? "Try again in a moment."}
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (guildId) void reloadPlan(guildId, true);
+              }}
+            >
+              Retry
+            </Button>
+          }
+        />
+      ) : view === "signed-out" ? (
+        <PlanNotice
+          title="Your Discord sign-in has expired."
+          detail="Sign in again to see this server’s plan and upgrade it."
+          action={
+            <Button size="sm" variant="secondary" onClick={login}>
+              Sign in
+            </Button>
+          }
+        />
+      ) : null}
 
       {coveredByOther ? (
         <p className={styles.coveredNote}>
@@ -477,6 +590,8 @@ export function PricingModal() {
               }}
             />
           </label>
+        ) : reservePromoRow ? (
+          <span className={cn(styles.skeleton, styles.promoSkeleton)} aria-hidden="true" />
         ) : null}
       </div>
 
@@ -490,9 +605,17 @@ export function PricingModal() {
             Enter codes here, not at payment — one that covers the plan skips card entry.
           </p>
         )
+      ) : reservePromoRow ? (
+        <span className={cn(styles.skeleton, styles.hintSkeleton)} aria-hidden="true" />
+      ) : view === "ready" ? (
+        // A loaded plan with no checkout behind it (billing isn't set up on this
+        // deployment): say so, or the cards read as missing their buttons.
+        <p className={styles.promoHint}>
+          Upgrading isn’t available on this site — the plans below are for reference.
+        </p>
       ) : null}
 
-      <div className={styles.plans}>
+      <div className={styles.plans} aria-busy={loading || undefined}>
         {TIERS.map((t) => {
           const canBuy = buyable(t.id);
           return (
@@ -501,6 +624,7 @@ export function PricingModal() {
               tier={t}
               period={period}
               promo={promoByTier.get(t.id)}
+              loading={loading}
               isCurrent={currentTier === t.id}
               // Highlight the natural upgrade (Plus) only while it's actually an
               // upgrade — i.e. the server is still on Free. Once it's on any paid
@@ -546,6 +670,7 @@ function PlanCard({
   tier,
   period,
   promo,
+  loading,
   isCurrent,
   featured,
   canBuy,
@@ -557,6 +682,8 @@ function PlanCard({
   period: BillingInterval;
   /** Set only while a campaign covers this tier *and* the buyer can purchase it. */
   promo?: PromoPricing;
+  /** The server's plan is still loading, so this card's CTA isn't known yet. */
+  loading: boolean;
   isCurrent: boolean;
   featured: boolean;
   canBuy: boolean;
@@ -600,6 +727,8 @@ function PlanCard({
           <button type="button" className={styles.ctaBuy} disabled={disabled} onClick={onBuy}>
             {starting ? "Starting…" : "Upgrade"}
           </button>
+        ) : loading ? (
+          <span className={cn(styles.skeleton, styles.ctaSkeleton)} aria-hidden="true" />
         ) : (
           <span className={styles.ctaSpacer} aria-hidden="true" />
         )}
@@ -683,6 +812,10 @@ function PremiumServers({
                   <span className={styles.moveLock}>
                     {" · "}Movable {new Date(cooldownUntil * 1000).toLocaleDateString()}
                   </span>
+                ) : targets.length === 0 ? (
+                  // Why Move is disabled, in view — its tooltip never reaches a
+                  // touch screen.
+                  <span>{" · "}Add the bot to another server to move this</span>
                 ) : null}
               </span>
             </span>
@@ -736,8 +869,29 @@ function subMeta(s: PremiumSubscription): string {
   return when ? `Renews ${when}` : "Active";
 }
 
+/** Where the plan-dependent controls would be when there's no plan to hang them
+ *  on: what's missing and why, beside the one action that can fix it. */
+function PlanNotice({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action: ReactNode;
+}) {
+  return (
+    <div className={styles.notice} role="alert">
+      <p className={styles.noticeText}>
+        <strong>{title}</strong> {detail}
+      </p>
+      {action}
+    </div>
+  );
+}
+
 /** A small round server glyph — the guild icon, or its initial as a fallback. */
-function GuildGlyph({ guild }: { guild: PickerGuild }) {
+function GuildGlyph({ guild }: { guild: GuildIdentityInfo }) {
   const url = guildIconUrl(guild.id, guild.icon, 32);
   if (url) return <img className={styles.serverIcon} src={url} alt="" loading="lazy" />;
   return (

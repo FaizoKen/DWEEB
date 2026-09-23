@@ -11,7 +11,8 @@
  * preview source lives in the renderers.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { Button } from "@/ui/Button";
 import { isSessionUrl, parseSessionUrl, registerAttachment } from "@/core/state/attachmentStore";
 import { fileFromClipboard, formatBytes, matchesAccept } from "@/lib/fileUpload";
@@ -26,7 +27,7 @@ interface AttachmentPickerProps {
 }
 
 export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProps) {
-  const fileInputId = useId();
+  const fileInputId = useUniqueId("attach");
   const inputRef = useRef<HTMLInputElement>(null);
   const session = isSessionUrl(url) ? parseSessionUrl(url) : null;
   const record = useAttachmentRecord(session?.blobId ?? null);

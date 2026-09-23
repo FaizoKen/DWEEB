@@ -38,6 +38,19 @@
   height: var(--app-control-h);
 }
 
+/* Touch: taller targets for a fingertip; fine pointers keep the compact
+   heights. `height` rather than a `min-height` floor, at the sizes' own
+   specificity, so a caller that sizes a button through its own class keeps it. */
+@media (pointer: coarse) {
+  .size-sm {
+    height: 36px;
+  }
+
+  .size-md {
+    height: 40px;
+  }
+}
+
 .fullWidth {
   width: 100%;
 }

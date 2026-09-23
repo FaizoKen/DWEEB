@@ -71,13 +71,22 @@ export function InstallDialog() {
 
   // Detected once per open — the UA doesn't change mid-session.
   const platform = useMemo(() => detectInstallPlatform(), []);
-  const [busy, setBusy] = useState(false);
+  // Set from the Install click until the browser's prompt settles. The dialog's
+  // path is held on this rather than read live from `canPrompt` alone:
+  // `promptInstall()` spends the captured event — flipping `canPrompt` off —
+  // *before* the browser's sheet opens, so a live read swapped the native path
+  // for the manual steps (and "Opening…" never showed) while the user was still
+  // answering the browser.
+  const [prompting, setPrompting] = useState(false);
+  const native = canPrompt || prompting;
 
   const install = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (prompting) return;
+    setPrompting(true);
+    // Called straight from the click, before any other await: the browser only
+    // shows its sheet during the click's user activation.
     const outcome = await promptInstall();
-    setBusy(false);
+    setPrompting(false);
     if (outcome === "accepted") {
       pushToast("Installing DWEEB…", "success");
       close();
@@ -96,10 +105,10 @@ export function InstallDialog() {
 
   // The native button is the whole story on Chromium; elsewhere we lead with
   // the per-platform steps. `steps`/`heading` only apply on the manual path.
-  const steps = canPrompt ? null : MANUAL_STEPS[platform === "chromium" ? "unknown" : platform];
+  const steps = native ? null : MANUAL_STEPS[platform === "chromium" ? "unknown" : platform];
   const heading = PLATFORM_HEADING[platform === "chromium" ? "unknown" : platform];
 
-  const footer = canPrompt ? (
+  const footer = native ? (
     <>
       <Button variant="secondary" onClick={close}>
         Not now
@@ -108,9 +117,9 @@ export function InstallDialog() {
         variant="primary"
         leadingIcon={<InstallIcon />}
         onClick={() => void install()}
-        disabled={busy}
+        disabled={prompting}
       >
-        {busy ? "Opening…" : "Install app"}
+        {prompting ? "Opening…" : "Install app"}
       </Button>
     </>
   ) : (
@@ -132,9 +141,15 @@ export function InstallDialog() {
         on your home screen or dock, and the editor still works offline.
       </p>
 
-      {canPrompt ? (
+      {native ? (
         <p className={styles.note}>
-          Click <strong>Install app</strong> below to add it now.
+          {prompting ? (
+            "Answer your browser’s prompt to finish installing."
+          ) : (
+            <>
+              Click <strong>Install app</strong> below to add it now.
+            </>
+          )}
         </p>
       ) : (
         <div className={styles.steps}>

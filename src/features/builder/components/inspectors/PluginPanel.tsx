@@ -66,11 +66,12 @@ import { Button } from "@/ui/Button";
 import { AlertTriangleIcon, ChevronRightIcon, PuzzleIcon } from "@/ui/Icon";
 import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 
-// The plugin config dialogs (their hosts, handshake state and CSS) are opened
-// on demand from an inspector that ships in the boot bundle — loading them
-// lazily keeps ~16 kB of dialog code out of every visit's critical path. Like
-// every lazy surface they sit inside a ChunkErrorBoundary whose dismissal fully
-// unmounts them (see AGENTS.md, "Deploy skew self-heals").
+// The plugin dialogs — the two config hosts (handshake state and CSS) and the
+// plugin library with its setup-status probes — are opened on demand from an
+// inspector that ships in the boot bundle, so loading them lazily keeps their
+// code and styles out of every visit's critical path. Like every lazy surface
+// they sit inside a ChunkErrorBoundary whose dismissal fully unmounts them
+// (see AGENTS.md, "Deploy skew self-heals").
 const PluginConfigModal = lazy(() =>
   import("@/features/plugins/PluginConfigModal").then((m) => ({ default: m.PluginConfigModal })),
 );
@@ -79,8 +80,12 @@ const LinkPluginConfigModal = lazy(() =>
     default: m.LinkPluginConfigModal,
   })),
 );
+const PluginLibraryModal = lazy(() =>
+  import("@/features/plugins/PluginLibraryModal").then((m) => ({
+    default: m.PluginLibraryModal,
+  })),
+);
 import { PluginIcon } from "@/features/plugins/PluginIcon";
-import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
 import type { LinkPluginSaveResult } from "@/features/plugins/useLinkPluginConfig";
 import { useLinkPluginStatus } from "@/features/plugins/useLinkPluginStatus";
@@ -118,17 +123,28 @@ function actionTarget(node: AnyComponent): PluginTarget | null {
   return targetOf(node);
 }
 
-/** The custom_id field's wording + cap, per kind of component. */
-function idFieldProps(target: PluginTarget): { maxLength: number; hint: string } {
+/** The custom_id field's wording + cap, per kind of component. The field is
+ *  labelled "Custom ID"; the hint keeps the API's own name for bot developers. */
+function idFieldProps(target: PluginTarget): { maxLength: number; hint: ReactNode } {
   if (target === "button") {
     return {
       maxLength: LIMITS.BUTTON_CUSTOM_ID,
-      hint: "Your bot receives this when the button is clicked — set it to wire up the action.",
+      hint: (
+        <>
+          Your bot receives this as the <code>custom_id</code> when the button is clicked — set it
+          to wire up the action.
+        </>
+      ),
     };
   }
   return {
     maxLength: LIMITS.SELECT_CUSTOM_ID,
-    hint: "Sent to your bot when a user changes the selection — set it to wire up the action.",
+    hint: (
+      <>
+        Sent to your bot as the <code>custom_id</code> when someone changes the selection — set it
+        to wire up the action.
+      </>
+    ),
   };
 }
 
@@ -526,20 +542,24 @@ export function PluginPanel({ node }: Props) {
       )}
 
       {libraryOpen ? (
-        <PluginLibraryModal
-          plugins={interactiveAvailable}
-          linkPlugins={linkAvailable}
-          target={target}
-          onPick={(manifest, preset) => {
-            setLibraryOpen(false);
-            openConfig(manifest, preset);
-          }}
-          onPickLink={(manifest) => {
-            setLibraryOpen(false);
-            attachLink(manifest);
-          }}
-          onClose={() => setLibraryOpen(false)}
-        />
+        <ChunkErrorBoundary onDismiss={() => setLibraryOpen(false)}>
+          <Suspense fallback={null}>
+            <PluginLibraryModal
+              plugins={interactiveAvailable}
+              linkPlugins={linkAvailable}
+              target={target}
+              onPick={(manifest, preset) => {
+                setLibraryOpen(false);
+                openConfig(manifest, preset);
+              }}
+              onPickLink={(manifest) => {
+                setLibraryOpen(false);
+                attachLink(manifest);
+              }}
+              onClose={() => setLibraryOpen(false)}
+            />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
 
       {configuring ? (

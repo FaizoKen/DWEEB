@@ -53,6 +53,7 @@ import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
+import { missingUploadsMessage, useMissingUploadCount } from "@/core/activity/uploads";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
@@ -63,21 +64,38 @@ import styles from "./ActivityBar.module.css";
  *  this cadence — a backstop for clients that don't fire focus/visibility events
  *  (and for a teammate adding the bot). Bounded by {@link AUTO_RECHECK_MAX_TICKS}
  *  so an "Add DWEEB" screen left open doesn't poll the proxy forever; the free
- *  focus/visibility re-checks and the manual button keep working past the cap. */
+ *  focus/visibility re-checks keep working past the cap, and tapping "Add DWEEB"
+ *  again re-arms a fresh poll window. */
 const AUTO_RECHECK_INTERVAL_MS = 5_000;
 const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
+
+/** Why an action can't run right now: the full sentence (hover title, the
+ *  control's accessible description, and a toast on tap — touch has no hover)
+ *  and a short form for its overflow-menu row. */
+interface Unavailable {
+  reason: string;
+  short: string;
+}
 
 /** One utility action in the bar's right cluster: an inline icon button while
  *  the bar has room, an overflow-menu row once the fit check folds it away. */
 interface UtilityAction {
   key: string;
   icon: ComponentType<{ size?: number }>;
-  /** Tooltip / accessible name on the inline icon button. */
+  /** The inline icon button's accessible name — and its tooltip while it's
+   *  available. It stays the action's name when unavailable: the reason is the
+   *  description, so every button doesn't read out the same paragraph. */
   label: string;
   /** Row text once folded into the overflow menu. */
   menuLabel: string;
-  disabled?: boolean;
+  /** Set while the action can't run, saying why. */
+  unavailable?: Unavailable | null;
   run: () => void;
+}
+
+/** Explain an unavailable bar action — the tap-time counterpart of its title. */
+function explain(reason: string) {
+  pushToast(reason, "info", { durationMs: 6000 });
 }
 
 /** A post the user has asked for but not yet confirmed (the pre-post dialog is
@@ -106,7 +124,6 @@ export function ActivityBar() {
   // gate. Computed fresh here — the bar sits above the tree's ValidationContext
   // provider — but it's memoized per message, so it's a single cheap pass.
   const validation = useMergedValidationView();
-  const hasErrors = validation.errorCount > 0;
   // The destination-title rules (a forum/media channel needs a `thread_name`;
   // every other kind rejects one) only apply to *brand-new* posts — an update
   // PATCHes the existing message, where Discord disregards the create-only
@@ -118,7 +135,11 @@ export function ActivityBar() {
       (i.code === "THREAD_NAME_REQUIRED" || i.code === "THREAD_NAME_FORBIDDEN") &&
       i.severity === "error",
   ).length;
-  const hasUpdateErrors = validation.errorCount - destErrorCount > 0;
+  const updateErrorCount = validation.errorCount - destErrorCount;
+  // Uploads the draft references that this browser doesn't hold — a teammate's,
+  // or from before a relaunch. The validator already blocks on them; this names
+  // the cause when someone taps the blocked Post.
+  const missingUploads = useMissingUploadCount();
 
   const publishing = useActivityStore((s) => s.publishing);
   const publish = useActivityStore((s) => s.publish);
@@ -312,8 +333,7 @@ export function ActivityBar() {
   // does that). Only a *known* `false` gates the UI — while it's still being
   // resolved (`null`) we stay optimistic, since the proxy is the real guard.
   const blockedFromPosting = canPostToTarget === false;
-  // The full "you can't post here" explanation, reused as the pill's tooltip and
-  // the Restore button's disabled hint.
+  // The full "you can't post here" explanation, behind the "Edit only" pill.
   const blockedReason =
     "You don't have the “Manage Webhooks” permission in this server, so you can't " +
     "post here — but you can still edit together. Ask someone who can post, or use " +
@@ -325,10 +345,53 @@ export function ActivityBar() {
     lastPost.guild_id === targetGuildId &&
     lastPost.channel_id === targetChannelId;
 
+  // Why Post / New / Update can't run, or null when it can. Like the utilities
+  // they stay tappable and say why (an in-flight post alone keeps the native
+  // disabled state — its label already reads "Posting…").
+  const postUnavailable = (errors: number, verb: "posting" | "updating"): string | null => {
+    if (noDestination) {
+      return isDm && !targetGuildId
+        ? "Pick a server to post to first."
+        : "Pick a channel to post to first.";
+    }
+    if (missingUploads > 0) return missingUploadsMessage(missingUploads);
+    if (errors > 0) {
+      return `Fix ${errors} ${errors === 1 ? "issue" : "issues"} before ${verb} — check the highlighted components.`;
+    }
+    return null;
+  };
+  const postBlocked = postUnavailable(validation.errorCount, "posting");
+  const updateBlocked = postUnavailable(updateErrorCount, "updating");
+
   // "View the posted message" belongs to the update state and only when posting
   // here is actually possible — mirroring the wide-layout `canUpdate` arm below,
   // where it sits inline. When compact it rides in the overflow menu instead.
   const showView = canUpdate && !botMissing && !blockedFromPosting;
+
+  // Why a server-library action (save, directory, restore) can't run yet, or
+  // null when it can. They all need the bot in the server and the Manage
+  // Webhooks gate the proxy enforces; Restore also reads through a channel.
+  const libraryUnavailable = (purpose: string, needsChannel = false): Unavailable | null => {
+    if (botMissing) {
+      return { reason: `Add DWEEB to this server first to ${purpose}.`, short: "Add DWEEB first" };
+    }
+    if (blockedFromPosting) {
+      return {
+        reason: `You need the “Manage Webhooks” permission in this server to ${purpose} — you can still edit together.`,
+        short: "Needs Manage Webhooks",
+      };
+    }
+    if (!targetGuildId) {
+      return {
+        reason: `Pick a server to post to before you ${purpose}.`,
+        short: "Pick a server first",
+      };
+    }
+    if (needsChannel && !targetChannelId) {
+      return { reason: `Pick a channel before you ${purpose}.`, short: "Pick a channel first" };
+    }
+    return null;
+  };
 
   // Utility actions, most-reached-for first. Only the first
   // MAX_INLINE_UTILITIES get an inline icon; the rest ("Open on web",
@@ -341,39 +404,25 @@ export function ActivityBar() {
     {
       key: "save",
       icon: SaveIcon,
-      label: botMissing
-        ? "Add DWEEB to this server first to save a server draft"
-        : blockedFromPosting
-          ? blockedReason
-          : targetGuildId
-            ? "Save the current message as a server draft"
-            : "Pick a server before saving a draft",
+      label: "Save the current message as a server draft",
       menuLabel: "Save current message",
-      disabled: !targetGuildId || blockedFromPosting || botMissing,
+      unavailable: libraryUnavailable("save a server draft"),
       run: () => setSaveOpen(true),
     },
     {
       key: "library",
       icon: BookmarkIcon,
-      label: botMissing
-        ? "Add DWEEB to this server first to open its message library"
-        : blockedFromPosting
-          ? blockedReason
-          : "Message directory — this server's message library",
+      label: "Message directory — this server's message library",
       menuLabel: "Message directory",
-      disabled: !targetGuildId || blockedFromPosting || botMissing,
+      unavailable: libraryUnavailable("open the Message directory"),
       run: () => setLibraryOpen(true),
     },
     {
       key: "restore",
       icon: HistoryIcon,
-      label: botMissing
-        ? "Add DWEEB to this server first to restore a message"
-        : blockedFromPosting
-          ? blockedReason
-          : "Restore a message DWEEB posted",
+      label: "Restore a message DWEEB posted",
       menuLabel: "Restore a message",
-      disabled: noDestination || blockedFromPosting || botMissing,
+      unavailable: libraryUnavailable("restore a message", true),
       run: () => setRestoreOpen(true),
     },
     {
@@ -597,16 +646,24 @@ export function ActivityBar() {
             fit check folds even these into the overflow menu one at a time —
             which can also absorb the update state's "View" — keeping the row
             to the destination, undo/redo, and the primary action. */}
-        {inlineUtilities.map((action) => (
-          <IconButton
-            key={action.key}
-            label={action.label}
-            onClick={action.run}
-            disabled={action.disabled}
-          >
-            <action.icon />
-          </IconButton>
-        ))}
+        {inlineUtilities.map((action) => {
+          const unavailable = action.unavailable;
+          // An unavailable action stays focusable and tappable (aria-disabled,
+          // not disabled): its title explains on hover, and a tap explains on
+          // touch, where there is no hover. Its name stays the action's own.
+          return (
+            <IconButton
+              key={action.key}
+              label={action.label}
+              title={unavailable?.reason ?? action.label}
+              aria-disabled={unavailable ? true : undefined}
+              className={unavailable ? styles.unavailableIcon : undefined}
+              onClick={unavailable ? () => explain(unavailable.reason) : action.run}
+            >
+              <action.icon />
+            </IconButton>
+          );
+        })}
 
         {foldedUtilities.length > 0 || viewFolded ? (
           <Menu
@@ -630,19 +687,34 @@ export function ActivityBar() {
                     View posted message
                   </MenuItem>
                 ) : null}
-                {foldedUtilities.map((action) => (
-                  <MenuItem
-                    key={action.key}
-                    icon={<action.icon size={16} />}
-                    disabled={action.disabled}
-                    onSelect={() => {
-                      close();
-                      action.run();
-                    }}
-                  >
-                    {action.menuLabel}
-                  </MenuItem>
-                ))}
+                {foldedUtilities.map((action) =>
+                  action.unavailable ? (
+                    // A disabled menu row can't be tapped, so it carries its
+                    // reason in plain sight instead.
+                    <MenuItem
+                      key={action.key}
+                      icon={<action.icon size={16} />}
+                      disabled
+                      onSelect={() => {}}
+                    >
+                      <span className={styles.menuRow}>
+                        {action.menuLabel}
+                        <span className={styles.menuReason}>{action.unavailable.short}</span>
+                      </span>
+                    </MenuItem>
+                  ) : (
+                    <MenuItem
+                      key={action.key}
+                      icon={<action.icon size={16} />}
+                      onSelect={() => {
+                        close();
+                        action.run();
+                      }}
+                    >
+                      {action.menuLabel}
+                    </MenuItem>
+                  ),
+                )}
               </>
             )}
           </Menu>
@@ -681,13 +753,13 @@ export function ActivityBar() {
           // No Manage Webhooks here: editing/collab stays open (above), but the
           // primary action becomes an "edit only" explainer rather than a Post
           // button that would dead-end on a 403. Tapping it surfaces the reason as
-          // a toast, so the "why" reaches mobile (which has no hover tooltip).
+          // a toast, so the "why" reaches mobile (which has no hover tooltip). Its
+          // name is its visible "Edit only"; the reason is the description.
           <button
             type="button"
             className={styles.gated}
-            aria-label={blockedReason}
             title={blockedReason}
-            onClick={() => pushToast(blockedReason, "info")}
+            onClick={() => explain(blockedReason)}
           >
             <LockIcon size={14} />
             Edit only
@@ -708,13 +780,16 @@ export function ActivityBar() {
               size="sm"
               leadingIcon={<SendIcon />}
               collapseLabel
-              onClick={() => setPending({ mode: "new", newCopy: true })}
-              disabled={publishing || noDestination || hasErrors}
-              title={
-                hasErrors
-                  ? "Fix the highlighted issues before posting"
-                  : "Post a separate new copy into the channel"
+              // Named outright: a compact bar hides the label, and the title (a
+              // reason while blocked) must describe the button, not become its name.
+              aria-label="New"
+              onClick={() =>
+                postBlocked ? explain(postBlocked) : setPending({ mode: "new", newCopy: true })
               }
+              disabled={publishing}
+              aria-disabled={postBlocked ? true : undefined}
+              className={postBlocked ? styles.unavailableSecondary : undefined}
+              title={postBlocked ?? "Post a separate new copy into the channel"}
             >
               New
             </Button>
@@ -722,13 +797,15 @@ export function ActivityBar() {
               variant="primary"
               size="sm"
               leadingIcon={<RefreshIcon />}
-              onClick={() => setPending({ mode: "update", newCopy: false })}
-              disabled={publishing || noDestination || hasUpdateErrors}
-              title={
-                hasUpdateErrors
-                  ? "Fix the highlighted issues before updating"
-                  : "Update the message you posted with the current draft"
+              onClick={() =>
+                updateBlocked
+                  ? explain(updateBlocked)
+                  : setPending({ mode: "update", newCopy: false })
               }
+              disabled={publishing}
+              aria-disabled={updateBlocked ? true : undefined}
+              className={updateBlocked ? styles.unavailablePrimary : undefined}
+              title={updateBlocked ?? "Update the message you posted with the current draft"}
             >
               {publishing ? "Updating…" : "Update"}
             </Button>
@@ -738,13 +815,13 @@ export function ActivityBar() {
             variant="primary"
             size="sm"
             leadingIcon={<SendIcon />}
-            onClick={() => setPending({ mode: "new", newCopy: false })}
-            disabled={publishing || noDestination || hasErrors}
-            title={
-              hasErrors
-                ? "Fix the highlighted issues before posting"
-                : "Post this message into the selected channel"
+            onClick={() =>
+              postBlocked ? explain(postBlocked) : setPending({ mode: "new", newCopy: false })
             }
+            disabled={publishing}
+            aria-disabled={postBlocked ? true : undefined}
+            className={postBlocked ? styles.unavailablePrimary : undefined}
+            title={postBlocked ?? "Post this message into the selected channel"}
           >
             {publishing ? "Posting…" : "Post"}
           </Button>

@@ -40,6 +40,7 @@ import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { ActivityBar } from "./ActivityBar";
 import { TreeSkeleton, PreviewSkeleton } from "./Skeletons";
 import { PresenceDock } from "./PresenceDock";
+import { RoomReplaceConfirm } from "./RoomReplaceConfirm";
 import styles from "./ActivityApp.module.css";
 
 /** Hard ceiling on the per-region loading hold: if the room draft and/or guild
@@ -243,6 +244,10 @@ export function ActivityApp() {
         </ChunkErrorBoundary>
       ) : null}
 
+      {/* "Replace the draft for everyone?" — opens only when a whole-draft
+          action would land on others' work (see core/activity/roomReplaceConfirm). */}
+      <RoomReplaceConfirm />
+
       <ToastViewport />
     </div>
   );
@@ -285,7 +290,11 @@ function Splash({
 
         {isError ? (
           <>
-            <p className={styles.splashMsg}>{error ?? "Something went wrong starting DWEEB."}</p>
+            {/* The splash swaps to this in place, so announce it — a screen-reader
+                user otherwise hears the launch go quiet with no reason why. */}
+            <p className={styles.splashMsg} role="alert">
+              {error ?? "Something went wrong starting DWEEB."}
+            </p>
             {/* Name the stage we stalled on, for errors whose message doesn't (a
                 non-timeout SDK failure). Hidden once the handshake had finished. */}
             {step !== "done" ? (

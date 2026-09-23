@@ -181,11 +181,20 @@ const SKETCHES: Record<AddPreviewKind, ReactNode> = {
       </div>
     </div>
   ),
+  // The "Buttons & menus" group: a row takes buttons *or* one dropdown, never
+  // both, so the sketch offers the two as alternatives rather than one row.
   row: (
-    <div className={styles.btnRow}>
-      <Btn />
-      <Btn tone="secondary" />
-      <Btn tone="success" />
+    <div className={styles.rowChoice}>
+      <div className={styles.btnRow}>
+        <Btn />
+        <Btn tone="secondary" />
+        <Btn tone="success" />
+      </div>
+      <span className={styles.orRule}>or</span>
+      <div className={styles.selectBox}>
+        <Line w="46%" />
+        <span className={styles.selectChevron} />
+      </div>
     </div>
   ),
   button: <Btn lg w={40} />,

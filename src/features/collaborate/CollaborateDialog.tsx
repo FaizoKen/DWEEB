@@ -18,7 +18,7 @@
  * `collaborateStore`, so any entry point just calls `openCollaborate()`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
@@ -30,13 +30,9 @@ import { copyText } from "@/core/serialization/clipboard";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
-import {
-  createActivityInvite,
-  GuildApiError,
-  isAuthError,
-  type ActivityInvite,
-} from "@/core/guild/api";
+import { createActivityInvite, isAuthError, type ActivityInvite } from "@/core/guild/api";
 import { useCollaborateStore } from "./collaborateStore";
+import { inviteErrorMessage } from "./inviteError";
 import styles from "./CollaborateDialog.module.css";
 
 /** GUILD_VOICE — shown with a speaker glyph; everything else here is a text kind. */
@@ -75,6 +71,7 @@ export function CollaborateDialog() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invite, setInvite] = useState<ActivityInvite | null>(null);
+  const signInRef = useRef<HTMLButtonElement>(null);
 
   // The toolbar's picked channel, when it belongs to this server. Defaulting to
   // the alphabetically-first channel put an invite in "#ds" for someone whose
@@ -117,13 +114,14 @@ export function CollaborateDialog() {
       setInvite(await createActivityInvite(connectedId, channelId));
     } catch (e) {
       if (isAuthError(e)) {
-        setError("Your Discord session expired — sign in again, then retry.");
+        // The session is gone. Sign out app-wide like every other 401 (which
+        // also toasts "Your session expired — sign in again."), so the dialog
+        // turns into its sign-in view with a button that does it — rather than
+        // telling the user to sign in with no way to from here.
+        useAuthStore.getState().markSignedOut();
+        requestAnimationFrame(() => signInRef.current?.focus());
       } else {
-        setError(
-          e instanceof GuildApiError
-            ? e.message
-            : "Couldn't create a collaboration link. Try again.",
-        );
+        setError(inviteErrorMessage(e));
       }
     } finally {
       setBusy(false);
@@ -154,7 +152,7 @@ export function CollaborateDialog() {
         <Button variant="secondary" onClick={close}>
           Close
         </Button>
-        <Button variant="primary" leadingIcon={<LogInIcon />} onClick={login}>
+        <Button ref={signInRef} variant="primary" leadingIcon={<LogInIcon />} onClick={login}>
           Sign in with Discord
         </Button>
       </>
@@ -287,7 +285,13 @@ export function CollaborateDialog() {
               </Select>
             )}
           </Field>
-          {error ? <p className={styles.error}>{error}</p> : null}
+          {/* An alert, like the feedback form's send failure: focus stays on
+              "Create link", so without it the failure is never announced. */}
+          {error ? (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          ) : null}
         </>
       ) : null}
 

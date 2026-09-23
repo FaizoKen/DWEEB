@@ -133,3 +133,11 @@
   font-weight: 700;
   line-height: 1;
 }
+
+/* Touch: give the pinned "Add a server" action a finger-sized target, matching
+   the picker's list rows (see the coarse-pointer rule in ChannelPicker.module.css). */
+@media (pointer: coarse) {
+  .addServer {
+    min-height: 44px;
+  }
+}

@@ -45,7 +45,7 @@ export function FileInspector({ node }: Props) {
         </Field>
         <Field
           label="Attachment ID (optional)"
-          hint="Discord snowflake. Use instead of URL to reference an already-uploaded file."
+          hint="Use instead of a URL to attach a file already uploaded to Discord, by its ID."
         >
           {(id) => (
             <TextInput

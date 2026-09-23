@@ -2,9 +2,11 @@
  * Applies a `?custom-bot=<guildId>` deep link on first load.
  *
  * The embedded Activity uses this handoff for the + action in its Post-as row.
- * Custom-bot settings require a web session, so the intent is kept through a
- * Discord login redirect, the named server is selected, and the account menu's
- * existing per-server CustomBotDialog is opened once authentication resolves.
+ * Custom-bot settings require a web session, so a signed-out visitor is asked to
+ * sign in (a toast with a button — a page load carries no click to open the
+ * Discord popup with), the intent is kept through the sign-in, the named server
+ * is selected, and the account menu's existing per-server CustomBotDialog is
+ * opened once authentication resolves.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -25,7 +27,7 @@ function stripCustomBotParam(): void {
 
 export function useCustomBotDeepLink(onOpen: (guildId: string) => void): void {
   const status = useAuthStore((s) => s.status);
-  const login = useAuthStore((s) => s.login);
+  const requestLogin = useAuthStore((s) => s.requestLogin);
   const [pending, setPending] = useState<string | null>(null);
   const captured = useRef(false);
   const loginStarted = useRef(false);
@@ -73,7 +75,9 @@ export function useCustomBotDeepLink(onOpen: (guildId: string) => void): void {
       setPending(null);
     } else if (status === "anon" && !loginStarted.current) {
       loginStarted.current = true;
-      login();
+      // Ask, don't open: a popup with no click behind it is blocked and falls
+      // back to navigating this whole page to Discord.
+      requestLogin("Sign in with Discord to set up this server’s custom bot.");
     }
-  }, [pending, status, login, onOpen]);
+  }, [pending, status, requestLogin, onOpen]);
 }

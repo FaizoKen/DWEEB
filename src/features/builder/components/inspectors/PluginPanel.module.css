@@ -40,7 +40,9 @@
   border: 0;
   padding: 0;
   font: inherit;
-  color: var(--app-accent, #5865f2);
+  /* The text tint, as reset.css gives every link: the accent fill measures
+     ~3.9:1 as small text on these surfaces, under AA's 4.5:1. */
+  color: var(--app-accent-text);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -164,9 +166,12 @@
 .manualLabel {
   font-weight: 500;
 }
+/* Full-strength subtle text (~5.5:1 on the inspector's --app-bg): the old 0.85
+   opacity pulled it to ~4.3:1, under AA for text this small. It stays the
+   quieter half of the toggle through its lighter weight beside the label, and
+   by keeping this colour while the label brightens on hover. */
 .manualNote {
   color: var(--app-text-subtle);
-  opacity: 0.85;
 }
 
 /* ── Attached chip ───────────────────────────────────────────────────────── */

@@ -29,6 +29,7 @@ import {
   submitFeedback,
 } from "@/core/feedback/submit";
 import { useFeedbackStore } from "./feedbackStore";
+import { clearFeedbackDraft, loadFeedbackDraft, saveFeedbackDraft } from "./feedbackDraft";
 import styles from "./FeedbackDialog.module.css";
 
 const TOPGG_REVIEW_URL = "https://top.gg/bot/1511769679096447016#reviews";
@@ -37,16 +38,37 @@ export function FeedbackDialog() {
   const activityMode = isActivityMode();
   const close = useFeedbackStore((s) => s.closeFeedback);
 
-  const [tagIndex, setTagIndex] = useState(0);
-  const [summary, setSummary] = useState("");
-  const [details, setDetails] = useState("");
-  const [contact, setContact] = useState("");
+  // Every close unmounts this dialog, so an unsent report is kept for the tab
+  // (feedbackDraft) and picked up here the next time it opens.
+  const [restored] = useState(loadFeedbackDraft);
+  const [showRestored, setShowRestored] = useState(restored !== null);
+  const [tagIndex, setTagIndex] = useState(restored?.tagIndex ?? 0);
+  const [summary, setSummary] = useState(restored?.summary ?? "");
+  const [details, setDetails] = useState(restored?.details ?? "");
+  const [contact, setContact] = useState(restored?.contact ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const summaryRef = useRef<HTMLInputElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!sent) saveFeedbackDraft({ tagIndex, summary, details, contact });
+  }, [tagIndex, summary, details, contact, sent]);
+
+  const discardDraft = () => {
+    clearFeedbackDraft();
+    setTagIndex(0);
+    setSummary("");
+    setDetails("");
+    setContact("");
+    setError(null);
+    setShowRestored(false);
+    // The notice (and its button) go; start the fresh report in its first field.
+    requestAnimationFrame(() => summaryRef.current?.focus());
+  };
 
   const tag = FEEDBACK_TAGS[tagIndex] ?? FEEDBACK_TAGS[0]!;
   const canSend = summary.trim().length > 0 && details.trim().length > 0 && !busy;
@@ -69,6 +91,7 @@ export function FeedbackDialog() {
       setError(result.error);
       return;
     }
+    clearFeedbackDraft();
     setSent(true);
   };
 
@@ -124,8 +147,10 @@ export function FeedbackDialog() {
       title="Send feedback"
       footer={
         <>
+          {/* "Close", not "Cancel": closing keeps the report for this tab
+              rather than throwing it away. */}
           <Button variant="secondary" onClick={close} disabled={busy}>
-            Cancel
+            Close
           </Button>
           <Button variant="primary" onClick={handleSend} disabled={!canSend}>
             {busy ? "Sending…" : "Send feedback"}
@@ -133,6 +158,14 @@ export function FeedbackDialog() {
         </>
       }
     >
+      {showRestored ? (
+        <p className={styles.restored}>
+          <span>Restored the report you hadn’t sent yet.</span>
+          <button type="button" className={styles.restoredDiscard} onClick={discardDraft}>
+            Discard it
+          </button>
+        </p>
+      ) : null}
       <p className={styles.lead}>
         Spotted a bug or have an idea? Send it straight to our feedback forum — no account needed.
       </p>
@@ -166,6 +199,7 @@ export function FeedbackDialog() {
       >
         {(id) => (
           <TextInput
+            ref={summaryRef}
             id={id}
             value={summary}
             maxLength={FEEDBACK_SUMMARY_MAX}

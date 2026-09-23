@@ -198,7 +198,7 @@ export function MessageOptions() {
               Forum post
               <LaneDot severity={forumSeverity} active={forumActive} />
             </span>
-            <span className={styles.optionsTabSub}>Thread title &amp; tags</span>
+            <span className={styles.optionsTabSub}>Thread name &amp; tags</span>
           </span>
           <ChevronDownIcon size={15} className={styles.optionsTabChevron} aria-hidden="true" />
         </button>
@@ -298,6 +298,7 @@ export function MessageOptions() {
             hint="Starts a new forum post with this title. Skip when posting into an existing thread."
             error={issueAt("thread_name")?.error}
             warning={issueAt("thread_name")?.warning}
+            counter={{ value: message.thread_name ?? "", max: LIMITS.THREAD_NAME }}
           >
             {(id) => (
               <TextArea

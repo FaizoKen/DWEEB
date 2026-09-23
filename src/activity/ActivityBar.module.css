@@ -94,3 +94,46 @@
 .bar[data-compact] .sep {
   display: none;
 }
+
+/* An action that can't run right now but still explains itself when tapped:
+   `aria-disabled` rather than `disabled`, since a disabled control swallows the
+   tap and touch has no hover to show its title. These mirror the native
+   disabled look of IconButton / Button (and cancel their hover lift, which keys
+   off `:not(:disabled)`), so it reads as unavailable while staying tappable. */
+.unavailableIcon[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.unavailablePrimary[aria-disabled="true"],
+.unavailableSecondary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.right .unavailableIcon[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--app-text-muted);
+}
+
+.right .unavailablePrimary[aria-disabled="true"]:hover {
+  background: var(--app-accent);
+}
+
+.right .unavailableSecondary[aria-disabled="true"]:hover {
+  background: var(--app-bg-input);
+  border-color: var(--app-border);
+}
+
+/* A folded utility that can't run: its overflow-menu row is disabled (menus
+   skip those), so the reason is spelled out under the label instead. */
+.menuRow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.menuReason {
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+}

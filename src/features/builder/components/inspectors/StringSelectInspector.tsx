@@ -121,7 +121,7 @@ export function StringSelectInspector({ node }: Props) {
                 </IconButton>
               ) : null}
             </div>
-            <Field label="Label">
+            <Field label="Label" counter={{ value: opt.label, max: LIMITS.SELECT_OPTION_LABEL }}>
               {(id) => (
                 <PlaceholderInput
                   id={id}
@@ -136,7 +136,11 @@ export function StringSelectInspector({ node }: Props) {
               emoji={opt.emoji}
               onChange={(emoji) => updateOption(i, { ...opt, emoji })}
             />
-            <Field label="Value" hint="Sent to your bot when the option is picked.">
+            <Field
+              label="Value"
+              hint="Sent to your bot when the option is picked."
+              counter={{ value: opt.value, max: LIMITS.SELECT_OPTION_VALUE }}
+            >
               {(id) => (
                 <PlaceholderInput
                   id={id}
@@ -147,7 +151,10 @@ export function StringSelectInspector({ node }: Props) {
                 />
               )}
             </Field>
-            <Field label="Description">
+            <Field
+              label="Description"
+              counter={{ value: opt.description ?? "", max: LIMITS.SELECT_OPTION_DESCRIPTION }}
+            >
               {(id) => (
                 <PlaceholderInput
                   id={id}

@@ -14,7 +14,7 @@
  *  - the validation self-repair turn adopts fixed payloads.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./providers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./providers")>();
@@ -31,9 +31,27 @@ vi.mock("@/core/guild/config", async (importOriginal) => {
 });
 
 import { callAI, type AiCallResult, type AiTurn } from "./providers";
-import { useAiStore } from "./aiStore";
+import { undoClearChat, useAiStore } from "./aiStore";
+import { loadAiSettings } from "./settingsStorage";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useMessageStore } from "@/core/state/messageStore";
+
+afterEach(() => vi.unstubAllGlobals());
+
+/** A throwaway Web Storage, so settings persistence can be read back. */
+function memoryStorage(): Storage {
+  const items = new Map<string, string>();
+  return {
+    get length() {
+      return items.size;
+    },
+    clear: () => items.clear(),
+    getItem: (key) => items.get(key) ?? null,
+    key: (index) => [...items.keys()][index] ?? null,
+    removeItem: (key) => void items.delete(key),
+    setItem: (key, value) => void items.set(key, String(value)),
+  };
+}
 
 const mockedCallAI = vi.mocked(callAI);
 
@@ -248,5 +266,114 @@ describe("aiStore.send — validation self-repair", () => {
     expect(bubble.appliedMessage).toBe(true);
     expect(bubble.failedEdit).toBeFalsy();
     expect(bubble.raw).toContain('"AI EDIT THREE"');
+  });
+});
+
+describe("aiStore — saved API keys", () => {
+  it("Remove key deletes it from the store and from storage, keeping the provider", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    useAiStore.getState().setSettings({
+      provider: "openai",
+      apiKey: "sk-live",
+      model: "gpt-x",
+      baseUrl: "",
+    });
+
+    useAiStore.getState().removeApiKey();
+
+    const expected = { provider: "openai", apiKey: "", model: "gpt-x", baseUrl: "" };
+    expect(useAiStore.getState().settings).toEqual(expected);
+    expect(loadAiSettings()).toEqual(expected);
+    // A provider that needs a key is no longer ready to chat without one.
+    expect(useAiStore.getState().isConfigured()).toBe(false);
+  });
+
+  it("never keeps a key beside the built-in provider", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    useAiStore.getState().setSettings({
+      provider: "dweeb",
+      apiKey: "sk-live",
+      model: "",
+      baseUrl: "",
+    });
+
+    expect(useAiStore.getState().settings.apiKey).toBe("");
+    expect(loadAiSettings().apiKey).toBe("");
+  });
+
+  it("treats a keyless provider as ready without a key", () => {
+    useAiStore.getState().setSettings({
+      provider: "ollama",
+      apiKey: "",
+      model: "llama3.2",
+      baseUrl: "https://ollama.example.com",
+    });
+    expect(useAiStore.getState().isConfigured()).toBe(true);
+  });
+});
+
+describe("aiStore — Clear chat can be undone until the chat moves on", () => {
+  it("restores exactly the cleared transcript, once", async () => {
+    queueReply("First answer.");
+    await useAiStore.getState().send("first question");
+    const before = useAiStore.getState().messages;
+
+    useAiStore.getState().clearChat();
+    expect(useAiStore.getState().messages).toEqual([]);
+
+    expect(undoClearChat()).toBe(true);
+    expect(useAiStore.getState().messages).toEqual(before);
+    // One-shot: nothing is left to restore.
+    expect(undoClearChat()).toBe(false);
+  });
+
+  it("declines once a new message has been sent since", async () => {
+    queueReply("Old answer.");
+    await useAiStore.getState().send("old question");
+    useAiStore.getState().clearChat();
+    queueReply("New answer.");
+    await useAiStore.getState().send("new question");
+    const current = useAiStore.getState().messages;
+
+    expect(undoClearChat()).toBe(false);
+    expect(useAiStore.getState().messages).toBe(current);
+  });
+
+  it("declines after a settings change started a fresh assistant", async () => {
+    queueReply("An answer.");
+    await useAiStore.getState().send("a question");
+    useAiStore.getState().clearChat();
+    useAiStore.getState().setSettings({
+      provider: "groq",
+      apiKey: "gsk-test",
+      model: "test-model",
+      baseUrl: "",
+    });
+
+    expect(undoClearChat()).toBe(false);
+    expect(useAiStore.getState().messages).toEqual([]);
+  });
+
+  it("brings a turn cleared mid-stream back settled, never stuck streaming", async () => {
+    const reply = deferred<AiCallResult>();
+    mockedCallAI.mockImplementationOnce(async (_settings, _system, _turns, _signal, onToken) => {
+      onToken?.("Half an ans");
+      return reply.promise;
+    });
+    const sending = useAiStore.getState().send("a question");
+    await vi.waitFor(() => expect(lastAssistantBubble().content).toBe("Half an ans"));
+
+    useAiStore.getState().clearChat();
+    reply.resolve({ ok: false, error: "Request cancelled." });
+    await sending;
+
+    expect(undoClearChat()).toBe(true);
+    const restored = useAiStore.getState().messages;
+    expect(restored.map((m) => [m.role, m.content])).toEqual([
+      ["user", "a question"],
+      ["assistant", "Half an ans"],
+    ]);
+    expect(restored.some((m) => m.streaming)).toBe(false);
+    expect(useAiStore.getState().thinking).toBe(false);
   });
 });

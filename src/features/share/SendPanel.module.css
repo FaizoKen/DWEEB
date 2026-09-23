@@ -296,6 +296,34 @@
   gap: 2px;
 }
 
+/* An issue that has a home in the editor: the whole row is the way there. It
+   keeps the callout's text colour and reads as a link (dotted underline, a
+   "Show" cue) rather than a button slab, so the list stays a list. The reset's
+   :focus-visible outline is its focus ring. */
+.issueJump {
+  max-width: 100%;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.18em;
+  border-radius: 2px;
+}
+.issueJump:hover {
+  color: var(--app-text);
+  text-decoration-style: solid;
+  text-decoration-color: currentColor;
+}
+.issueJumpCue {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
+}
+
 .error {
   background: rgba(237, 66, 69, 0.1);
   border: 1px solid rgba(237, 66, 69, 0.35);
@@ -607,5 +635,57 @@
   cursor: pointer;
 }
 .scheduleManageLink:hover {
+  text-decoration: underline;
+}
+
+/* ── Update target ──────────────────────────────────────────────────────── */
+/* The message an update overwrites, named as well as we know it — so the tab
+   no longer asks the user to trust a bare snowflake — with the raw id field
+   folded under it when the editor came from that message. */
+.target {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.targetCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-accent);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.targetLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-subtle);
+}
+
+.targetTitle {
+  font-weight: 600;
+  color: var(--app-text);
+  overflow-wrap: anywhere;
+}
+
+.targetMeta {
+  color: var(--app-text-muted);
+}
+
+.targetLink {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.targetLink:hover {
   text-decoration: underline;
 }

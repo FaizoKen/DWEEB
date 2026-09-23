@@ -61,7 +61,15 @@ export function SelectBaseFields({ node }: Props) {
     <>
       {/* The select's capability notice now renders above the Action panel, just
           ahead of these shared fields — see the Inspector. */}
-      <Field label="Placeholder" hint={owns("placeholder") ? lockedHint : undefined}>
+      <Field
+        label="Placeholder"
+        hint={owns("placeholder") ? lockedHint : undefined}
+        counter={
+          owns("placeholder")
+            ? undefined
+            : { value: node.placeholder ?? "", max: LIMITS.SELECT_PLACEHOLDER }
+        }
+      >
         {(id) =>
           owns("placeholder") ? (
             <LockedValue id={id} display={node.placeholder || "—"} pluginName={pluginName} />

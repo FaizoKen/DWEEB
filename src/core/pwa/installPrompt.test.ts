@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { detectInstallPlatform } from "./installPrompt";
 
 /**
@@ -61,5 +61,111 @@ describe("detectInstallPlatform", () => {
 
   it("falls back to unknown for an unrecognized UA", () => {
     expect(detectInstallPlatform("some-random-bot/1.0", 0)).toBe("unknown");
+  });
+});
+
+/**
+ * The replay sequencing `InstallDialog` is built around: the captured event is
+ * spent — and `canPrompt` drops, notifying subscribers — the moment the prompt
+ * is replayed, *before* the browser's sheet resolves. The dialog holds its own
+ * "prompting" state across that window; these pin the store side of it.
+ */
+describe("promptInstall sequencing", () => {
+  /** A stand-in `window`: just the event target and media query the module reads. */
+  function fakeWindow() {
+    return Object.assign(new EventTarget(), {
+      matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+    });
+  }
+
+  /** Chromium's `beforeinstallprompt`, with a controllable prompt and choice. */
+  function installEvent(prompt: () => Promise<unknown>) {
+    let choose!: (outcome: "accepted" | "dismissed") => void;
+    const userChoice = new Promise<{ outcome: "accepted" | "dismissed" }>((resolve) => {
+      choose = (outcome) => resolve({ outcome });
+    });
+    const event = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+      prompt: vi.fn(prompt),
+      userChoice,
+    });
+    return { event, choose };
+  }
+
+  /** A fresh module (its capture state is module-level) wired to a fake window. */
+  async function setup() {
+    const win = fakeWindow();
+    vi.stubGlobal("window", win);
+    vi.stubGlobal("navigator", {});
+    vi.resetModules();
+    const mod = await import("./installPrompt");
+    mod.captureInstallPrompt();
+    return { win, ...mod };
+  }
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is unavailable until the browser offers a prompt", async () => {
+    const { promptInstall, getInstallSnapshot } = await setup();
+    expect(getInstallSnapshot()).toEqual({ installed: false, canPrompt: false });
+    await expect(promptInstall()).resolves.toBe("unavailable");
+  });
+
+  it("captures the event, suppressing the browser's own promotion", async () => {
+    const { win, getInstallSnapshot } = await setup();
+    const { event } = installEvent(async () => {});
+    win.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(getInstallSnapshot().canPrompt).toBe(true);
+  });
+
+  it("spends the event before the sheet resolves, so a snapshot reader must hold its own mode", async () => {
+    const { win, promptInstall, getInstallSnapshot, subscribeInstall } = await setup();
+    const { event, choose } = installEvent(async () => {});
+    win.dispatchEvent(event);
+    const seen: boolean[] = [];
+    subscribeInstall(() => seen.push(getInstallSnapshot().canPrompt));
+
+    const outcome = promptInstall();
+    // Synchronously, while the browser's sheet is still up: the prompt is
+    // replayed, and subscribers have already been told there's none to show.
+    expect(event.prompt).toHaveBeenCalledTimes(1);
+    expect(getInstallSnapshot().canPrompt).toBe(false);
+    expect(seen).toEqual([false]);
+
+    choose("dismissed");
+    await expect(outcome).resolves.toBe("dismissed");
+  });
+
+  it("never replays a spent event: a second call while the sheet is up is unavailable", async () => {
+    const { win, promptInstall } = await setup();
+    const { event, choose } = installEvent(async () => {});
+    win.dispatchEvent(event);
+
+    const first = promptInstall();
+    await expect(promptInstall()).resolves.toBe("unavailable");
+    expect(event.prompt).toHaveBeenCalledTimes(1);
+
+    choose("accepted");
+    await expect(first).resolves.toBe("accepted");
+  });
+
+  it("reports a prompt the browser refused as unavailable", async () => {
+    const { win, promptInstall } = await setup();
+    const { event } = installEvent(() => Promise.reject(new Error("NotAllowedError")));
+    win.dispatchEvent(event);
+    await expect(promptInstall()).resolves.toBe("unavailable");
+  });
+
+  it("marks the app installed and drops the prompt once an install completes", async () => {
+    const { win, getInstallSnapshot } = await setup();
+    const { event } = installEvent(async () => {});
+    win.dispatchEvent(event);
+    win.dispatchEvent(new Event("appinstalled"));
+    expect(getInstallSnapshot()).toEqual({ installed: true, canPrompt: false });
   });
 });

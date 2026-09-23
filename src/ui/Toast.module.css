@@ -31,7 +31,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px 12px 12px;
+  /* The right edge is the dismiss button's own padding. */
+  padding: 12px 8px 12px 12px;
   border-radius: var(--app-radius-lg);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
@@ -83,6 +84,42 @@
 .action:focus-visible {
   outline: none;
   box-shadow: var(--app-focus-ring);
+}
+
+/* Every toast can be closed early — nobody should have to wait out a notice
+   that's covering what they're working on. Quiet until hovered so the message
+   and its action stay the focal point. */
+.dismiss {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -4px;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text-subtle);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.dismiss:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.dismiss:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+@media (pointer: coarse) {
+  .dismiss {
+    width: 40px;
+    height: 40px;
+  }
+  .action {
+    min-height: 40px;
+  }
 }
 
 .info .icon {

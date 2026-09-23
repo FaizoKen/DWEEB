@@ -11,10 +11,12 @@
  * escalates the collapse ladder by one when `needed` exceeds it.
  */
 
-/** Ceiling (px) on the space reserved for the left cluster. The reserve is the
- *  cluster's real natural width capped at this — a short channel name never
- *  books phantom space (which would collapse the actions with visible room left
- *  over), while a long one truncates gracefully once the actions need the room. */
+/** Default ceiling (px) on the space reserved for the left cluster. The reserve
+ *  is the cluster's real natural width capped at this — a short channel name
+ *  never books phantom space (which would collapse the actions with visible room
+ *  left over), while a long one truncates gracefully once the actions need the
+ *  room. The Activity bar uses this default; the web builder passes its own
+ *  (see `measureNeededWidth`'s `maxReserve`). */
 export const LEFT_MAX_RESERVE = 150;
 
 /** Ceiling on how many utility icons either bar shows inline, however much room
@@ -31,6 +33,9 @@ export function measureNeededWidth(
   bar: HTMLElement,
   left: HTMLElement,
   right: HTMLElement,
+  /** Cap on the left cluster's reserve — how much of the destination the fit
+   *  check defends before it starts folding actions. */
+  maxReserve: number = LEFT_MAX_RESERVE,
 ): number {
   // A global `transition: all` rule (an anti-flash hack, ~10µs) animates the
   // bar's gap/padding and the clusters' gaps whenever `data-compact` flips.
@@ -62,7 +67,7 @@ export function measureNeededWidth(
   const naturalLeft = left.getBoundingClientRect().width;
   left.style.minWidth = prevMinWidth;
 
-  const reserve = Math.min(naturalLeft, LEFT_MAX_RESERVE);
+  const reserve = Math.min(naturalLeft, maxReserve);
   const needed = right.getBoundingClientRect().width + reserve + gap + padX;
 
   // Restore transitions last — after minWidth is already back to its original,

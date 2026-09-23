@@ -26,10 +26,21 @@ import { STRIPE_PUBLISHABLE_KEY } from "./stripeConfig";
 
 let stripePromise: Promise<Stripe | null> | null = null;
 
-/** Lazily load Stripe.js once. Resolves to null when no publishable key is set. */
+/** Lazily load Stripe.js once. Resolves to null when no publishable key is set,
+ *  or when the script couldn't load — never rejects. */
 export function getStripe(): Promise<Stripe | null> {
   if (!STRIPE_PUBLISHABLE_KEY) return Promise.resolve(null);
-  if (!stripePromise) stripePromise = loadStripe(STRIPE_PUBLISHABLE_KEY);
+  if (!stripePromise) {
+    stripePromise = loadStripe(STRIPE_PUBLISHABLE_KEY).catch(() => {
+      // Offline, or a content blocker refused js.stripe.com. Resolve null rather
+      // than reject: `EmbeddedCheckoutProvider` chains `.then` on this promise
+      // with no `catch`, so a rejection escaped as an unhandled rejection — a
+      // crash beacon for something that isn't our bug — beside an empty payment
+      // form. Forget the failure so the next Upgrade click tries again.
+      stripePromise = null;
+      return null;
+    });
+  }
   return stripePromise;
 }
 
@@ -142,10 +153,16 @@ interface RawSubscription {
   movable_at: number | null;
 }
 
+export type SubscriptionsResult =
+  | { ok: true; subscriptions: PremiumSubscription[] }
+  | { ok: false; error: string };
+
 /** `GET /api/stripe/subscriptions` → the signed-in user's premium subscriptions
- *  (the "your premium servers" list + move picker source). Empty on any miss —
- *  this only ever hides management UI, never blocks the pricing table. */
-export async function fetchMySubscriptions(): Promise<PremiumSubscription[]> {
+ *  (the "your premium servers" list + move picker source, and the gate on
+ *  Manage billing). A failure is reported as one, never as an empty list: this
+ *  list gates the only in-app cancel path, so "couldn't load" must not read as
+ *  "you have none". `error` reads on its own — the modal prints it as is. */
+export async function fetchMySubscriptions(): Promise<SubscriptionsResult> {
   let res: Response;
   try {
     res = await fetch(`${PROXY_BASE_URL}/api/stripe/subscriptions`, {
@@ -153,11 +170,24 @@ export async function fetchMySubscriptions(): Promise<PremiumSubscription[]> {
       credentials: "include",
     });
   } catch {
-    return [];
+    return { ok: false, error: "Couldn't reach the billing service to load your subscriptions." };
   }
-  if (!res.ok) return [];
-  const data = (await res.json().catch(() => null)) as { items?: RawSubscription[] } | null;
-  return (data?.items ?? []).map((s) => ({
+  const data = (await res.json().catch(() => null)) as {
+    items?: RawSubscription[];
+    error?: string;
+  } | null;
+  if (!res.ok) {
+    return { ok: false, error: data?.error ?? `Couldn't load your subscriptions (${res.status}).` };
+  }
+  // A 200 that isn't the list (a captive portal's page, a misrouted proxy) is a
+  // failed load too — the old "empty on any miss" read it as "no subscriptions".
+  if (!Array.isArray(data?.items)) {
+    return {
+      ok: false,
+      error: "Couldn't load your subscriptions — the billing service sent an unexpected reply.",
+    };
+  }
+  const subscriptions = data.items.map((s) => ({
     id: s.id,
     guildId: s.guild_id,
     tier: s.tier,
@@ -166,6 +196,7 @@ export async function fetchMySubscriptions(): Promise<PremiumSubscription[]> {
     cancelAtPeriodEnd: s.cancel_at_period_end,
     movableAt: s.movable_at ?? null,
   }));
+  return { ok: true, subscriptions };
 }
 
 export type ReassignResult = { ok: true } | { ok: false; error: string };

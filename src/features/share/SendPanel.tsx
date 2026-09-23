@@ -82,7 +82,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
-import { useLibraryStore } from "@/core/library/libraryStore";
+import { libraryEntryMessage, useLibraryStore } from "@/core/library/libraryStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
@@ -134,6 +134,7 @@ import {
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
+import { issueDestination, jumpToIssue } from "@/features/builder/jumpToIssue";
 import { usePlanStore } from "@/core/plan/planStore";
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { Button } from "@/ui/Button";
@@ -154,11 +155,23 @@ import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { encodeJson } from "@/core/serialization";
 import { hasSessionAttachments } from "@/core/serialization/normalize";
-import { cancelSchedule, createSchedule, isScheduleConfigured } from "@/core/schedule/api";
+import {
+  cancelSchedule,
+  createSchedule,
+  isScheduleConfigured,
+  updateSchedule,
+} from "@/core/schedule/api";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import { preserveCreatedScheduleAccess } from "@/core/schedule/accessPersistence";
-import { rememberSchedule, type LocalSchedule } from "@/core/schedule/localStore";
-import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
+import { getManageToken, rememberSchedule, type LocalSchedule } from "@/core/schedule/localStore";
+import { browserTimezone, formatInstant, localDateTimeValue } from "@/core/schedule/recurrence";
+import {
+  clearScheduleOrigin,
+  currentScheduleOrigin,
+  noteScheduleSaved,
+  useScheduleOrigin,
+} from "@/core/schedule/scheduleOrigin";
+import type { WebhookMessage } from "@/core/schema/types";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
@@ -174,6 +187,13 @@ import {
   updateFailureMessage,
 } from "./sendCopy";
 import { type ShareTab } from "./tabs";
+import {
+  describeUpdateTarget,
+  formatPostedAt,
+  postedContentFor,
+  rememberPostedContent,
+} from "./updateTarget";
+import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import styles from "./SendPanel.module.css";
 
 type SendState =
@@ -270,6 +290,7 @@ export function SendPanel({
   onCloseDialog,
   onSwitchTab,
   initialWhen = "now",
+  onRestoreFirst,
 }: {
   /**
    * Which webhook-message operation this panel performs — POST a brand-new
@@ -306,6 +327,16 @@ export function SendPanel({
   onSwitchTab?: (tab: ShareTab) => void;
   /** Initial send timing for an explicit Schedule landing-page intent. */
   initialWhen?: "now" | "later";
+  /**
+   * Update mode: switch the host dialog to its Restore tab, prefilled with the
+   * message this panel is about to overwrite — the warning's "Restore it
+   * first", for an editor that wasn't loaded from that message.
+   */
+  onRestoreFirst?: (handoff: {
+    messageInput: string;
+    webhookUrl?: string;
+    threadId?: string;
+  }) => void;
 } = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
@@ -323,6 +354,12 @@ export function SendPanel({
   });
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
+  // An update that opens already aimed at a message (the editor came from it)
+  // leads with that message and folds the raw id field behind "Update a
+  // different message"; one that opens with nothing to go on asks for it up
+  // front. Frozen per open so the field never moves while it's being typed in.
+  const [targetFoldedAtOpen] = useState(() => mode === "update" && restoredFrom != null);
+  const [targetFieldOpen, setTargetFieldOpen] = useState(false);
   const [revealUrl, setRevealUrl] = useState(false);
   // Beginner-friendly default: keep the optional thread setting folded away so
   // the common path is just "pick a channel → send". Auto-opens whenever a value
@@ -358,11 +395,42 @@ export function SendPanel({
   // Post-send result dialog — confirms delivery and offers a deep link straight
   // to the message in Discord. Null when closed.
   const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
+  // The scheduled post the editor was loaded from (Message directory ▸
+  // Scheduled), when there is one: Schedule then saves into that post instead
+  // of creating another. The store drops it the moment the editor's document is
+  // replaced, so it can only ever describe the message on screen.
+  const scheduleOrigin = useScheduleOrigin();
   // Send-now vs schedule-for-later. The primary button converts to "Schedule
   // post" while "later" is picked. Only meaningful for a brand-new post.
-  const [when, setWhen] = useState<"now" | "later">(initialWhen);
-  useEffect(() => setWhen(initialWhen), [initialWhen]);
-  const [scheduleAt, setScheduleAt] = useState<string>(defaultScheduleAt);
+  // Opening Send on a loaded scheduled post lands on Schedule — saving into it
+  // is what the user came to do (Send now stays one click away, and says it
+  // posts a separate copy). Frozen per open, like the panel's other first
+  // answers, so a mid-flow change can't flip the radio under the cursor.
+  const [editingAtOpen] = useState(
+    () => mode === "new" && isScheduleConfigured() && currentScheduleOrigin() != null,
+  );
+  const preferredWhen = initialWhen === "later" || editingAtOpen ? "later" : "now";
+  const [when, setWhen] = useState<"now" | "later">(preferredWhen);
+  useEffect(() => setWhen(preferredWhen), [preferredWhen]);
+  // Editing a scheduled post starts from its own time, in the local wall clock
+  // the input speaks; a new post defaults to the next whole hour.
+  const [scheduleAt, setScheduleAt] = useState<string>(() => {
+    const origin = mode === "new" ? currentScheduleOrigin() : null;
+    return origin ? localDateTimeValue(origin.runAt * 1000) : defaultScheduleAt();
+  });
+  // What the last successful schedule (or save) committed. While the message,
+  // the time and the destination are all still exactly that, the primary can't
+  // quietly repeat it: two clicks used to schedule two posts. A fresh schedule
+  // turns the button into an explicit "Schedule another" (whose confirm says it
+  // adds a second post), a save into a disabled "Saved". Any change — a new
+  // message object from any edit, another time, another destination — re-arms
+  // the plain action, since it would then be a different post.
+  const [committed, setCommitted] = useState<{
+    kind: "created" | "saved";
+    message: WebhookMessage;
+    at: string;
+    target: string;
+  } | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSuccess, setScheduleSuccess] = useState<string | null>(null);
@@ -420,6 +488,11 @@ export function SendPanel({
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const urlInvalid = url.trim().length > 0 && !parsedUrl;
 
+  // Schedule mode on a loaded scheduled post: "Save changes" edits that post
+  // (its message and time) rather than creating one.
+  const scheduleEditMode =
+    mode === "new" && when === "later" && isScheduleConfigured() && scheduleOrigin != null;
+
   // A verified result only describes the URL it was fetched for; editing the
   // URL (or restoring a different one) invalidates it.
   useEffect(() => setVerified(null), [url]);
@@ -462,47 +535,54 @@ export function SendPanel({
     [message, threadId],
   );
 
+  // In Schedule mode on a loaded scheduled post, the destination is that
+  // post's own — its webhook is sealed on the server and the picker is hidden —
+  // so every webhook check below reads what this browser knows about *that*
+  // webhook (by id), never a URL still sitting in the hidden field.
+  const checkWebhookId = scheduleEditMode ? scheduleOrigin?.webhookId : parsedUrl?.id;
+  const liveVerified = scheduleEditMode ? null : verified;
+
   // Best-known owner for the URL currently entered: a fresh verify result, or
   // the kind we persisted on a saved (recents) entry. Undefined until verified.
   const knownOwnerKind: WebhookOwnerKind | undefined = useMemo(() => {
-    if (verified) return verified.owner.kind;
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.ownerKind;
-  }, [verified, parsedUrl, history]);
+    if (liveVerified) return liveVerified.owner.kind;
+    if (!checkWebhookId) return undefined;
+    return history.find((e) => e.id === checkWebhookId)?.ownerKind;
+  }, [liveVerified, checkWebhookId, history]);
 
   // The owning app's id, same sources as `knownOwnerKind`. Only meaningful
   // when that kind is "bot"; undefined until verified (or on older saved
   // entries from before the field existed).
   const knownApplicationId = useMemo(() => {
-    if (verified) return verified.owner.applicationId ?? undefined;
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.applicationId;
-  }, [verified, parsedUrl, history]);
+    if (liveVerified) return liveVerified.owner.applicationId ?? undefined;
+    if (!checkWebhookId) return undefined;
+    return history.find((e) => e.id === checkWebhookId)?.applicationId;
+  }, [liveVerified, checkWebhookId, history]);
 
   // Whether the URL in the field is a saved webhook a health check found gone
   // on Discord (deleted / token revoked). Posting to it can only 404, so this
   // hard-blocks the send. Recomputes live if the check flags it while the dialog
   // is open (the recents list reloads our `history` on change).
   const knownGone = useMemo(() => {
-    if (!parsedUrl) return false;
-    return history.find((e) => e.id === parsedUrl.id)?.deletedAt != null;
-  }, [parsedUrl, history]);
+    if (!checkWebhookId) return false;
+    return history.find((e) => e.id === checkWebhookId)?.deletedAt != null;
+  }, [checkWebhookId, history]);
 
   // Best-known display name for the URL — from a fresh verify or a saved entry —
   // so the ownership banners can name the webhook instead of "this webhook".
   const knownName = useMemo(() => {
-    if (verified?.name) return verified.name;
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.name || undefined;
-  }, [verified, parsedUrl, history]);
+    if (liveVerified?.name) return liveVerified.name;
+    if (!checkWebhookId) return undefined;
+    return history.find((e) => e.id === checkWebhookId)?.name || undefined;
+  }, [liveVerified, checkWebhookId, history]);
 
   // Avatar hash for the URL, from a saved entry. Undefined for a freshly-typed
   // webhook (only verified on confirm) — the confirm dialog then shows Discord's
   // default avatar.
   const knownAvatar = useMemo(() => {
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.avatar ?? undefined;
-  }, [parsedUrl, history]);
+    if (!checkWebhookId) return undefined;
+    return history.find((e) => e.id === checkWebhookId)?.avatar ?? undefined;
+  }, [checkWebhookId, history]);
 
   // Whether anything actually *knows* this webhook, as opposed to the string
   // merely looking like one: a verify GET in this session, or a saved entry
@@ -510,25 +590,29 @@ export function SendPanel({
   // is a regex, so without this the panel would claim "All set" for a URL no
   // one has ever asked Discord about.
   const knownWebhook = useMemo(() => {
-    if (verified) return true;
-    if (!parsedUrl) return false;
-    return history.some((e) => e.id === parsedUrl.id);
-  }, [verified, parsedUrl, history]);
+    if (liveVerified) return true;
+    if (!checkWebhookId) return false;
+    return history.some((e) => e.id === checkWebhookId);
+  }, [liveVerified, checkWebhookId, history]);
 
   // Where the webhook posts — from a fresh verify or a saved entry. Shown in the
   // confirm dialog so the destination is explicit; undefined until verified for
   // a freshly-typed URL (resolved on confirm, same as ownership).
   const knownChannelId = useMemo(() => {
-    if (verified?.channelId) return verified.channelId;
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.channelId;
-  }, [verified, parsedUrl, history]);
+    if (liveVerified?.channelId) return liveVerified.channelId;
+    if (!checkWebhookId) return undefined;
+    return history.find((e) => e.id === checkWebhookId)?.channelId;
+  }, [liveVerified, checkWebhookId, history]);
 
   const knownGuildId = useMemo(() => {
-    if (verified?.guildId) return verified.guildId;
-    if (!parsedUrl) return undefined;
-    return history.find((e) => e.id === parsedUrl.id)?.guildId;
-  }, [verified, parsedUrl, history]);
+    if (liveVerified?.guildId) return liveVerified.guildId;
+    const stored = checkWebhookId
+      ? history.find((e) => e.id === checkWebhookId)?.guildId
+      : undefined;
+    // A loaded scheduled post names its own server even when this browser has
+    // never seen its webhook.
+    return stored ?? (scheduleEditMode ? (scheduleOrigin?.guildId ?? undefined) : undefined);
+  }, [liveVerified, checkWebhookId, history, scheduleEditMode, scheduleOrigin]);
 
   // Human names for the destination, so the confirm dialog reads "#general ·
   // Faizo's server" instead of raw snowflakes. Prefer the names saved on the
@@ -573,16 +657,20 @@ export function SendPanel({
     (!barChannelsLoaded || (barChannel != null && WEBHOOK_CHANNEL_TYPES.has(barChannel.type)));
 
   const knownGuildName = useMemo(() => {
-    const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.guildName : undefined;
+    const stored = checkWebhookId
+      ? history.find((e) => e.id === checkWebhookId)?.guildName
+      : undefined;
     if (stored) return stored;
     return knownGuildId ? authGuilds.find((g) => g.id === knownGuildId)?.name : undefined;
-  }, [parsedUrl, history, authGuilds, knownGuildId]);
+  }, [checkWebhookId, history, authGuilds, knownGuildId]);
 
   const knownChannelName = useMemo(() => {
-    const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.channelName : undefined;
+    const stored = checkWebhookId
+      ? history.find((e) => e.id === checkWebhookId)?.channelName
+      : undefined;
     if (stored) return stored;
     return knownChannelId ? connectedData?.channelById[knownChannelId]?.name : undefined;
-  }, [parsedUrl, history, connectedData, knownChannelId]);
+  }, [checkWebhookId, history, connectedData, knownChannelId]);
 
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
@@ -724,7 +812,10 @@ export function SendPanel({
     setConfirmSlots(null);
     setMakePermanent(false);
     setSlotsUnavailable(false);
+    // Saving into a scheduled post can't change its expiry (it was decided when
+    // it was scheduled), so there's nothing to fetch or offer.
     if (
+      scheduleEditMode ||
       !hasInteractiveComponents ||
       !isProxyConfigured() ||
       authStatus !== "authed" ||
@@ -752,7 +843,14 @@ export function SendPanel({
         }
       });
     return () => ac.abort();
-  }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
+  }, [
+    confirmOpen,
+    scheduleEditMode,
+    hasInteractiveComponents,
+    authStatus,
+    knownGuildId,
+    updateTargetId,
+  ]);
 
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
@@ -883,15 +981,62 @@ export function SendPanel({
     setConfirmOpen(true);
   };
 
-  // Schedule pre-flight. Mirrors `handleSend`: validate the same way a send
-  // does (valid webhook, no blocking issues, ownership/routing not dead) plus
-  // a future time and no local uploads (those can't leave the browser), then
-  // open the confirm dialog instead of creating straight away — the user
-  // reviews the destination, the fire time, and the never-expire choice before
-  // anything is stored server-side. The create runs in `handleScheduleConfirmed`.
+  // The time the schedule field holds, as an instant (NaN while unset).
+  const pickedAt = Date.parse(scheduleAt);
+  // An edit keeps its post's time unless the user moves it (compared to the
+  // minute, the input's own precision), and only a moved time is checked and
+  // sent — a paused post can sit in the past and still take a content edit.
+  const timeChanged =
+    !scheduleEditMode ||
+    Number.isNaN(pickedAt) ||
+    Math.floor(pickedAt / 60_000) !== Math.floor((scheduleOrigin?.runAt ?? 0) / 60);
+  // Refused up front, not at the click: the field's `min` keeps the picker off
+  // past times, but a typed or stale value still arrives, so it's flagged under
+  // the field and the primary waits for a future time.
+  const pickedInPast = timeChanged && !Number.isNaN(pickedAt) && pickedAt < Date.now() - 60_000;
+
+  // Which post a schedule writes to — a new post's webhook and thread, or the
+  // loaded scheduled post — so "the same post again" is told from a new one.
+  const scheduleTarget = scheduleEditMode
+    ? `schedule:${scheduleOrigin?.scheduleId ?? ""}`
+    : `${parsedUrl?.id ?? ""}#${threadId.trim()}`;
+  const unchangedSinceCommit =
+    committed != null &&
+    committed.message === message &&
+    committed.at === scheduleAt &&
+    committed.target === scheduleTarget;
+  const scheduleAgain = unchangedSinceCommit && committed.kind === "created";
+  const savedUnchanged = unchangedSinceCommit && committed.kind === "saved";
+
+  // What stops a schedule, whichever post it writes to: the same checks a send
+  // makes (no blocking issues, nothing provably dead), plus a real future time
+  // and no local uploads (those can't leave the browser).
+  const scheduleBlocker = (): string | null => {
+    if (hasUploads) return "Uploaded files can't be scheduled — use image/media URLs instead.";
+    if (blockingIssues.length > 0) {
+      return `${blockingIssues.length} validation error${blockingIssues.length === 1 ? "" : "s"} — fix them before scheduling.`;
+    }
+    if (
+      knownGone ||
+      ownershipBlocked ||
+      mustSignInToRouteCheck ||
+      componentRouting === "foreign" ||
+      pluginGuildMismatch != null
+    ) {
+      return "Resolve the warning above before scheduling.";
+    }
+    if (Number.isNaN(pickedAt)) return "Pick a date and time.";
+    if (pickedInPast) return "That time is in the past — pick a future time.";
+    return null;
+  };
+
+  // Schedule pre-flight. Mirrors `handleSend`: validate, then open the confirm
+  // dialog instead of creating straight away — the user reviews the
+  // destination, the fire time, and the never-expire choice before anything is
+  // stored server-side. The create runs in `handleScheduleConfirmed`. A click
+  // on "Schedule another" lands here too; its confirm says it adds a post.
   const handleScheduleClick = () => {
     setScheduleError(null);
-    setScheduleSuccess(null);
     if (scheduleRecovery) {
       setScheduleError(
         "Save access to or cancel the previous scheduled post before creating another one.",
@@ -902,36 +1047,120 @@ export function SendPanel({
       setScheduleError("Choose or paste a webhook above first.");
       return;
     }
-    if (hasUploads) {
-      setScheduleError("Uploaded files can't be scheduled — use image/media URLs instead.");
-      return;
-    }
-    if (blockingIssues.length > 0) {
-      setScheduleError(
-        `${blockingIssues.length} validation error${blockingIssues.length === 1 ? "" : "s"} — fix them before scheduling.`,
-      );
-      return;
-    }
-    if (
-      knownGone ||
-      ownershipBlocked ||
-      mustSignInToRouteCheck ||
-      componentRouting === "foreign" ||
-      pluginGuildMismatch != null
-    ) {
-      setScheduleError("Resolve the warning above before scheduling.");
-      return;
-    }
-    const at = Date.parse(scheduleAt);
-    if (Number.isNaN(at)) {
-      setScheduleError("Pick a date and time.");
-      return;
-    }
-    if (at < Date.now() - 60_000) {
-      setScheduleError("That time is in the past — pick a future time.");
+    const blocker = scheduleBlocker();
+    if (blocker) {
+      setScheduleError(blocker);
       return;
     }
     setConfirmOpen(true);
+  };
+
+  // "Save changes" on a loaded scheduled post: the same checks, then the same
+  // confirm (it restates the time and who gets pinged), then a PATCH.
+  const handleScheduleSaveClick = () => {
+    setScheduleError(null);
+    const blocker = scheduleBlocker();
+    if (blocker) {
+      setScheduleError(blocker);
+      return;
+    }
+    setConfirmOpen(true);
+  };
+
+  // Save the editor's message (and a moved time) into the scheduled post it was
+  // loaded from — `updateSchedule`, which only rewrites what it's sent.
+  const handleScheduleSaveConfirmed = async () => {
+    // Re-read the origin at the last moment: a document replaced since the
+    // panel rendered must never be saved into this post.
+    const origin = currentScheduleOrigin();
+    if (!origin) {
+      setConfirmOpen(false);
+      setScheduleError(
+        "This message isn't linked to that scheduled post anymore — schedule it as a new post instead.",
+      );
+      return;
+    }
+    const at = Date.parse(scheduleAt);
+    if (Number.isNaN(at)) return;
+    const outgoing = substituteMessage(
+      message,
+      collectMessagePlaceholders(message, getPlugins(), {
+        serverId: knownGuildId,
+        serverName: knownGuildName,
+        channelId: knownChannelId,
+        channelName: knownChannelName,
+      }),
+    );
+    let payload: unknown;
+    try {
+      payload = JSON.parse(encodeJson(outgoing));
+    } catch {
+      setConfirmOpen(false);
+      setScheduleError("Couldn't encode the message.");
+      return;
+    }
+
+    setScheduling(true);
+    // The same access the directory's Cancel uses: this browser's management
+    // key when it holds one, else the signed-in owner's or a server manager's
+    // session (the server accepts any of them for the same rows).
+    const res = await updateSchedule(
+      origin.scheduleId,
+      timeChanged ? { payload, start_at: Math.floor(at / 1000) } : { payload },
+      getManageToken(origin.scheduleId),
+    );
+    setScheduling(false);
+    setConfirmOpen(false);
+    if (!res.ok) {
+      if (res.status === 404) {
+        clearScheduleOrigin(origin.scheduleId);
+        setScheduleError(
+          "That scheduled post no longer exists — it was canceled or has already posted. Schedule this message as a new post instead.",
+        );
+      } else if (res.status === 403) {
+        setScheduleError(
+          "This account can't edit that scheduled post. Sign in with the account that scheduled it, or schedule this message as a new post.",
+        );
+      } else {
+        setScheduleError(`Couldn't save the changes: ${res.error}`);
+      }
+      return;
+    }
+
+    const saved = res.schedule;
+    // The save always lands, but a post already on its way out never reads it
+    // again — say so instead of reporting a save that changed nothing.
+    if (saved.status === "sending" || saved.status === "done" || saved.status === "failed") {
+      clearScheduleOrigin(saved.id);
+      setScheduleError(
+        saved.status === "sending"
+          ? "It started posting as you saved, so these changes may not be in it — check the channel before scheduling it again."
+          : saved.status === "done"
+            ? "It has already posted, so these changes weren't used. Schedule this message as a new post to send them."
+            : "That post failed to send and won't go out, so these changes weren't used. Schedule this message as a new post instead.",
+      );
+      return;
+    }
+    noteScheduleSaved(saved);
+    const postsAt = formatInstant(saved.next_run_at, saved.tz);
+    setScheduleSuccess(
+      saved.status === "paused"
+        ? `Saved. It's paused, so it won't post at ${postsAt} until it's resumed.`
+        : saved.status === "suspended"
+          ? `Saved. It's on hold while the server is over its plan limit, so it won't post at ${postsAt} until the server is upgraded.`
+          : `Saved — it posts ${postsAt}.`,
+    );
+    setCommitted({ kind: "saved", message, at: scheduleAt, target: `schedule:${saved.id}` });
+    pushToast("Scheduled post updated.", "success");
+  };
+
+  // Leave the loaded scheduled post as it is and treat this message as a new
+  // post from here on: the panel shows the destination picker and "Schedule
+  // post" again, and the original stays scheduled, untouched.
+  const scheduleAsNewPost = () => {
+    clearScheduleOrigin();
+    setScheduleError(null);
+    setScheduleSuccess(null);
   };
 
   // Create the one-time scheduled post, run from the confirm dialog's "Schedule
@@ -1025,6 +1254,7 @@ export function SendPanel({
 
     rememberWebhook(parsedUrl.url);
     setHistory(loadHistory());
+    setCommitted({ kind: "created", message, at: scheduleAt, target: scheduleTarget });
     const keepsPermanent = hasInteractiveComponents && makePermanent && !!knownGuildId;
     setScheduleSuccess(
       scheduleSuccessText(res.next_run_at, keepsPermanent, access.kind === "persisted"),
@@ -1051,6 +1281,7 @@ export function SendPanel({
       scheduleSuccessText(scheduleRecovery.nextRunAt, scheduleRecovery.keepsPermanent, true),
     );
     setScheduleRecovery(null);
+    setCommitted({ kind: "created", message, at: scheduleAt, target: scheduleTarget });
     pushToast("Schedule access saved to this browser.", "success");
   };
 
@@ -1316,6 +1547,7 @@ export function SendPanel({
         // Lives on the message store (like a restore) so it survives closing
         // and reopening the dialog.
         if (postedMessageId) {
+          rememberPostedContent(postedMessageId, outgoing);
           setRestoreOrigin({
             webhookUrl: parsedUrl.url,
             messageId: postedMessageId,
@@ -1685,6 +1917,55 @@ export function SendPanel({
     setState({ kind: "idle" });
   };
 
+  // What the Update tab can say about the message it will overwrite — posted
+  // when, where, what it said (see `updateTarget.ts`) — and whether the editor
+  // was loaded from it, which decides the overwrite warning below.
+  const libraryEntries = useLibraryStore((s) => s.entries);
+  const updateTarget = useMemo(() => {
+    if (mode !== "update" || !parsedMessageId) return null;
+    const row = libraryEntries.find(
+      (e) => e.label === "posted" && e.message_id === parsedMessageId,
+    );
+    return describeUpdateTarget({
+      messageId: parsedMessageId,
+      input: messageIdInput,
+      threadId,
+      origin: restoredFrom,
+      library: row ?? null,
+      webhook: {
+        guildId: knownGuildId,
+        guildName: knownGuildName,
+        channelId: knownChannelId,
+        channelName: knownChannelName,
+      },
+      content: postedContentFor(parsedMessageId) ?? (row ? libraryEntryMessage(row) : null),
+      channelName: (id) => connectedData?.channelById[id]?.name,
+    });
+  }, [
+    mode,
+    parsedMessageId,
+    messageIdInput,
+    threadId,
+    restoredFrom,
+    libraryEntries,
+    knownGuildId,
+    knownGuildName,
+    knownChannelId,
+    knownChannelName,
+    connectedData,
+  ]);
+  const updateTargetMeta = updateTarget
+    ? [
+        updateTarget.where ? `In ${updateTarget.where}` : null,
+        updateTarget.guildName,
+        updateTarget.headline && updateTarget.postedAt != null
+          ? `posted ${formatPostedAt(updateTarget.postedAt)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+
   // The server an update lands in — named from the webhook (its saved
   // destination) or, before that resolves, the restore origin. Surfaced in
   // update mode so it's clear the edit goes to the message's *home* server, not
@@ -1725,7 +2006,7 @@ export function SendPanel({
   // the click handler, which a disabled button never runs.
   const disabledHint = sendDisabledHint({
     mode,
-    hasDestination: parsedUrl != null,
+    hasDestination: parsedUrl != null || scheduleEditMode,
     hasBlockingIssues: blockingIssues.length > 0,
     busy: sending || saving || scheduling,
     primaryIsSignIn: scheduleMode && authStatus !== "authed",
@@ -1742,6 +2023,7 @@ export function SendPanel({
           // create cards and "Paste it instead" — so "pick a channel below"
           // pointed at nothing. Gated on a proxy, or signing in isn't possible.
           signedOut: authStatus === "anon" && proxyOn,
+          editingSchedule: scheduleEditMode,
         })}
       </p>
 
@@ -1787,16 +2069,57 @@ export function SendPanel({
             </label>
           </div>
 
+          {/* Send now while a scheduled post is loaded posts a separate copy —
+              the scheduled one stays exactly as it is, and the choice says so. */}
+          {scheduleOrigin && when === "now" ? (
+            <p className={styles.scheduleNote}>
+              Send now posts a separate copy right away — the post scheduled for{" "}
+              {formatInstant(scheduleOrigin.runAt, scheduleOrigin.tz)} stays scheduled as it is.
+            </p>
+          ) : null}
+
           {when === "later" ? (
             authStatus === "authed" ? (
               <>
-                <Field label="Post date &amp; time (your local time)">
+                {scheduleEditMode && scheduleOrigin ? (
+                  <Callout
+                    tone="info"
+                    role="note"
+                    title={
+                      <>
+                        Editing the post scheduled for{" "}
+                        {formatInstant(scheduleOrigin.runAt, scheduleOrigin.tz)}
+                      </>
+                    }
+                    actions={
+                      <Button size="sm" variant="secondary" onClick={scheduleAsNewPost}>
+                        Schedule as a new post instead
+                      </Button>
+                    }
+                  >
+                    {scheduleOrigin.destLabel ? (
+                      <>
+                        It posts to <strong>{scheduleOrigin.destLabel}</strong>.{" "}
+                      </>
+                    ) : null}
+                    Save changes updates that post with this message and time.
+                  </Callout>
+                ) : null}
+                <Field
+                  label="Post date &amp; time (your local time)"
+                  error={
+                    pickedInPast ? "That time is in the past — pick a future time." : undefined
+                  }
+                >
                   {(id) => (
                     <input
                       id={id}
                       type="datetime-local"
                       className={styles.dtInput}
                       value={scheduleAt}
+                      // The picker offers nothing earlier than now; a typed
+                      // past time is still caught by the error above.
+                      min={localDateTimeValue(Date.now())}
                       onChange={(e) => {
                         setScheduleAt(e.currentTarget.value);
                         setScheduleError(null);
@@ -1894,7 +2217,7 @@ export function SendPanel({
           stand in when there's no picker at all (non-manager / signed out). The
           paste-a-URL fallback still surfaces recents inline for the rare webhook
           the picker can't enumerate (another server / browser). */}
-      {!pickerActive ? (
+      {!pickerActive && !scheduleEditMode ? (
         <WebhookRecents
           history={history}
           activeId={parsedUrl?.id ?? null}
@@ -1915,7 +2238,7 @@ export function SendPanel({
           posting a *new* message: an update is already bound to the webhook that
           posted it, so a connected-guild channel picker here would be irrelevant
           (and, if clicked, would retarget the edit at the wrong server). */}
-      {proxyOn && mode === "new" ? (
+      {proxyOn && mode === "new" && !scheduleEditMode ? (
         <section className={styles.destination} aria-label="Choose a webhook">
           {pickerActive ? (
             <>
@@ -1978,7 +2301,7 @@ export function SendPanel({
           the edit will change and where it lives (naming the server, since it
           may differ from the connected one); new mode shows the post destination
           or a quiet link to paste a URL. */}
-      {canCollapseUrl && !editingUrl ? (
+      {canCollapseUrl && !editingUrl && !scheduleEditMode ? (
         mode === "update" ? (
           parsedUrl ? (
             <p className={styles.urlSet}>
@@ -2064,7 +2387,7 @@ export function SendPanel({
           action: collapse to the summary once the URL is valid (Done), wipe a
           bad/leftover URL (Clear), or back out of an empty field (Cancel). With
           no create flow to fall back on there's nowhere to go, so it's omitted. */}
-      {editingUrl ? (
+      {editingUrl && !scheduleEditMode ? (
         <div className={styles.pasteSection}>
           <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
             <strong>Treat the webhook URL like a password.</strong> It's a credential that lets
@@ -2149,54 +2472,140 @@ export function SendPanel({
         </div>
       ) : null}
 
-      <details
-        className={styles.optional}
-        open={optionalOpen}
-        onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
-      >
-        <summary className={styles.optionalSummary}>
-          Posting inside a thread or forum post?{" "}
-          <span className={styles.optionalHint}>(optional)</span>
-        </summary>
-        <div className={styles.optionalBody}>
-          <Field
-            label="Thread ID"
-            hint="Most people can skip this. Fill it in only if your message should appear inside a specific thread or forum post — in Discord, right-click the thread → Copy Channel ID (Developer Mode required)."
-          >
-            {(id) => (
-              <TextInput
-                id={id}
-                value={threadId}
-                onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
-                placeholder="e.g. 1185234567890123456"
-                inputMode="numeric"
-              />
-            )}
-          </Field>
-        </div>
-      </details>
+      {scheduleEditMode ? null : (
+        <details
+          className={styles.optional}
+          open={optionalOpen}
+          onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
+        >
+          <summary className={styles.optionalSummary}>
+            Posting inside a thread or forum post?{" "}
+            <span className={styles.optionalHint}>(optional)</span>
+          </summary>
+          <div className={styles.optionalBody}>
+            <Field
+              label="Thread ID"
+              hint="Most people can skip this. Fill it in only if your message should appear inside a specific thread or forum post — in Discord, right-click the thread → Copy Channel ID (Developer Mode required)."
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={threadId}
+                  onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
+                  placeholder="e.g. 1185234567890123456"
+                  inputMode="numeric"
+                />
+              )}
+            </Field>
+          </div>
+        </details>
+      )}
 
       {mode === "update" ? (
-        <Field
-          label="Which message should we update?"
-          hint={
-            restoredFrom
-              ? "Already filled in from the message you last sent — change it only if you want to edit a different one."
-              : "Open the message in Discord, right-click it, and choose Copy Message Link — then paste it here. (Must be a message this webhook posted.)"
-          }
-          error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
-        >
-          {(id) => (
-            <TextInput
-              id={id}
-              value={messageIdInput}
-              onChange={(e) => setMessageIdInput(e.currentTarget.value)}
-              invalid={messageIdInvalid}
-              placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
-              spellCheck={false}
-            />
+        <section className={styles.target} aria-label="Message to update">
+          {updateTarget ? (
+            <div className={styles.targetCard}>
+              <span className={styles.targetLabel}>Replaces</span>
+              <span className={styles.targetTitle}>
+                {updateTarget.headline
+                  ? `“${updateTarget.headline}”`
+                  : updateTarget.postedAt != null
+                    ? `Your message from ${formatPostedAt(updateTarget.postedAt)}`
+                    : "Your message"}
+              </span>
+              {updateTargetMeta ? (
+                <span className={styles.targetMeta}>{updateTargetMeta}</span>
+              ) : null}
+              {updateTarget.discordUrl ? (
+                <a
+                  className={styles.targetLink}
+                  href={updateTarget.discordUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => handleDiscordLinkClick(e, updateTarget.discordUrl ?? "")}
+                >
+                  View in Discord ↗
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+          {targetFoldedAtOpen ? (
+            <details
+              className={styles.optional}
+              open={targetFieldOpen || messageIdInvalid}
+              onToggle={(e) => setTargetFieldOpen(e.currentTarget.open)}
+            >
+              <summary className={styles.optionalSummary}>Update a different message</summary>
+              <div className={styles.optionalBody}>
+                <Field
+                  label="Message ID or link"
+                  hint="In Discord, right-click the message → Copy Message Link, then paste it here. It must be one this webhook posted."
+                  error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
+                >
+                  {(id) => (
+                    <TextInput
+                      id={id}
+                      value={messageIdInput}
+                      onChange={(e) => setMessageIdInput(e.currentTarget.value)}
+                      invalid={messageIdInvalid}
+                      placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
+                      spellCheck={false}
+                    />
+                  )}
+                </Field>
+              </div>
+            </details>
+          ) : (
+            <Field
+              label="Which message should we update?"
+              hint="Open the message in Discord, right-click it, and choose Copy Message Link — then paste it here. (Must be a message this webhook posted.)"
+              error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={messageIdInput}
+                  onChange={(e) => setMessageIdInput(e.currentTarget.value)}
+                  invalid={messageIdInvalid}
+                  placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
+                  spellCheck={false}
+                />
+              )}
+            </Field>
           )}
-        </Field>
+        </section>
+      ) : null}
+
+      {/* The overwrite warning the file header promises: a PATCH replaces the
+          whole posted message, and nothing ties this editor to that one — it
+          wasn't restored from it or last posted as it — so whatever the posted
+          message has that the editor doesn't is about to be lost. */}
+      {mode === "update" && updateTarget && !updateTarget.fromEditorOrigin ? (
+        <Callout
+          tone="warning"
+          role="note"
+          title="Update replaces the whole posted message with what’s in the editor."
+          actions={
+            onRestoreFirst ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  onRestoreFirst({
+                    messageInput: messageIdInput,
+                    webhookUrl: parsedUrl?.url,
+                    threadId: threadId.trim() || undefined,
+                  })
+                }
+              >
+                Restore it first
+              </Button>
+            ) : null
+          }
+        >
+          This editor wasn’t loaded from that message, so anything it has that the editor doesn’t is
+          lost. Restore it to start from what’s posted.
+        </Callout>
       ) : null}
 
       {knownGone ? (
@@ -2212,26 +2621,28 @@ export function SendPanel({
           }
           moreLabel="What happened"
           actions={
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => {
-                if (!parsedUrl) return;
-                if (!forgetWebhook(parsedUrl.id)) {
-                  pushToast(
-                    "Couldn't remove the webhook — check browser storage and try again.",
-                    "error",
-                  );
-                  return;
-                }
-                setHistory(loadHistory());
-                setTypedUrl("");
-                setState({ kind: "idle" });
-                pushToast("Webhook removed from this browser.", "info");
-              }}
-            >
-              Remove from recents
-            </Button>
+            scheduleEditMode ? undefined : (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  if (!parsedUrl) return;
+                  if (!forgetWebhook(parsedUrl.id)) {
+                    pushToast(
+                      "Couldn't remove the webhook — check browser storage and try again.",
+                      "error",
+                    );
+                    return;
+                  }
+                  setHistory(loadHistory());
+                  setTypedUrl("");
+                  setState({ kind: "idle" });
+                  pushToast("Webhook removed from this browser.", "info");
+                }}
+              >
+                Remove from recents
+              </Button>
+            )
           }
         />
       ) : null}
@@ -2365,7 +2776,31 @@ export function SendPanel({
         <Callout tone="danger" role="alert" title="Fix before sending:">
           <ul className={styles.issueList}>
             {blockingIssues.slice(0, 5).map((issue, i) => (
-              <li key={i}>{issue.message}</li>
+              <li key={i}>
+                {/* An issue with a home in the editor is a way there: close the
+                    dialog and land on it exactly as the header's issue chip
+                    does. One with nowhere to go (an empty message) stays text.
+                    The "Show" cue is decoration — the row's name is the issue,
+                    plus where the button takes you, read once. */}
+                {onCloseDialog && issueDestination(issue) ? (
+                  <button
+                    type="button"
+                    className={styles.issueJump}
+                    onClick={() => {
+                      onCloseDialog();
+                      jumpToIssue(issue);
+                    }}
+                  >
+                    {issue.message}
+                    <span className="sr-only"> — show it in the editor</span>
+                    <span className={styles.issueJumpCue} aria-hidden="true">
+                      Show
+                    </span>
+                  </button>
+                ) : (
+                  issue.message
+                )}
+              </li>
             ))}
             {blockingIssues.length > 5 ? <li>…and {blockingIssues.length - 5} more</li> : null}
           </ul>
@@ -2441,6 +2876,27 @@ export function SendPanel({
               <Button variant="primary" onClick={() => login()}>
                 Sign in to schedule
               </Button>
+            ) : scheduleEditMode ? (
+              // A save with nothing changed since the last one would rewrite
+              // the post with itself — "Saved" until an edit makes it real.
+              <Button
+                variant="primary"
+                onClick={handleScheduleSaveClick}
+                disabled={
+                  scheduling ||
+                  savedUnchanged ||
+                  knownGone ||
+                  blockingIssues.length > 0 ||
+                  ownershipBlocked ||
+                  mustSignInToRouteCheck ||
+                  componentRouting === "foreign" ||
+                  pluginGuildMismatch != null ||
+                  hasUploads ||
+                  pickedInPast
+                }
+              >
+                {scheduling ? "Saving…" : savedUnchanged ? "Saved" : "Save changes"}
+              </Button>
             ) : (
               <Button
                 variant="primary"
@@ -2456,10 +2912,11 @@ export function SendPanel({
                   mustSignInToRouteCheck ||
                   componentRouting === "foreign" ||
                   pluginGuildMismatch != null ||
-                  hasUploads
+                  hasUploads ||
+                  pickedInPast
                 }
               >
-                {scheduling ? "Scheduling…" : "Schedule post"}
+                {scheduling ? "Scheduling…" : scheduleAgain ? "Schedule another" : "Schedule post"}
               </Button>
             )
           ) : (
@@ -2496,20 +2953,27 @@ export function SendPanel({
         mode={mode}
         webhookName={knownName}
         ownerKind={knownOwnerKind}
-        webhookId={parsedUrl?.id}
+        webhookId={scheduleEditMode ? scheduleOrigin?.webhookId : parsedUrl?.id}
         webhookAvatar={knownAvatar}
         guildId={knownGuildId}
         channelId={knownChannelId}
         guildName={knownGuildName}
         channelName={knownChannelName}
-        threadId={threadId.trim() || undefined}
+        threadId={scheduleEditMode ? undefined : threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
+        messageLabel={updateTarget?.headline ?? undefined}
+        messageUrl={updateTarget?.discordUrl ?? undefined}
         schedule={
           scheduleMode
             ? {
                 at: Number.isNaN(Date.parse(scheduleAt))
                   ? scheduleAt
                   : formatInstant(Math.floor(Date.parse(scheduleAt) / 1000), browserTimezone()),
+                editing: scheduleEditMode,
+                again: !scheduleEditMode && scheduleAgain,
+                destination: scheduleEditMode
+                  ? (scheduleOrigin?.destLabel ?? undefined)
+                  : undefined,
               }
             : undefined
         }
@@ -2526,10 +2990,16 @@ export function SendPanel({
             : undefined
         }
         previewMismatch={previewMismatch}
-        expiryNudge={expiryNudge}
-        permanentOption={permanentOption}
+        expiryNudge={scheduleEditMode ? undefined : expiryNudge}
+        permanentOption={scheduleEditMode ? undefined : permanentOption}
         busy={scheduleMode ? scheduling : confirmBusy}
-        onConfirm={scheduleMode ? handleScheduleConfirmed : handleConfirmedSend}
+        onConfirm={
+          scheduleEditMode
+            ? handleScheduleSaveConfirmed
+            : scheduleMode
+              ? handleScheduleConfirmed
+              : handleConfirmedSend
+        }
         onCancel={handleConfirmCancel}
       />
 

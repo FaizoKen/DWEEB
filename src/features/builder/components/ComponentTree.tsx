@@ -3,7 +3,8 @@
  *
  * Each row carries its node's id in a `data-node-id` attribute and uses the
  * store's `select` action on click. Reordering happens through the store
- * (`moveSibling` for the inline up/down buttons, `moveToParent` /
+ * (`moveSibling` for the inline up/down buttons — labelled from the same
+ * `planSiblingMove` it carries out — and `moveToParent` /
  * `moveGalleryItemToGallery` for drag-and-drop) so the preview stays in
  * lockstep with the tree without intermediate state. Drag-and-drop supports
  * same-parent reorders plus cross-parent moves between any two lists of the
@@ -33,7 +34,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { useMessageStore } from "@/core/state/messageStore";
+import { planSiblingMove, useMessageStore } from "@/core/state/messageStore";
 import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
 import { Avatar } from "@/activity/Avatar";
 import {
@@ -80,6 +81,7 @@ import {
   ChevronRightIcon,
   CloseIcon,
   CopyIcon,
+  GripIcon,
   PlusIcon,
   TrashIcon,
 } from "@/ui/Icon";
@@ -98,6 +100,12 @@ import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
 import { HeaderIssueChip } from "./HeaderIssueChip";
 import { IssueDot, IssueList } from "./ValidationIssues";
+import {
+  moveArrowKey,
+  moveArrowLabel,
+  swallowsClickAfterDrag,
+  type MoveArrowKey,
+} from "./treeRowActions";
 import styles from "./ComponentTree.module.css";
 import type { ContainerChildFactoryKey } from "@/core/factory/createComponent";
 
@@ -436,7 +444,14 @@ export function ComponentTree({ emptyHint }: { emptyHint?: ReactNode } = {}) {
                   fullWidth
                   disabled={atLimit}
                 >
-                  {atLimit ? "Top-level limit reached" : open ? "Close" : "Add component"}
+                  {/* Names the number: the meta header's "n / 40 components"
+                      pill counts nested components too, so a bare "limit
+                      reached" read as contradicting it. */}
+                  {atLimit
+                    ? `Top-level limit of ${LIMITS.TOP_LEVEL_COMPONENTS} reached`
+                    : open
+                      ? "Close"
+                      : "Add component"}
                 </Button>
               )}
             />
@@ -513,6 +528,7 @@ function MetaHeader() {
           label="Username"
           error={fieldIssues.get("username")?.error}
           warning={fieldIssues.get("username")?.warning}
+          counter={{ value: username, max: LIMITS.WEBHOOK_USERNAME }}
         >
           {(id) => (
             <PlaceholderInput
@@ -641,6 +657,8 @@ function usePointerDragRow({
      * looks to the user like the drag "auto-released".
      */
     touchMoveBlocker: ((ev: TouchEvent) => void) | null;
+    /** Whether this gesture ever showed a drop indicator (see `swallowsClickAfterDrag`). */
+    showedDropTarget: boolean;
   }
   const stateRef = useRef<PointerState | null>(null);
   const lastDropRef = useRef<{ id: EditorId; position: DropPosition } | null>(null);
@@ -741,6 +759,10 @@ function usePointerDragRow({
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
+      // A new gesture: any "just dragged" flag is from the last one, whose
+      // click (if the browser fired one at all) has already come and gone —
+      // left set, it would eat this gesture's genuine click.
+      justDraggedRef.current = false;
       if (!isReorderable) return;
       // Don't consume presses that land on action buttons or interactive
       // children inside the row — they need to keep firing click.
@@ -760,6 +782,7 @@ function usePointerDragRow({
         isDragging: false,
         longPressTimer: null,
         touchMoveBlocker: null,
+        showedDropTarget: false,
       };
 
       if (e.pointerType === "touch" || e.pointerType === "pen") {
@@ -833,6 +856,7 @@ function usePointerDragRow({
         position = allowedPositions[0]!;
       }
 
+      if (stateRef.current) stateRef.current.showedDropTarget = true;
       const prev = lastDropRef.current;
       if (prev?.id !== targetData.id || prev?.position !== position) {
         lastDropRef.current = { id: targetData.id, position };
@@ -904,7 +928,12 @@ function usePointerDragRow({
       releasePointerState(state);
       if (state.isDragging) {
         endDrag(true);
-        justDraggedRef.current = true;
+        justDraggedRef.current = swallowsClickAfterDrag({
+          pointerType: e.pointerType,
+          dx: e.clientX - state.startX,
+          dy: e.clientY - state.startY,
+          showedDropTarget: state.showedDropTarget,
+        });
       }
       stateRef.current = null;
       try {
@@ -1008,6 +1037,80 @@ function subtreeSize(node: AnyComponent): number {
   return n;
 }
 
+/**
+ * Keep keyboard focus on a move arrow through the move it just made. A reorder
+ * can relocate the row's DOM node (Preact moves one of the two swapped rows),
+ * and a step into or out of a Container remounts the row — either way the
+ * pressed button leaves the document and focus falls back to <body>, so the
+ * next Enter would go nowhere. Runs a frame later, once the tree has
+ * re-rendered, and only reclaims focus that was dropped — never focus the user
+ * has since put somewhere else.
+ */
+function keepMoveArrowFocus(rowId: EditorId, dir: "up" | "down"): void {
+  requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    document
+      .querySelector<HTMLElement>(
+        `[data-tree-row="true"][data-row-id="${CSS.escape(rowId)}"] [data-move="${dir}"]`,
+      )
+      ?.focus();
+  });
+}
+
+/**
+ * A row's up or down arrow. It stays mounted when its direction has nowhere to
+ * go — `aria-disabled` rather than `disabled`, which would drop focus (and
+ * unmounting it shifted the cluster under the pointer and lost focus too) —
+ * so a keyboard user can press it repeatedly until the item reaches the edge.
+ * Its label says what the press will actually do; see `moveArrowLabel`.
+ */
+function MoveArrow({
+  rowId,
+  direction,
+  arrowKey,
+  onMove,
+}: {
+  rowId: EditorId;
+  direction: -1 | 1;
+  arrowKey: MoveArrowKey;
+  onMove: () => void;
+}) {
+  const dir = direction === -1 ? "up" : "down";
+  const enabled = arrowKey !== "none" && arrowKey !== "top-level-full";
+  return (
+    <IconButton
+      size="sm"
+      label={moveArrowLabel(arrowKey, direction)}
+      data-move={dir}
+      aria-disabled={enabled ? undefined : true}
+      onClick={(e) => {
+        if (!enabled) return;
+        const hadFocus = document.activeElement === e.currentTarget;
+        onMove();
+        if (hadFocus) keepMoveArrowFocus(rowId, dir);
+      }}
+    >
+      {direction === -1 ? <ArrowUpIcon size={12} /> : <ArrowDownIcon size={12} />}
+    </IconButton>
+  );
+}
+
+/**
+ * The six-dot drag handle in a draggable row's left padding: for a mouse, the
+ * visible sign that the whole row can be dragged (the grab cursor was the only
+ * one). Decorative for assistive tech — the arrows are the keyboard path — and
+ * shown by CSS on hover for fine pointers only. It is pointer-transparent, so
+ * pressing there presses the row, which starts the row's own drag.
+ */
+function DragGrip() {
+  return (
+    <span className={styles.grip} aria-hidden="true">
+      <GripIcon size={14} />
+    </span>
+  );
+}
+
 function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }: TreeNodeProps) {
   // Subscribe to just this row's selected state so changing the selection only
   // re-renders the two rows whose highlight flips, not every row in the tree.
@@ -1057,13 +1160,16 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
 
   const isReorderable = parentSiblingIds !== null && parentKind !== null;
 
-  // A node is "stuck" at an edge only when there's truly nowhere for it to go.
-  // Container children at the edge of their sibling list can still pop out to
-  // the grandparent (see `moveSibling`), so they keep both arrows.
-  const lastSiblingIndex = parentSiblingIds ? parentSiblingIds.length - 1 : -1;
-  const canMoveUp = isReorderable && (siblingIndex > 0 || parentKind === "container");
-  const canMoveDown =
-    isReorderable && (siblingIndex < lastSiblingIndex || parentKind === "container");
+  // What each arrow would really do right now — reorder, step into the
+  // adjacent Container, step out of this one, or nothing — read from the same
+  // `planSiblingMove` the store carries out, as a string so an unrelated edit
+  // doesn't re-render the row. Rows that aren't list entries have no arrows.
+  const upKey = useMessageStore((s) =>
+    isReorderable ? moveArrowKey(planSiblingMove(s.message, node._id, -1)) : "none",
+  );
+  const downKey = useMessageStore((s) =>
+    isReorderable ? moveArrowKey(planSiblingMove(s.message, node._id, 1)) : "none",
+  );
 
   const dragInfo = useMemo<DragInfo>(
     () => ({ id: node._id, type: node.type, parentKind: parentKind ?? "top", parentId }),
@@ -1199,6 +1305,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         {...fileDropHandlers}
         onClick={onRowClick}
       >
+        {isReorderable ? <DragGrip /> : null}
         <button
           type="button"
           className={styles.rowSelect}
@@ -1226,21 +1333,23 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         <PresenceCluster editors={editors} />
 
         <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
-          {canMoveUp ? (
-            <IconButton size="sm" label="Move up" onClick={() => moveSibling(node._id, -1)}>
-              <ArrowUpIcon size={12} />
-            </IconButton>
-          ) : null}
-          {canMoveDown ? (
-            <IconButton size="sm" label="Move down" onClick={() => moveSibling(node._id, 1)}>
-              <ArrowDownIcon size={12} />
-            </IconButton>
-          ) : null}
           {/* A Section's accessory isn't a list entry: `duplicate`/`remove` only
-              walk child lists, so on that row both buttons were silent no-ops.
-              Its inspector swaps the accessory kind instead. */}
+              walk child lists, so on that row they were silent no-ops, and it
+              can't move either. Its inspector swaps the accessory kind instead. */}
           {isReorderable ? (
             <>
+              <MoveArrow
+                rowId={node._id}
+                direction={-1}
+                arrowKey={upKey}
+                onMove={() => moveSibling(node._id, -1)}
+              />
+              <MoveArrow
+                rowId={node._id}
+                direction={1}
+                arrowKey={downKey}
+                onMove={() => moveSibling(node._id, 1)}
+              />
               <IconButton size="sm" label="Duplicate" onClick={() => duplicate(node._id)}>
                 <CopyIcon size={12} />
               </IconButton>
@@ -1426,6 +1535,7 @@ function GalleryItemNode({
         {...fileDropHandlers}
         onClick={onRowClick}
       >
+        <DragGrip />
         <button
           type="button"
           className={styles.rowSelect}
@@ -1453,24 +1563,21 @@ function GalleryItemNode({
         <PresenceCluster editors={editors} />
 
         <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
-          {canMoveUp ? (
-            <IconButton
-              size="sm"
-              label="Move up"
-              onClick={() => moveGalleryItem(galleryId, item._id, -1)}
-            >
-              <ArrowUpIcon size={12} />
-            </IconButton>
-          ) : null}
-          {canMoveDown ? (
-            <IconButton
-              size="sm"
-              label="Move down"
-              onClick={() => moveGalleryItem(galleryId, item._id, 1)}
-            >
-              <ArrowDownIcon size={12} />
-            </IconButton>
-          ) : null}
+          {/* Images only ever reorder within their gallery, so an arrow is a
+              plain move or nothing — kept mounted either way, like a
+              component row's (see MoveArrow). */}
+          <MoveArrow
+            rowId={item._id}
+            direction={-1}
+            arrowKey={canMoveUp ? "reorder" : "none"}
+            onMove={() => moveGalleryItem(galleryId, item._id, -1)}
+          />
+          <MoveArrow
+            rowId={item._id}
+            direction={1}
+            arrowKey={canMoveDown ? "reorder" : "none"}
+            onMove={() => moveGalleryItem(galleryId, item._id, 1)}
+          />
           <IconButton
             size="sm"
             label="Duplicate"

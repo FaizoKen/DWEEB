@@ -26,6 +26,21 @@
   height: 36px;
 }
 
+/* Touch: floors a fingertip can hit (fine pointers keep the compact sizes).
+   Same specificity as the sizes above, so a caller that deliberately sizes a
+   button through its own class — a dense row trimmed for phones — still wins. */
+@media (pointer: coarse) {
+  .sm {
+    width: 36px;
+    height: 36px;
+  }
+
+  .md {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 .ghost:hover:not(:disabled) {
   background: var(--app-bg-hover);
   color: var(--app-text);

@@ -259,6 +259,12 @@ export interface MessageState {
   patchGalleryItem(galleryId: EditorId, itemId: EditorId, patch: Partial<MediaGalleryItem>): void;
   setSectionAccessoryKind(sectionId: EditorId, kind: "button" | "thumbnail"): void;
 
+  /**
+   * One press of a tree row's up/down arrow: carries out
+   * {@link planSiblingMove}, which can reorder, step into an adjacent
+   * Container, or step out of one. No-ops (no undo step) when the plan is
+   * `none`.
+   */
   moveSibling(id: EditorId, direction: -1 | 1): void;
   /**
    * Drag-and-drop move. Relocates `id` into `targetParentId`'s children at
@@ -455,6 +461,115 @@ function canAcceptChild(
     return parent.components.length < LIMITS.ACTION_ROW_BUTTONS;
   }
   return false;
+}
+
+/** A parent's reorderable child list (null === the top level). */
+function childList(message: WebhookMessage, parent: AnyComponent | null): AnyComponent[] {
+  if (parent === null) return message.components;
+  return (parent as { components?: AnyComponent[] }).components ?? [];
+}
+
+/**
+ * What one press of a tree row's up/down arrow would do, decided without
+ * doing it — see {@link planSiblingMove}.
+ *
+ *  - `reorder`: swap with the neighbour in the same list.
+ *  - `enter`:   step into the adjacent Container (landing last from below,
+ *               first from above).
+ *  - `exit`:    step out of the Container it sits in, landing just above or
+ *               below that Container.
+ *  - `none`:    nowhere to go. `blocked: "top-level-full"` marks the one case
+ *               the tree can't show on its own: a Container's edge child whose
+ *               way out is shut because the top level is at its limit.
+ *
+ * `targetParentId` / `targetIndex` are exactly what `moveToParent` takes
+ * (null === the top level; a reorder's index is pre-removal).
+ */
+export type SiblingMovePlan =
+  | { kind: "none"; blocked?: "top-level-full" }
+  | {
+      kind: "reorder" | "enter" | "exit";
+      targetParentId: EditorId | null;
+      targetIndex: number;
+    };
+
+const NO_MOVE: SiblingMovePlan = { kind: "none" };
+
+/**
+ * Decide what `moveSibling(id, direction)` would do to `message`. The single
+ * source of that decision: the store applies it, and the tree's arrow buttons
+ * read it to say what they will actually do ("Move into the Container above"
+ * rather than a bare "Move up") and to disable a direction that can't move —
+ * so the label and the behaviour cannot drift apart.
+ *
+ * The arrows navigate the same boundaries a drag can: between the top level
+ * and Containers a move can step into an adjacent Container that has room, or
+ * out of the Container at either edge. Section texts and Buttons Row children
+ * only reorder inside their parent, since those slots take specialised types.
+ * Every crossing is checked against `canAcceptChild`, the gate `moveToParent`
+ * applies, so a plan never promises a move the store would then refuse.
+ */
+export function planSiblingMove(
+  message: WebhookMessage,
+  id: EditorId,
+  direction: -1 | 1,
+): SiblingMovePlan {
+  const loc = findById(message, id);
+  if (!loc) return NO_MOVE;
+  const { node, parent } = loc;
+  const siblings = childList(message, parent);
+  // -1 for a Section's accessory: it fills a slot rather than a list entry.
+  const idx = siblings.findIndex((c) => c._id === id);
+  if (idx === -1) return NO_MOVE;
+  const newIdx = idx + direction;
+  const inBounds = newIdx >= 0 && newIdx < siblings.length;
+
+  if (parent === null || isContainer(parent)) {
+    if (inBounds) {
+      // An adjacent Container with room is entered rather than swapped past.
+      // (A full one, or a Container moving past a Container, falls through to
+      // the plain swap below.)
+      const neighbor = siblings[newIdx]!;
+      if (
+        isContainer(neighbor) &&
+        node.type !== ComponentType.Container &&
+        neighbor.components.length < LIMITS.CONTAINER_CHILDREN
+      ) {
+        if (!canAcceptChild(neighbor, node, message)) return NO_MOVE;
+        return {
+          kind: "enter",
+          targetParentId: neighbor._id,
+          targetIndex: direction === -1 ? neighbor.components.length : 0,
+        };
+      }
+    } else {
+      // Past either edge of a Container: step out into the grandparent's list,
+      // right beside the Container. Nothing is higher than the top level.
+      if (parent === null) return NO_MOVE;
+      const parentLoc = findById(message, parent._id);
+      if (!parentLoc) return NO_MOVE;
+      const grand = parentLoc.parent;
+      const pIdx = childList(message, grand).findIndex((c) => c._id === parent._id);
+      if (pIdx === -1) return NO_MOVE;
+      if (!canAcceptChild(grand, node, message)) {
+        return grand === null && message.components.length >= LIMITS.TOP_LEVEL_COMPONENTS
+          ? { kind: "none", blocked: "top-level-full" }
+          : NO_MOVE;
+      }
+      return {
+        kind: "exit",
+        targetParentId: grand === null ? null : grand._id,
+        targetIndex: direction === -1 ? pIdx : pIdx + 1,
+      };
+    }
+  }
+
+  if (!inBounds) return NO_MOVE;
+  return {
+    kind: "reorder",
+    targetParentId: parent === null ? null : parent._id,
+    targetIndex: direction === 1 ? newIdx + 1 : newIdx,
+  };
 }
 
 /** Field-edit bursts that share a tag within this window collapse into one
@@ -1023,68 +1138,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   moveSibling(id, direction) {
-    // Mirrors drag-and-drop semantics so the arrow buttons can navigate the
-    // same boundaries the pointer can: between top-level and Containers, the
-    // move can step into an adjacent Container or escape to the grandparent's
-    // sibling list. Section/ActionRow children stay scoped to their parent
-    // because those slots carry specialized types.
-    const state = get();
-    const loc = findById(state.message, id);
-    if (!loc) return;
-    const parent = loc.parent;
-    const node = loc.node;
-
-    const siblings: AnyComponent[] =
-      parent === null
-        ? state.message.components
-        : ((parent as unknown as { components?: AnyComponent[] }).components ?? []);
-    const idx = siblings.findIndex((c) => c._id === id);
-    if (idx === -1) return;
-
-    const canCrossParent = parent === null || isContainer(parent);
-    const newIdx = idx + direction;
-    const parentId = parent === null ? null : parent._id;
-
-    if (canCrossParent) {
-      // Adjacent sibling is a Container we can enter — dive in instead of
-      // swapping past it.
-      if (newIdx >= 0 && newIdx < siblings.length) {
-        const neighbor = siblings[newIdx]!;
-        if (
-          isContainer(neighbor) &&
-          node.type !== ComponentType.Container &&
-          neighbor.components.length < LIMITS.CONTAINER_CHILDREN
-        ) {
-          const insertAt = direction === -1 ? neighbor.components.length : 0;
-          get().moveToParent(id, neighbor._id, insertAt);
-          return;
-        }
-      }
-
-      // Out of bounds → pop out to the grandparent's sibling list.
-      if (newIdx < 0 || newIdx >= siblings.length) {
-        if (parent === null) return; // already at the top, nowhere higher
-        const parentLoc = findById(state.message, parent._id);
-        if (!parentLoc) return;
-        const grand = parentLoc.parent;
-        const grandSiblings: AnyComponent[] =
-          grand === null
-            ? state.message.components
-            : ((grand as unknown as { components?: AnyComponent[] }).components ?? []);
-        const pIdx = grandSiblings.findIndex((c) => c._id === parent._id);
-        if (pIdx === -1) return;
-        const insertAt = direction === -1 ? pIdx : pIdx + 1;
-        get().moveToParent(id, grand === null ? null : grand._id, insertAt);
-        return;
-      }
-    }
-
-    // Same-parent swap. Covers reorderable top-level/Container moves that
-    // don't cross a boundary as well as Section text and ActionRow button
-    // reorders, which moveToParent handles via its same-parent branch.
-    if (newIdx < 0 || newIdx >= siblings.length) return;
-    const targetIndex = direction === 1 ? newIdx + 1 : newIdx;
-    get().moveToParent(id, parentId, targetIndex);
+    // The decision lives in `planSiblingMove`, which the tree's arrow buttons
+    // also read for their labels — this only carries it out.
+    const plan = planSiblingMove(get().message, id, direction);
+    if (plan.kind === "none") return;
+    get().moveToParent(id, plan.targetParentId, plan.targetIndex);
   },
 
   moveToParent(id, targetParentId, targetIndex) {

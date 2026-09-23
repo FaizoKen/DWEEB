@@ -1,24 +1,9 @@
-/* Cinematic backdrop — darker than the standard modal scrim so the film reads
-   like a theatre, and above the Template Gallery's overlay (`--app-z-tooltip`)
-   since on a first visit the film opens right on top of it.
-
-   No backdrop blur here: re-blurring the whole app on every composited frame
-   is exactly what makes video playback feel heavy on phones, and even on
-   desktop it buys little over a slightly deeper plain scrim. */
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--app-z-tooltip) + 20);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* --app-sa* (tokens.css) keep the film clear of the Discord mobile client's
-     native top bar / home indicator inside the Activity; 0 everywhere else. */
-  padding: calc(20px + var(--app-sait)) calc(20px + var(--app-sair)) calc(20px + var(--app-saib))
-    calc(20px + var(--app-sail));
-  background: rgba(3, 4, 8, 0.88);
-  animation: welcomeFade 200ms ease-out both;
-}
+/* The backdrop is `ui/Modal`'s (safe-area padding included), deepened and
+   lifted above the Template Gallery's overlay through `backdropStyle` in
+   WelcomeVideo.tsx so the film reads like a theatre. No backdrop blur:
+   re-blurring the whole app on every composited frame is exactly what makes
+   video playback feel heavy on phones, and even on desktop it buys little over
+   a slightly deeper plain scrim. */
 
 .panel {
   display: flex;
@@ -37,7 +22,7 @@
 
 /* The vertical cut is a phone-shaped stage — cap the panel's width so the
    9:16 video (bounded by the viewport height) isn't flanked by dead space. */
-.panel[data-orientation="portrait"] {
+.portrait {
   max-width: min(440px, 94vw);
 }
 
@@ -69,7 +54,7 @@
   aspect-ratio: 16 / 9;
   object-fit: contain;
 }
-.panel[data-orientation="portrait"] .video {
+.portrait .video {
   aspect-ratio: 9 / 16;
 }
 
@@ -116,6 +101,13 @@
   background: rgba(24, 28, 40, 0.95);
 }
 
+@media (pointer: coarse) {
+  .closeFloat {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -145,17 +137,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .backdrop,
   .panel,
   .soundPill {
     animation: none;
-  }
-}
-
-/* Phones: let the panel own nearly the whole screen — still clear of the
-   Discord mobile client's top bar / home indicator inside the Activity. */
-@media (max-width: 520px) {
-  .backdrop {
-    padding: calc(10px + var(--app-sait)) 10px calc(10px + var(--app-saib));
   }
 }

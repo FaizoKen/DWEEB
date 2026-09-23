@@ -40,10 +40,22 @@
   cursor: pointer;
   width: 100%;
 }
-.item:hover:not(:disabled),
-.item:focus-visible {
+/* Hover stays a quiet fill; keyboard focus adds the ring, so the item arrow
+   keys or typeahead landed on reads apart from wherever the pointer rests. */
+.item:hover:not(:disabled) {
   background: var(--app-bg-hover);
+}
+.item:focus-visible {
   outline: none;
+  background: var(--app-bg-hover);
+  box-shadow: var(--app-focus-ring);
+}
+
+/* Touch: rows a fingertip can hit without catching the neighbour. */
+@media (pointer: coarse) {
+  .item {
+    min-height: 44px;
+  }
 }
 .item:disabled {
   opacity: 0.5;

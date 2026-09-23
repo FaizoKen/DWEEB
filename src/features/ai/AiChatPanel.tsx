@@ -10,11 +10,13 @@
  * configured yet) and the chat transcript + composer.
  */
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
-import { undoAiEdit, useAiEditIsCurrent, useAiStore } from "@/core/ai/aiStore";
+import { pushToast } from "@/ui/Toast";
+import { undoAiEdit, undoClearChat, useAiEditIsCurrent, useAiStore } from "@/core/ai/aiStore";
 import { PROVIDERS } from "@/core/ai/providerMeta";
 import { useAiUsageStore } from "@/core/ai/usageStore";
 import type { ChatMessage } from "@/core/ai/types";
@@ -32,7 +34,7 @@ const SUGGESTIONS = [
 ];
 
 export function AiChatPanel() {
-  const titleId = useId();
+  const titleId = useUniqueId("ai-title");
   const open = useAiStore((s) => s.open);
   const closePanel = useAiStore((s) => s.closePanel);
   const messages = useAiStore((s) => s.messages);
@@ -139,6 +141,26 @@ export function AiChatPanel() {
       ?.focus({ preventScroll: true });
   }, [open, view]);
 
+  // "Clear chat" is one tap on a small icon between Settings and Close, so it
+  // acknowledges itself with an Undo — as the editor's destructive actions do
+  // (builder/undoToast) — rather than asking first. The Undo declines once a
+  // new turn has been sent, instead of splicing the old one back in.
+  const clearChatWithUndo = () => {
+    clearChat();
+    // The Clear button leaves with the transcript; keep focus in the panel.
+    inputRef.current?.focus({ preventScroll: true });
+    pushToast("Chat cleared", "info", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (!undoClearChat()) {
+            pushToast("Can't undo that any more — the chat has changed since.", "info");
+          }
+        },
+      },
+    });
+  };
+
   const submit = (value: string) => {
     const text = value.trim();
     if (!text || thinking) return;
@@ -170,7 +192,7 @@ export function AiChatPanel() {
         </div>
         <div className={styles.headerActions}>
           {view === "chat" && messages.length > 0 ? (
-            <IconButton label="Clear chat" size="sm" onClick={clearChat}>
+            <IconButton label="Clear chat" size="sm" onClick={clearChatWithUndo}>
               <TrashIcon size={16} />
             </IconButton>
           ) : null}

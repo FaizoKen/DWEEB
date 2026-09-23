@@ -1,4 +1,5 @@
-import { forwardRef, useId, type InputHTMLAttributes } from "react";
+import { forwardRef, type InputHTMLAttributes } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { cn } from "@/lib/cn";
 import styles from "./Switch.module.css";
 
@@ -13,7 +14,7 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(function Switch(
   // The visible label is associated by wrapping, but the checkbox still wants its
   // own id/name so accessibility tooling and browser heuristics can address it.
   // Generate a stable id when the caller doesn't supply one.
-  const generatedId = useId();
+  const generatedId = useUniqueId("switch");
   return (
     <label className={cn(styles.wrapper, className)}>
       <input ref={ref} id={id ?? generatedId} type="checkbox" className={styles.input} {...rest} />

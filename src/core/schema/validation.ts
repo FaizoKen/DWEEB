@@ -107,7 +107,7 @@ export function validateDestination(
       {
         severity: "error",
         code: "THREAD_NAME_REQUIRED",
-        message: `Posting to ${dest} starts a new ${kind} post, which needs a title (Message options → Forum post).`,
+        message: `Posting to ${dest} starts a new ${kind} post, which needs a thread name (Message options → Forum post).`,
       },
     ];
   }
@@ -117,7 +117,7 @@ export function validateDestination(
     {
       severity: "error",
       code: "THREAD_NAME_FORBIDDEN",
-      message: `Discord rejects a post to ${dest} while a forum post title is set — clear it (Message options → Forum post), or pick a forum/media channel.`,
+      message: `Discord rejects a post to ${dest} while a thread name is set — clear it (Message options → Forum post), or pick a forum or media channel.`,
     },
   ];
 }
@@ -163,7 +163,7 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
     issues.push({
       severity: "error",
       code: "USERNAME_TOO_LONG",
-      message: `Webhook username must be ≤${LIMITS.WEBHOOK_USERNAME} characters.`,
+      message: `Username can be at most ${LIMITS.WEBHOOK_USERNAME} characters.`,
     });
   }
 
@@ -171,7 +171,7 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
     issues.push({
       severity: "error",
       code: "USERNAME_RESERVED",
-      message: "Webhook username can’t contain “clyde” or “discord” — Discord rejects those names.",
+      message: "Username can’t contain “clyde” or “discord” — Discord rejects those names.",
     });
   }
 
@@ -226,7 +226,7 @@ function validateUniqueIds(message: WebhookMessage, issues: ValidationIssue[]): 
         nodeId,
         severity: "error",
         code: "CUSTOM_ID_DUPLICATE",
-        message: `custom_id "${customId}" is used by ${nodeIds.length} components — each custom_id must be unique within a message.`,
+        message: `Custom ID “${customId}” is used by ${nodeIds.length} components — give each one its own.`,
       });
     }
   }
@@ -240,7 +240,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
         severity: "error",
         code: "ALLOWED_MENTIONS_CONFLICT_ROLES",
         message:
-          "allowed_mentions: don't combine parse: ['roles'] with an explicit roles list — pick one.",
+          "Use either the @role chip (any role can be pinged) or allowed role IDs (only those can) — Discord rejects both at once.",
       });
     }
     if (am.parse?.includes("users") && am.users && am.users.length > 0) {
@@ -248,7 +248,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
         severity: "error",
         code: "ALLOWED_MENTIONS_CONFLICT_USERS",
         message:
-          "allowed_mentions: don't combine parse: ['users'] with an explicit users list — pick one.",
+          "Use either the @user chip (anyone can be pinged) or allowed user IDs (only those can) — Discord rejects both at once.",
       });
     }
     for (const id of am.roles ?? []) {
@@ -256,7 +256,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
         issues.push({
           severity: "error",
           code: "ALLOWED_MENTIONS_BAD_ROLE",
-          message: `allowed_mentions.roles: "${id}" is not a valid snowflake.`,
+          message: `Allowed role IDs: “${id}” isn’t a valid Discord ID.`,
         });
       }
     }
@@ -265,7 +265,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
         issues.push({
           severity: "error",
           code: "ALLOWED_MENTIONS_BAD_USER",
-          message: `allowed_mentions.users: "${id}" is not a valid snowflake.`,
+          message: `Allowed user IDs: “${id}” isn’t a valid Discord ID.`,
         });
       }
     }
@@ -279,7 +279,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
     issues.push({
       severity: "error",
       code: "THREAD_NAME_LONG",
-      message: `Forum thread name must be ≤${LIMITS.THREAD_NAME} characters.`,
+      message: `Thread name can be at most ${LIMITS.THREAD_NAME} characters.`,
     });
   }
 
@@ -296,7 +296,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
         issues.push({
           severity: "error",
           code: "APPLIED_TAG_BAD",
-          message: `applied_tags: "${id}" is not a valid snowflake.`,
+          message: `Applied tags: “${id}” isn’t a valid Discord ID.`,
         });
       }
     }
@@ -304,8 +304,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
       issues.push({
         severity: "warning",
         code: "APPLIED_TAGS_NO_THREAD",
-        message:
-          "applied_tags are only honoured when posting to a forum channel with a thread_name.",
+        message: "Applied tags only take effect on a new forum post — add a thread name too.",
       });
     }
   }
@@ -314,7 +313,7 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
     issues.push({
       severity: "error",
       code: "AVATAR_URL_TOO_LONG",
-      message: `Avatar URL must be ≤${LIMITS.WEBHOOK_AVATAR_URL} characters.`,
+      message: `Avatar URL can be at most ${LIMITS.WEBHOOK_AVATAR_URL} characters.`,
     });
   }
   if (
@@ -338,7 +337,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
       nodeId: node._id,
       severity: "error",
       code: "COMPONENT_ID_NOT_INTEGER",
-      message: "Component `id` must be a 32-bit integer.",
+      message: "Component id must be a whole number.",
     });
   }
 
@@ -385,7 +384,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         nodeId: node._id,
         severity: "error",
         code: "CONTAINER_ACCENT_RANGE",
-        message: `Container accent_color must be an integer in 0…${LIMITS.COLOR_MAX} (0xFFFFFF).`,
+        message: `Container accent color must be a whole number from 0 to ${LIMITS.COLOR_MAX} (0xFFFFFF).`,
       });
     }
     for (const child of node.components) validateNode(child, issues);
@@ -447,7 +446,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
           nodeId: item._id,
           severity: "error",
           code: "GALLERY_DESC_LONG",
-          message: `Gallery item ${i + 1} description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
+          message: `Gallery item ${i + 1}: alt text can be at most ${LIMITS.MEDIA_DESCRIPTION} characters.`,
         });
       }
     });
@@ -465,7 +464,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         nodeId: node._id,
         severity: "error",
         code: "THUMB_DESC_LONG",
-        message: `Thumbnail description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
+        message: `Thumbnail alt text can be at most ${LIMITS.MEDIA_DESCRIPTION} characters.`,
       });
     }
   }
@@ -536,7 +535,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         nodeId: node._id,
         severity: "error",
         code: "TEXT_TOO_LONG",
-        message: `Text content exceeds ${LIMITS.TEXT_DISPLAY_CONTENT} characters.`,
+        message: `Text can be at most ${LIMITS.TEXT_DISPLAY_CONTENT} characters.`,
       });
     }
   }
@@ -564,7 +563,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_URL_LONG",
-        message: `Link button URL must be ≤${LIMITS.BUTTON_URL} characters.`,
+        message: `Link button URL can be at most ${LIMITS.BUTTON_URL} characters.`,
       });
     }
     // A link-plugin URL may still carry a fill-me slot — a non-core `{token}`
@@ -590,14 +589,14 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_SKU_MISSING",
-        message: "Premium button requires a SKU id.",
+        message: "Premium button needs a SKU ID.",
       });
     } else if (!containsPlaceholder(btn.sku_id) && !SNOWFLAKE_RE.test(btn.sku_id)) {
       issues.push({
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_SKU_INVALID",
-        message: "Premium button SKU id must be a Discord snowflake.",
+        message: "Premium button: the SKU ID isn’t a valid Discord ID.",
       });
     }
   } else {
@@ -606,7 +605,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_CUSTOM_ID_MISSING",
-        message: "Interactive button requires a custom_id (used by your bot).",
+        message: "Button needs a custom ID — it’s how your bot tells its clicks apart.",
       });
     }
     if (btn.custom_id && btn.custom_id.length > LIMITS.BUTTON_CUSTOM_ID) {
@@ -614,7 +613,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_CUSTOM_ID_LONG",
-        message: `custom_id must be ≤${LIMITS.BUTTON_CUSTOM_ID} characters.`,
+        message: `Custom ID can be at most ${LIMITS.BUTTON_CUSTOM_ID} characters.`,
       });
     }
   }
@@ -637,7 +636,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
       nodeId: btn._id,
       severity: "error",
       code: "BUTTON_LABEL_LONG",
-      message: `Button label must be ≤${LIMITS.BUTTON_LABEL} characters.`,
+      message: `Button label can be at most ${LIMITS.BUTTON_LABEL} characters.`,
     });
   }
 
@@ -648,7 +647,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
       nodeId: btn._id,
       severity: "error",
       code: "EMOJI_NAME_MISSING",
-      message: "Custom emoji needs an alias name alongside its id.",
+      message: "Custom emoji needs its name as well as its ID.",
     });
   }
 }
@@ -659,14 +658,14 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_CUSTOM_ID_MISSING",
-      message: "Select requires a custom_id (used by your bot).",
+      message: "Menu needs a custom ID — it’s how your bot tells its picks apart.",
     });
   } else if (sel.custom_id.length > LIMITS.SELECT_CUSTOM_ID) {
     issues.push({
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_CUSTOM_ID_LONG",
-      message: `Select custom_id must be ≤${LIMITS.SELECT_CUSTOM_ID} characters.`,
+      message: `Custom ID can be at most ${LIMITS.SELECT_CUSTOM_ID} characters.`,
     });
   }
   if (sel.placeholder && sel.placeholder.length > LIMITS.SELECT_PLACEHOLDER) {
@@ -674,7 +673,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_PLACEHOLDER_LONG",
-      message: `Select placeholder must be ≤${LIMITS.SELECT_PLACEHOLDER} characters.`,
+      message: `Placeholder can be at most ${LIMITS.SELECT_PLACEHOLDER} characters.`,
     });
   }
 
@@ -685,7 +684,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_MIN_RANGE",
-      message: `min_values must be ${LIMITS.SELECT_MIN_VALUES}–${LIMITS.SELECT_MAX_VALUES}.`,
+      message: `Min selections must be between ${LIMITS.SELECT_MIN_VALUES} and ${LIMITS.SELECT_MAX_VALUES}.`,
     });
   }
   if (max < 1 || max > LIMITS.SELECT_MAX_VALUES) {
@@ -693,7 +692,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_MAX_RANGE",
-      message: `max_values must be 1–${LIMITS.SELECT_MAX_VALUES}.`,
+      message: `Max selections must be between 1 and ${LIMITS.SELECT_MAX_VALUES}.`,
     });
   }
   if (min > max) {
@@ -701,7 +700,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
       nodeId: sel._id,
       severity: "error",
       code: "SELECT_MIN_GT_MAX",
-      message: "min_values cannot exceed max_values.",
+      message: "Min selections can’t be more than max selections.",
     });
   }
 
@@ -711,7 +710,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "SELECT_NO_OPTIONS",
-        message: "String select needs at least one option.",
+        message: "Options menu needs at least one option.",
       });
     }
     if (sel.options.length > LIMITS.SELECT_OPTIONS) {
@@ -719,7 +718,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "SELECT_OPTIONS_LIMIT",
-        message: `String select can hold at most ${LIMITS.SELECT_OPTIONS} options.`,
+        message: `Options menu can hold at most ${LIMITS.SELECT_OPTIONS} options.`,
       });
     }
     const seenValues = new Set<string>();
@@ -731,14 +730,14 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
           nodeId: sel._id,
           severity: "error",
           code: "OPTION_LABEL_MISSING",
-          message: `${where}: label is required.`,
+          message: `${where} needs a label.`,
         });
       } else if (opt.label.length > LIMITS.SELECT_OPTION_LABEL) {
         issues.push({
           nodeId: sel._id,
           severity: "error",
           code: "OPTION_LABEL_LONG",
-          message: `${where}: label must be ≤${LIMITS.SELECT_OPTION_LABEL} chars.`,
+          message: `${where}: label can be at most ${LIMITS.SELECT_OPTION_LABEL} characters.`,
         });
       }
       if (!opt.value) {
@@ -746,7 +745,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
           nodeId: sel._id,
           severity: "error",
           code: "OPTION_VALUE_MISSING",
-          message: `${where}: value is required.`,
+          message: `${where} needs a value.`,
         });
       } else {
         if (opt.value.length > LIMITS.SELECT_OPTION_VALUE) {
@@ -754,7 +753,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
             nodeId: sel._id,
             severity: "error",
             code: "OPTION_VALUE_LONG",
-            message: `${where}: value must be ≤${LIMITS.SELECT_OPTION_VALUE} chars.`,
+            message: `${where}: value can be at most ${LIMITS.SELECT_OPTION_VALUE} characters.`,
           });
         }
         if (seenValues.has(opt.value)) {
@@ -762,7 +761,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
             nodeId: sel._id,
             severity: "error",
             code: "OPTION_VALUE_DUP",
-            message: `${where}: value "${opt.value}" is duplicated.`,
+            message: `${where}: value “${opt.value}” is already used by another option.`,
           });
         } else {
           seenValues.add(opt.value);
@@ -773,7 +772,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
           nodeId: sel._id,
           severity: "error",
           code: "OPTION_DESC_LONG",
-          message: `${where}: description must be ≤${LIMITS.SELECT_OPTION_DESCRIPTION} chars.`,
+          message: `${where}: description can be at most ${LIMITS.SELECT_OPTION_DESCRIPTION} characters.`,
         });
       }
       if (opt.emoji?.id && !opt.emoji.name) {
@@ -781,7 +780,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
           nodeId: sel._id,
           severity: "error",
           code: "OPTION_EMOJI_NAME",
-          message: `${where}: custom emoji needs an alias name alongside its id.`,
+          message: `${where}: custom emoji needs its name as well as its ID.`,
         });
       }
       if (opt.default) defaults++;
@@ -791,7 +790,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "OPTION_DEFAULT_OVER_MAX",
-        message: "More options marked default than max_values allows.",
+        message: "More options are selected by default than max selections allows.",
       });
     }
     // You can't allow choosing more items than exist — Discord rejects a
@@ -801,7 +800,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "SELECT_MAX_OVER_OPTIONS",
-        message: `max_values (${max}) can't exceed the number of options (${sel.options.length}).`,
+        message: `Max selections (${max}) can’t be more than the number of options (${sel.options.length}).`,
       });
     }
   } else if (
@@ -816,7 +815,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "SELECT_DEFAULTS_LIMIT",
-        message: `default_values can have at most ${LIMITS.SELECT_DEFAULT_VALUES} entries.`,
+        message: `A menu can have at most ${LIMITS.SELECT_DEFAULT_VALUES} default selections.`,
       });
     }
     if (dvs.length > max) {
@@ -824,7 +823,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         nodeId: sel._id,
         severity: "error",
         code: "SELECT_DEFAULTS_OVER_MAX",
-        message: "default_values has more entries than max_values allows.",
+        message: "More default selections than max selections allows.",
       });
     }
     for (const dv of dvs) {
@@ -833,7 +832,7 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
           nodeId: sel._id,
           severity: "error",
           code: "SELECT_DEFAULT_BAD_ID",
-          message: `default_values: "${dv.id}" is not a valid snowflake.`,
+          message: `Default selections: “${dv.id}” isn’t a valid Discord ID.`,
         });
       }
     }
@@ -855,7 +854,7 @@ function validateMediaItem(
       nodeId,
       severity: "error",
       code: "MEDIA_REQUIRED",
-      message: `${context} needs a URL or an attachment_id.`,
+      message: `${context} needs a URL or an attachment ID.`,
     });
     return;
   }
@@ -864,7 +863,7 @@ function validateMediaItem(
       nodeId,
       severity: "error",
       code: "MEDIA_ATTACHMENT_ID_BAD",
-      message: `${context}: attachment_id must be a Discord snowflake.`,
+      message: `${context}: the attachment ID isn’t a valid Discord ID.`,
     });
   }
   if (hasUrl && containsPlaceholder(media.url!)) {
@@ -880,7 +879,7 @@ function validateMediaItem(
         nodeId,
         severity: "error",
         code: "MEDIA_URL_INVALID",
-        message: `${context}: URL must be https://, attachment://filename, or an in-session upload.`,
+        message: `${context}: use an https:// link or an attachment://filename reference, or upload a file.`,
       });
     } else if (
       opts.requireAttachment &&

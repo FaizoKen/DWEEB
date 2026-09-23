@@ -1,11 +1,11 @@
 import {
   useEffect,
-  useId,
   useState,
   type ChangeEvent,
   type InputHTMLAttributes,
   type KeyboardEvent,
 } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { cn } from "@/lib/cn";
 import styles from "./ColorInput.module.css";
 
@@ -50,7 +50,7 @@ export function ColorInput({
   "aria-errormessage": ariaErrorMessage,
   "aria-invalid": ariaInvalid,
 }: ColorInputProps) {
-  const generated = useId();
+  const generated = useUniqueId("color");
   const controlId = id ?? generated;
   const hex = toHex(value);
   const isSet = value != null;

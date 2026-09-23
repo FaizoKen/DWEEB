@@ -141,9 +141,11 @@
   border-radius: var(--app-radius-sm);
   cursor: pointer;
   user-select: none;
-  /* On selection the row is scrolled to the top of the tree (block: "start");
-     this keeps a little breathing room above it rather than pinning it flush. */
-  scroll-margin-top: 10px;
+  /* On selection the row is scrolled to the top of the tree (block: "start").
+     The floating issue chip docks over the pane's top-right corner (~6–30px),
+     so a row pinned flush there had its Duplicate/Delete buttons hidden under
+     the chip; this margin lands the row just below it. */
+  scroll-margin-top: 36px;
   font-size: var(--app-text-base);
   color: var(--app-text);
   /* Per-type colour coding. Each row inherits --row-hue / --row-sat from its
@@ -461,24 +463,81 @@
   opacity: 0.85;
 }
 
+/* Hidden actions are `visibility: hidden`, not just transparent: an invisible
+ * button that still takes Tab (four per row) made the tree a keyboard slog.
+ * Focus landing on the row's own button reveals them, so Tab still walks from
+ * a row into its actions. Visibility flips after the fade-out, not before. */
 .actions {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  visibility: hidden;
+  transition:
+    opacity 120ms ease,
+    visibility 0s linear 120ms;
 }
 .row:hover .actions,
 .rowSelected .actions,
 .row:focus-within .actions {
   opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
 }
 
-/* Touch and narrow viewports: hover-based reveal isn't reliable, so the
- * inline row actions stay visible. */
-@media (hover: none), (max-width: 900px) {
+/* An arrow with nowhere to go stays mounted (see MoveArrow) but reads as off
+ * and ignores hover — `aria-disabled` rather than `disabled`, so it keeps
+ * focus. */
+.actions [aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.actions [aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--app-text-muted);
+}
+
+/* Touch has no hover to reveal actions with, and showing all four on every
+ * row squeezed each label to a few characters on a phone. So only the row
+ * you've opened carries them — the natural "tap it, then act on it" — at a
+ * size a thumb can hit. */
+@media (hover: none), (pointer: coarse) {
   .actions {
+    display: none;
+  }
+  .rowSelected .actions {
+    display: inline-flex;
     opacity: 1;
+    visibility: visible;
+  }
+  .actions button {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* The drag handle: a six-dot grip in the row's left padding (between the
+ * type-colour stripe and the chevron), shown on hover for a mouse, where the
+ * grab cursor alone was the only sign a row could be dragged. It never takes
+ * the pointer — pressing on it presses the row, which is what starts the
+ * drag — and it takes no space, so the row never shifts when it appears. */
+.grip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--app-text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .row:hover > .grip {
+    opacity: 0.8;
   }
 }
 
@@ -929,14 +988,6 @@
 
   .rowSelect {
     column-gap: 6px;
-  }
-
-  /* Trim the inline action buttons a touch on phones so a row carrying all four
-     (up / down / duplicate / delete) still fits the narrowest screens (~320px)
-     without clipping. Stays a comfortable touch target. */
-  .actions button {
-    width: 28px;
-    height: 28px;
   }
 
   .summary {

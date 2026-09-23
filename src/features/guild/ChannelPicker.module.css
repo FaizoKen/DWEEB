@@ -217,3 +217,13 @@
   color: var(--app-accent-text);
   flex: none;
 }
+
+/* Touch: the ~30px rows are too small to hit reliably with a finger (Discord's
+   mobile client in the Activity, or the web bar on a phone), so lift each row —
+   channel and, through the shared class, the Activity's server picker — to a
+   40px target. Pointer-based, so a narrow desktop window keeps the compact list. */
+@media (pointer: coarse) {
+  .row {
+    min-height: 40px;
+  }
+}

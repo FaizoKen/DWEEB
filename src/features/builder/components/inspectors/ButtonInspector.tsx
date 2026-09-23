@@ -91,7 +91,13 @@ export function ButtonInspector({ node }: Props) {
       </Field>
 
       {node.style !== ButtonStyle.Premium ? (
-        <Field label="Label" hint={`Max ${LIMITS.BUTTON_LABEL} characters.`}>
+        <Field
+          label="Label"
+          counter={{
+            value: "label" in node ? (node.label ?? "") : "",
+            max: LIMITS.BUTTON_LABEL,
+          }}
+        >
           {(id) => (
             <PlaceholderInput
               id={id}
@@ -117,6 +123,7 @@ export function ButtonInspector({ node }: Props) {
         // chip detaches; paste another plugin's URL and the chip swaps.
         <Field
           label="URL"
+          counter={{ value: node.url, max: LIMITS.BUTTON_URL }}
           hint={
             linkPlugin ? (
               <>
@@ -142,7 +149,10 @@ export function ButtonInspector({ node }: Props) {
       ) : null}
 
       {node.style === ButtonStyle.Premium ? (
-        <Field label="SKU ID" hint="Discord SKU snowflake.">
+        <Field
+          label="SKU ID"
+          hint="The ID of the product (SKU) this button sells — copy it from your app in the Discord Developer Portal."
+        >
           {(id) => (
             <TextInput
               id={id}

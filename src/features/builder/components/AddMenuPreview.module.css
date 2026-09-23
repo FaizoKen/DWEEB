@@ -126,6 +126,37 @@
   line-height: 1;
 }
 
+/* ── Buttons & menus (a row of buttons, or one dropdown) ─────────────── */
+
+.rowChoice {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rowChoice .btnRow {
+  margin-top: 0;
+}
+/* A ruled "OR" between the two alternatives. */
+.orRule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--discord-text-muted);
+}
+.orRule::before,
+.orRule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--discord-bg-quote);
+}
+
 /* ── Media gallery ───────────────────────────────────────────────────── */
 
 .galleryGrid {

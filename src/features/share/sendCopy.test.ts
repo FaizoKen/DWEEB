@@ -212,3 +212,17 @@ describe("updateFailureMessage", () => {
     }
   });
 });
+
+describe("sendLeadCopy — saving into a loaded scheduled post", () => {
+  it("says the changes go into the existing post instead of asking for a channel", () => {
+    const copy = sendLeadCopy({
+      mode: "new",
+      pickerActive: true,
+      destinationPicked: false,
+      signedOut: false,
+      editingSchedule: true,
+    });
+    expect(copy).toContain("already scheduled");
+    expect(copy).not.toContain("Pick a channel");
+  });
+});

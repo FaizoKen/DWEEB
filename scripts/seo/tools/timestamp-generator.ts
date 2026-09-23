@@ -41,9 +41,15 @@ export function timestampGeneratorHtml(): string {
   // Every control ships in place, disabled and showing the example, so the
   // script only enables and fills it: revealing hidden controls after first
   // paint would shift the table below them on a slow connection (CLS).
+  //
+  // The explicit table roles are for phones: below 560px the rows restyle into
+  // stacked cards (name + Copy, then the code, then what readers see) because a
+  // four-column table left Copy and the preview off-screen at 390px. Changing a
+  // row's `display` makes some engines drop the implicit table semantics, and
+  // explicit roles keep a screen reader's row/column navigation intact.
   const rows = TIMESTAMP_STYLES.map(
     (style) =>
-      `<tr data-ts-style="${style.code}"><th scope="row">${escapeHtml(style.label)} <span class="tool-letter">${style.code}</span></th><td><code data-ts-code>${escapeHtml(timestampToken(EXAMPLE_UNIX, style.code))}</code></td><td data-ts-preview>${escapeHtml(EXAMPLE_OUTPUT[style.code] ?? "")}</td><td class="tool-copy-cell"><button type="button" class="tool-btn tool-copy" data-ts-copy disabled>Copy</button></td></tr>`,
+      `<tr role="row" data-ts-style="${style.code}"><th scope="row" role="rowheader">${escapeHtml(style.label)} <span class="tool-letter">${style.code}</span></th><td role="cell" class="tool-code-cell"><code data-ts-code>${escapeHtml(timestampToken(EXAMPLE_UNIX, style.code))}</code></td><td role="cell" data-ts-preview>${escapeHtml(EXAMPLE_OUTPUT[style.code] ?? "")}</td><td role="cell" class="tool-copy-cell"><button type="button" class="tool-btn tool-copy" data-ts-copy disabled>Copy</button></td></tr>`,
   ).join("");
   return `<section class="tool" id="timestamp-generator" aria-labelledby="timestamp-generator-heading" data-timestamp-tool>
         <h2 id="timestamp-generator-heading">Discord timestamp generator</h2>
@@ -58,10 +64,10 @@ export function timestampGeneratorHtml(): string {
         </div>
         <p class="tool-status" role="status" aria-live="polite" data-ts-status>Example: 1 January 2026, 00:00 UTC, as an en-US reader sees it. Turn on JavaScript to use your own date.</p>
         <div class="table-scroll tool-table" tabindex="0" role="region" aria-label="Discord timestamp codes">
-          <table>
+          <table role="table">
             <caption class="sr-only">Discord timestamp codes for the chosen moment</caption>
-            <thead><tr><th scope="col">Style</th><th scope="col">Code to paste</th><th scope="col">What readers see</th><th scope="col"><span class="sr-only">Copy</span></th></tr></thead>
-            <tbody>${rows}</tbody>
+            <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Style</th><th scope="col" role="columnheader">Code to paste</th><th scope="col" role="columnheader">What readers see</th><th scope="col" role="columnheader"><span class="sr-only">Copy</span></th></tr></thead>
+            <tbody role="rowgroup">${rows}</tbody>
           </table>
         </div>
         <p class="tool-note">Unix time <code data-ts-unix>${EXAMPLE_UNIX}</code> · <span data-ts-zone>shown in UTC</span></p>
@@ -95,4 +101,19 @@ export const TIMESTAMP_TOOL_CSS = `
 .tool-note{color:var(--dim);font-size:13px;margin:10px 0 0}
 .tool-note code{font:12px ui-monospace,Menlo,Consolas,monospace}
 @media(max-width:560px){.tool{padding:16px}.tool-fields>.tool-field{flex:1 1 140px}}
+@media(max-width:560px){
+  .tool-table{overflow:visible;border:0;border-radius:0}
+  .tool-table table{min-width:0;background:transparent}
+  .tool-table thead{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .tool-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"style copy" "code code" "preview preview";align-items:center;gap:8px 12px;padding:12px 14px;margin-bottom:8px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  .tool-table th[scope="row"],.tool-table td{padding:0;border:0;background:transparent}
+  .tool-table th[scope="row"]{grid-area:style;white-space:normal}
+  .tool-table .tool-code-cell{grid-area:code}
+  .tool-table td[data-ts-preview]{grid-area:preview;color:var(--text)}
+  .tool-table td[data-ts-preview]::before{content:"Readers see: " / "";color:var(--dim)}
+  .tool-table .tool-copy-cell{grid-area:copy;width:auto}
+  .tool-table code{white-space:normal;overflow-wrap:anywhere}
+  .tool-table .tool-copy{min-height:40px}
+  .tool-table tr[data-ts-active]{background:#2b2d55}
+}
 `;

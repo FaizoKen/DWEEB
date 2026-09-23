@@ -92,7 +92,10 @@ export function GuildPicker({
   useEffect(() => {
     if (!open) return;
     place();
-    const onDown = (e: MouseEvent) => {
+    // `pointerdown`, not `mousedown`: WebKit (Discord's iOS client) sends no
+    // compatibility mouse events for a tap on a non-clickable area, so a tap
+    // outside the panel on a phone never closed it.
+    const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (wrapperRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
@@ -100,12 +103,12 @@ export function GuildPicker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);

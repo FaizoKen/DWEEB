@@ -7,7 +7,11 @@
      client's native top bar inside the Activity; 0 everywhere else. */
   top: calc(16px + var(--app-sait));
   right: calc(16px + var(--app-sair));
-  z-index: var(--app-z-tooltip);
+  /* Above the Message directory (--app-z-tooltip) and its confirmations (+10),
+     and so above every dialog backdrop (--app-z-modal): at the directory's own
+     layer it lost on DOM order and sat buried under it. Still beneath the intro
+     film (+20), which it would otherwise overlap on a phone, and the toasts (+30). */
+  z-index: calc(var(--app-z-tooltip) + 15);
   display: flex;
   pointer-events: none;
 }
@@ -58,6 +62,14 @@
 .prompt:focus-visible {
   outline: none;
   box-shadow: var(--app-shadow-lg), var(--app-focus-ring);
+}
+
+/* Touch: a 26px pill is a hard target for a fingertip. */
+@media (pointer: coarse) {
+  .prompt {
+    height: 36px;
+    padding: 0 14px;
+  }
 }
 
 .prompt:disabled {

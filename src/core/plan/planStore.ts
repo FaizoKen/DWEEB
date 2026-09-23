@@ -11,20 +11,30 @@
  *
  * The plan is loaded lazily: `load(guildId)` is cheap and idempotent for the same
  * server, and reloads when the server changes. It fails soft — an error just
- * leaves `plan` null (the UI then simply doesn't show a tier badge).
+ * leaves `plan` null (the tier badges simply don't show) — but it keeps the
+ * reason, because the pricing modal can't fail soft: without a plan it has no
+ * Upgrade or billing controls to offer, so it says why and offers a retry.
  */
 
 import { create } from "zustand";
 import { fetchGuildPlan, isAuthError, type PlanInfo } from "@/core/guild/api";
 import { isProxyConfigured } from "@/core/guild/config";
 
-type PlanStatus = "idle" | "loading" | "ready" | "error";
+export type PlanStatus = "idle" | "loading" | "ready" | "error";
+
+/** Shown when a failed load carried no words of its own. */
+const LOAD_FAILED_FALLBACK = "Try again in a moment.";
 
 interface PlanState {
   /** The server the loaded `plan` (and the pricing modal) is for. */
   guildId: string | null;
   plan: PlanInfo | null;
   status: PlanStatus;
+  /** Why the last load failed, in words the UI can show — set alongside
+   *  `status: "error"`, cleared when the next load starts. The proxy's own
+   *  message when it sent one ("Couldn't reach the server…", "You can only load
+   *  servers you manage…"), which is what the pricing modal prints. */
+  error: string | null;
   open: boolean;
 
   /** Load a server's plan from the proxy. Skips the network on a warm `ready`
@@ -44,6 +54,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
   guildId: null,
   plan: null,
   status: "idle",
+  error: null,
   open: false,
 
   async load(guildId, force = false) {
@@ -56,7 +67,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     if (!force && id === st.guildId && (st.status === "ready" || st.status === "loading")) return;
     // Switching servers clears the previous server's tier so we never briefly
     // show it against the new one.
-    set({ guildId: id, status: "loading", plan: id === st.guildId ? st.plan : null });
+    set({ guildId: id, status: "loading", error: null, plan: id === st.guildId ? st.plan : null });
     try {
       const plan = await fetchGuildPlan(id);
       // A newer load for a different server may have superseded this one.
@@ -64,9 +75,14 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       set({ plan, status: "ready" });
     } catch (e) {
       if (generation !== accountGeneration || get().guildId !== id) return;
-      // A 401 is "signed out"; anything else is a soft miss.
+      // A 401 is "signed out"; anything else is a soft miss — kept with its
+      // reason (the API client's errors are already phrased for people).
       if (isAuthError(e)) set({ plan: null, status: "ready" });
-      else set({ status: "error" });
+      else
+        set({
+          status: "error",
+          error: e instanceof Error && e.message ? e.message : LOAD_FAILED_FALLBACK,
+        });
     }
   },
 
@@ -81,6 +97,6 @@ export const usePlanStore = create<PlanState>((set, get) => ({
 
   reset() {
     accountGeneration += 1;
-    set({ guildId: null, plan: null, status: "idle", open: false });
+    set({ guildId: null, plan: null, status: "idle", error: null, open: false });
   },
 }));

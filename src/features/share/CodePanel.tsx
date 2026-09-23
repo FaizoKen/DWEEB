@@ -12,7 +12,8 @@
  * invite edits that silently go nowhere.
  */
 
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { useMessageStore } from "@/core/state/messageStore";
 import { CODE_TARGETS, generateCode, isCodeTarget, type CodeTarget } from "@/core/codegen";
 import { copyText } from "@/core/serialization";
@@ -57,7 +58,7 @@ function storeTarget(target: CodeTarget): void {
 
 export function CodePanel() {
   const message = useMessageStore((s) => s.message);
-  const groupId = useId();
+  const groupId = useUniqueId("code");
   const [target, setTarget] = useState<CodeTarget>(readStoredTarget);
   const info = CODE_TARGETS.find((item) => item.id === target)!;
   const code = useMemo(() => generateCode(message, target), [message, target]);

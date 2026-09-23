@@ -18,7 +18,8 @@
  * `replaceMessageFromRestore`) on import.
  */
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -47,9 +48,13 @@ import {
   parseWebhookUrl,
   rememberWebhook,
   useCanManageGuildWebhooks,
+  useGuildWebhooksStore,
   verifyWebhook,
   webhookAvatarHash,
+  webhookChannelId,
+  webhookGuildId,
 } from "@/core/webhook";
+import { linkThread, linkThreadId } from "@/core/webhook/restoreLink";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
@@ -69,6 +74,7 @@ import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import { type ShareTab } from "./tabs";
+import { rememberPostedContent } from "./updateTarget";
 import styles from "./ShareDialog.module.css";
 
 type Tab = ShareTab;
@@ -97,6 +103,14 @@ const SHARE_TABS: readonly { id: Tab; label: string }[] = [
   { id: "code", label: "Code" },
   { id: "about", label: "About" },
 ];
+
+/** What the Update tab hands the Restore tab: the message it would overwrite,
+ *  and the webhook that posted it (only that one can read it back). */
+interface RestoreHandoff {
+  messageInput: string;
+  webhookUrl?: string;
+  threadId?: string;
+}
 
 interface ShareDialogProps {
   open: boolean;
@@ -131,7 +145,7 @@ export function ShareDialog({
   onRequestRemoveInteractive,
   initialWebhook,
 }: ShareDialogProps) {
-  const tabsetId = useId();
+  const tabsetId = useUniqueId("share-tabs");
   const [tab, setTab] = useState<Tab>(initialTab);
 
   // Snap to the requested tab whenever the dialog re-opens, so opening from
@@ -139,6 +153,13 @@ export function ShareDialog({
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
+
+  // "Restore it first" from the Update tab lands here for the Restore tab to
+  // start from; it lives for one dialog open, like the webhook draft below.
+  const [restoreHandoff, setRestoreHandoff] = useState<RestoreHandoff | null>(null);
+  useEffect(() => {
+    if (open) setRestoreHandoff(null);
+  }, [open]);
 
   // A hand-entered webhook URL outlives the panel that took it (each tab mounts
   // its own), but never the dialog: the cleanup runs when `open` goes false or
@@ -214,9 +235,13 @@ export function ShareDialog({
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             onCloseDialog={onClose}
             onSwitchTab={setTab}
+            onRestoreFirst={(handoff) => {
+              setRestoreHandoff(handoff);
+              setTab("restore");
+            }}
           />
         ) : null}
-        {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
+        {tab === "restore" ? <RestorePanel onDone={onClose} handoff={restoreHandoff} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonPanel onDone={onClose} /> : null}
         {tab === "code" ? <CodePanel /> : null}
@@ -440,7 +465,14 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
  * becomes "Update" — opening the Update tab (PATCH) prefilled with this webhook
  * + message id instead of posting a new message.
  */
-function RestorePanel({ onDone }: { onDone: () => void }) {
+function RestorePanel({
+  onDone,
+  handoff,
+}: {
+  onDone: () => void;
+  /** Set by the Update tab's "Restore it first": start from that message. */
+  handoff?: RestoreHandoff | null;
+}) {
   const replaceFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
   // Set when an "Edit in DWEEB" link named a webhook this browser hasn't saved:
@@ -453,15 +485,21 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   // Falls back to a URL hand-entered on another tab of this same dialog open —
   // the panels are mounted per tab, so without the shared draft a webhook the
   // user just pasted on Send has to be pasted again here.
-  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl || readWebhookDraft().url || "");
+  const [url, setUrl] = useState(
+    () => handoff?.webhookUrl || restoredFrom?.webhookUrl || readWebhookDraft().url || "",
+  );
   const [revealUrl, setRevealUrl] = useState(false);
   // Manual URL entry is the secondary path once the auto-detect picker is
   // available: the full credential field stays collapsed behind a summary until
   // the user opts in (or a typed URL needs fixing). `urlInputRef` focuses it.
   const [pasteMode, setPasteMode] = useState(() => readWebhookDraft().open);
   const urlInputRef = useRef<HTMLInputElement>(null);
-  const [idInput, setIdInput] = useState(() => prefill?.messageId ?? "");
-  const [threadId, setThreadId] = useState(() => prefill?.threadId ?? "");
+  const [idInput, setIdInput] = useState(() => handoff?.messageInput ?? prefill?.messageId ?? "");
+  // The thread field follows a pasted message link (null) until the user types
+  // or clears it (a string, even ""). A prefilled thread is an explicit value.
+  const [manualThread, setManualThread] = useState<string | null>(
+    () => (handoff ? handoff.threadId : prefill?.threadId) || null,
+  );
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -479,7 +517,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (!pendingEditOrigin) return;
     setIdInput(pendingEditOrigin.messageId);
-    setThreadId(pendingEditOrigin.threadId ?? "");
+    setManualThread(pendingEditOrigin.threadId || null);
     setError(null);
   }, [pendingEditOrigin]);
 
@@ -497,6 +535,27 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   const connectedData = useGuildStore((s) => s.data);
   const pickerActive = useCanManageGuildWebhooks();
   const matchChannelId = useMemo(() => parseMessageChannelId(idInput), [idInput]);
+
+  // Where the chosen webhook posts, when anything here knows — a saved entry, or
+  // the connected server's webhook list — and what a pasted link then says
+  // about the thread (see `restoreLink.ts`): a link into another channel is a
+  // thread or forum post, so its id is filled in from the link rather than
+  // left for the user to dig out; a link into the webhook's own channel (or
+  // any regular channel) must send no thread id, which Discord would refuse.
+  const guildWebhooks = useGuildWebhooksStore((s) => s.webhooks);
+  const webhookChannel = useMemo(() => {
+    if (!parsedUrl) return null;
+    return (
+      history.find((e) => e.id === parsedUrl.id)?.channelId ??
+      guildWebhooks.find((w) => w.id === parsedUrl.id)?.channel_id ??
+      null
+    );
+  }, [parsedUrl, history, guildWebhooks]);
+  const isKnownChannel = (id: string) => connectedData?.channelById[id] != null;
+  const fromLink = linkThread(idInput, { webhookChannelId: webhookChannel, isKnownChannel });
+  const linkedThread = linkThreadId(fromLink);
+  const threadFromLink = manualThread === null && linkedThread != null;
+  const threadId = manualThread ?? linkedThread ?? "";
 
   // The auto-detect picker is the primary way to choose a webhook for managers;
   // the raw credential field becomes the secondary "advanced" path, collapsed to
@@ -561,8 +620,34 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
     }
 
     setBusy(true);
+    let thread = threadId.trim();
+    // A thread the link only suggested (this webhook's channel isn't known
+    // here): ask Discord where the webhook posts — one GET — so a link into its
+    // own channel is never sent as a thread id. It also fills in the saved
+    // entry, so the next restore through this webhook knows without asking.
+    if (manualThread === null && fromLink.kind === "unknown") {
+      const check = await verifyWebhook(parsedUrl);
+      if (!check.ok) {
+        setBusy(false);
+        setError(check.error);
+        return;
+      }
+      const channel = webhookChannelId(check.webhook);
+      const owner = classifyWebhookOwner(check.webhook);
+      rememberWebhook(parsedUrl.url, {
+        name: typeof check.webhook.name === "string" ? check.webhook.name : undefined,
+        ownerKind: owner.kind,
+        applicationId: owner.applicationId ?? undefined,
+        avatar: webhookAvatarHash(check.webhook),
+        channelId: channel ?? undefined,
+        guildId: webhookGuildId(check.webhook) ?? undefined,
+      });
+      setHistory(loadHistory());
+      thread =
+        linkThreadId(linkThread(idInput, { webhookChannelId: channel, isKnownChannel })) ?? "";
+    }
     const result = await fetchWebhookMessage(parsedUrl, messageId, {
-      threadId: threadId.trim() || undefined,
+      threadId: thread || undefined,
     });
     setBusy(false);
 
@@ -590,10 +675,12 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
     const originGuildName =
       savedEntry?.guildName ??
       (originGuildId ? authGuilds.find((g) => g.id === originGuildId)?.name : undefined);
+    // What the message says right now — the Update tab names it by this.
+    rememberPostedContent(messageId, result.message);
     replaceFromRestore(result.message, {
       webhookUrl: parsedUrl.url,
       messageId,
-      threadId: threadId.trim() || undefined,
+      threadId: thread || undefined,
       guildId: originGuildId,
       guildName: originGuildName,
     });
@@ -794,7 +881,12 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
           <TextInput
             id={id}
             value={idInput}
-            onChange={(e) => setIdInput(e.currentTarget.value)}
+            onChange={(e) => {
+              const next = e.currentTarget.value;
+              setIdInput(next);
+              // A pasted link names its own thread, over any older typed value.
+              if (parseMessageChannelId(next)) setManualThread(null);
+            }}
             invalid={idInvalid}
             placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
             spellCheck={false}
@@ -802,12 +894,33 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
         )}
       </Field>
 
-      <Field label="Thread ID (optional)" hint="Required only if the message lives in a thread.">
+      <Field
+        label="Thread ID (optional)"
+        hint={
+          threadFromLink ? (
+            <>
+              {fromLink.kind === "thread"
+                ? "From the link — the message is in a thread or forum post."
+                : "From the link — used if the message is in a thread."}{" "}
+              <button
+                type="button"
+                className={styles.pasteBack}
+                onClick={() => setManualThread("")}
+                aria-label="Clear the thread ID from the link"
+              >
+                Clear
+              </button>
+            </>
+          ) : (
+            "Required only if the message lives in a thread."
+          )
+        }
+      >
         {(id) => (
           <TextInput
             id={id}
             value={threadId}
-            onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
+            onChange={(e) => setManualThread(e.currentTarget.value.replace(/[^\d]/g, ""))}
             placeholder="e.g. 1185234567890123456"
             inputMode="numeric"
           />

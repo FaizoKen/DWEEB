@@ -104,7 +104,10 @@ export function EmojiField({ emoji: current, onChange }: Props) {
         )}
       </Field>
       <Disclosure label="Advanced emoji options">
-        <Field label="Custom emoji ID" hint="Required for guild emoji; leave blank for unicode.">
+        <Field
+          label="Custom emoji ID"
+          hint="Needed for a server’s custom emoji; leave blank for a standard emoji."
+        >
           {(id) => (
             <TextInput
               id={id}

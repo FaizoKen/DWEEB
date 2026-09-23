@@ -69,10 +69,19 @@ import { useMcpStore } from "@/features/mcp/mcpStore";
 import { useMcpConfigured } from "@/core/mcp/availability";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
-import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
+import { LEFT_MAX_RESERVE, MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
 import { openDiscordLink } from "@/lib/discordDeepLink";
 import styles from "./Builder.module.css";
+
+/** How much of the left cluster the web bar's fit check defends before it
+ *  folds actions: the signed-in account control (54px) and the cluster gap
+ *  (8px), plus a destination chip of ~148px — its 56px of chrome and a name
+ *  like "dweeb・news" (≈82px of 13px semibold) with room to spare. Wider than
+ *  the Activity bar's default: where the next post lands matters more than a
+ *  third utility icon. Never used for the step that drops the primary action's
+ *  label (see the fit effect below). */
+const WEB_LEFT_MAX_RESERVE = 210;
 
 /** One utility action in the bar's right cluster: an inline icon button while
  *  the bar has room, a "More"-menu row once the fit check folds it away. */
@@ -261,7 +270,11 @@ function ActionBar({
   // only exists where it can actually steer a send — the channel-first flow,
   // which needs a signed-in user with Manage Webhooks in the connected server;
   // in the paste-a-URL world the destination *is* the URL in the Send dialog.
-  const authed = useAuthStore((s) => s.status === "authed");
+  const authStatus = useAuthStore((s) => s.status);
+  const authed = authStatus === "authed";
+  // Signed out, the account control is a labelled "Sign in" button with its own
+  // step on the fit ladder below.
+  const signInShown = authStatus === "anon" && isProxyConfigured();
   const canManage = useCanManageGuildWebhooks();
   const guildData = useGuildStore((s) => s.data);
   const destActive = authed && canManage && !!connectedGuildId;
@@ -460,28 +473,34 @@ function ActionBar({
   //                   the `data-compact` flag) — nothing is hidden yet
   //   steps 2..N+1  — the N inline utility icons fold into the "More" overflow
   //                   menu one at a time, from the end of the inline run
+  //   signed out    — the account control's "Sign in" text drops to its icon
   //   final step    — the primary Send/Update button drops to its icon
   // We measure the real control widths instead of guessing a breakpoint, so the
   // full row survives on any width — viewport *or* pane — that has room for it.
   // Mirrors the Activity bar's own fit check (see ActivityBar).
   const [level, setLevel] = useState(0);
   // N is the capped inline run, not the whole list: anything past the cap is
-  // already a "More" row and has no ladder step to fold on. The ladder ends with
-  // one extra step in the update state — folding the inline "View the posted
-  // message" button into the overflow menu — before the final drop-primary step,
-  // mirroring the Activity bar's own `viewFolded` step.
+  // already a "More" row and has no ladder step to fold on. Signed out, the
+  // "Sign in" label gets a step after the utility folds: first-timers — most
+  // of them on phones — are who it's for, so it outlasts every utility icon
+  // (holding down to ~300px) but still gives way before the primary action.
+  // The ladder then ends with one extra step in the update state — folding the
+  // inline "View the posted message" button into the overflow menu — before
+  // the final drop-primary step, mirroring the Activity bar's `viewFolded`.
   const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
   const foldMax = inlineMax;
+  const signInStep = signInShown ? 1 : 0;
   const foldViewStep = showView ? 1 : 0;
-  const maxLevel = 1 + foldMax + foldViewStep + 1;
+  const maxLevel = 1 + foldMax + signInStep + foldViewStep + 1;
   const tightened = level >= 1;
   const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
   const inlineCount = inlineMax - foldedCount;
   const inlineUtilities = utilities.slice(0, inlineCount);
   const foldedUtilities = utilities.slice(inlineCount);
+  const signInIconOnly = signInShown && level >= 1 + foldMax + 1;
   // "View" folds once every utility icon already has (it sits closest to the
   // primary action, so it's the last icon to leave the row).
-  const viewFolded = showView && level >= 1 + foldMax + 1;
+  const viewFolded = showView && level >= 1 + foldMax + signInStep + 1;
   const primaryIconOnly = level >= maxLevel;
   // Bumped whenever the bar's *width* changes; drives a fresh measurement pass.
   // (Width only — collapsing changes the bar's content, not its width, so this
@@ -491,18 +510,24 @@ function ActionBar({
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Send↔Update revealing New, the plan pill or destination chip
-  // appearing or renaming) re-runs the fit measurement below — not just a raw
-  // width change. The channel name matters because the left reserve tracks the
-  // cluster's natural width. (Feedback is menu-only, so it never moves the bar.)
-  const layoutKey = `${isUpdate}|${showView}|${planVisible}|${destActive}|${barChannel?.name ?? ""}`;
+  // appearing or renaming, the account control swapping between its loading,
+  // "Sign in" and avatar forms) re-runs the fit measurement below — not just a
+  // raw width change. The channel name matters because the left reserve tracks
+  // the cluster's natural width. (Feedback is menu-only, so it never moves the
+  // bar.)
+  const layoutKey = `${authStatus}|${isUpdate}|${showView}|${planVisible}|${destActive}|${barChannel?.name ?? ""}`;
 
   // On every width or content change, optimistically restore the full row,
   // then collapse one step at a time until both clusters fit on one row. The
   // right cluster is `flex: none`, so its box width *is* its natural width; the
   // left (account + destination chip) is allowed to truncate, so we reserve its
   // natural width capped at a readable maximum — mirroring the Activity bar's
-  // fit check. Each pass runs before paint, so the staged collapse never
-  // flashes.
+  // fit check, with a larger cap (`WEB_LEFT_MAX_RESERVE`) so the destination
+  // chip stays legible while there are utility icons left to fold. The step
+  // that would drop the primary action's label measures against the Activity
+  // bar's smaller default instead: the destination may take room from the
+  // utilities, never from "Send". Each pass runs before paint, so the staged
+  // collapse never flashes.
   //
   // Restart and measurement live in ONE effect on purpose. As separate effects
   // (the old shape), a width change made the reset queue `level = 0` while the
@@ -525,7 +550,13 @@ function ActionBar({
     const left = leftRef.current;
     const right = rightRef.current;
     if (!bar || !left || !right || level >= maxLevel) return;
-    const needed = measureNeededWidth(bar, left, right);
+    const nextDropsPrimary = level + 1 >= maxLevel;
+    const needed = measureNeededWidth(
+      bar,
+      left,
+      right,
+      nextDropsPrimary ? LEFT_MAX_RESERVE : WEB_LEFT_MAX_RESERVE,
+    );
     if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
   }, [level, maxLevel, barWidth, layoutKey]);
 
@@ -548,7 +579,7 @@ function ActionBar({
           onPointerEnter={warmDestination}
           onFocusCapture={warmDestination}
         >
-          {isProxyConfigured() ? <AccountMenu /> : null}
+          {isProxyConfigured() ? <AccountMenu signInLabel={!signInIconOnly} /> : null}
           {destActive && connectedGuildId ? (
             <ChannelPicker
               selectedId={barChannelId}
@@ -592,7 +623,8 @@ function ActionBar({
 
           {/* The overflow menu: the long tail of occasional actions — Share
               and Send feedback live here permanently — plus any utility icons
-              the fit check folded in above them. */}
+              the fit check folded in above them. Divided into groups: folded
+              icons · share & export · clear · help & the app itself. */}
           <Menu
             align="end"
             trigger={
@@ -676,6 +708,9 @@ function ActionBar({
                 >
                   Export as code
                 </MenuItem>
+                {/* The one destructive row sits in a group of its own, so it's
+                    never a slip away from an export or from "Send feedback". */}
+                <MenuDivider />
                 <MenuItem
                   icon={<TrashIcon />}
                   onSelect={() => {
@@ -689,6 +724,7 @@ function ActionBar({
                 >
                   Clear current message
                 </MenuItem>
+                <MenuDivider />
                 {feedbackOn ? (
                   <MenuItem
                     icon={<SupportIcon />}
@@ -714,15 +750,6 @@ function ActionBar({
                   </MenuItem>
                 ) : null}
                 <MenuItem
-                  icon={<InfoIcon />}
-                  onSelect={() => {
-                    close();
-                    onAbout();
-                  }}
-                >
-                  About
-                </MenuItem>
-                <MenuItem
                   icon={<FilmIcon />}
                   onSelect={() => {
                     close();
@@ -747,6 +774,15 @@ function ActionBar({
                     Install app
                   </MenuItem>
                 )}
+                <MenuItem
+                  icon={<InfoIcon />}
+                  onSelect={() => {
+                    close();
+                    onAbout();
+                  }}
+                >
+                  About
+                </MenuItem>
               </>
             )}
           </Menu>

@@ -8,12 +8,27 @@
 import { ChannelType, ComponentType, type ComponentTypeValue } from "./types";
 
 interface ComponentMeta {
+  /** What the tree, the preview and the editor's toasts call a component. */
   label: string;
+  /** The add menu's one-line explanation of the entry. */
   description: string;
   /** Single-glyph icon used in the tree/picker. */
   glyph: string;
+  /**
+   * The add menu's name for the entry, when adding one reads differently from
+   * what the tree calls the result. People open the add menu looking for a
+   * button or a dropdown, never for the row that has to hold it — so the action
+   * row is offered as "Buttons & menus" and sits in the tree as the row it is.
+   */
+  addLabel?: string;
 }
 
+/*
+ * The five selects are named for what they list, in the same words the
+ * template setup already uses (`targetNoun`), and each description keeps
+ * Discord's own name for anyone who knows the API. A select is still a "menu"
+ * throughout the editor — the Action panel, the add menu's group, validation.
+ */
 export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
   [ComponentType.Container]: {
     label: "Container",
@@ -31,7 +46,7 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
     glyph: "¶",
   },
   [ComponentType.MediaGallery]: {
-    label: "Media Gallery",
+    label: "Media gallery",
     description: "Up to 10 images or videos in a grid.",
     glyph: "▦",
   },
@@ -46,8 +61,9 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
     glyph: "―",
   },
   [ComponentType.ActionRow]: {
-    label: "Buttons Row",
-    description: "Up to 5 buttons or one select side-by-side.",
+    label: "Action row",
+    addLabel: "Buttons & menus",
+    description: "A row of up to 5 buttons, or one dropdown menu.",
     glyph: "⬚",
   },
   [ComponentType.Button]: {
@@ -61,36 +77,43 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
     glyph: "▣",
   },
   [ComponentType.StringSelect]: {
-    label: "String Select",
-    description: "Dropdown of custom options (needs a bot to handle clicks).",
+    label: "Options menu",
+    description: "A dropdown of options you write (Discord’s string select).",
     glyph: "▾",
   },
   [ComponentType.TextInput]: {
-    label: "Text Input",
+    label: "Text input",
     description: "Modal text input (not allowed in messages).",
     glyph: "▭",
   },
   [ComponentType.UserSelect]: {
-    label: "User Select",
-    description: "Pick guild members (needs a bot to handle clicks).",
+    label: "Member menu",
+    description: "A dropdown of the server’s members (Discord’s user select).",
     glyph: "▾",
   },
   [ComponentType.RoleSelect]: {
-    label: "Role Select",
-    description: "Pick guild roles (needs a bot to handle clicks).",
+    label: "Role menu",
+    description: "A dropdown of the server’s roles (Discord’s role select).",
     glyph: "▾",
   },
   [ComponentType.MentionableSelect]: {
-    label: "Mentionable Select",
-    description: "Pick users or roles (needs a bot to handle clicks).",
+    label: "Member / role menu",
+    description: "A dropdown of members and roles (Discord’s mentionable select).",
     glyph: "▾",
   },
   [ComponentType.ChannelSelect]: {
-    label: "Channel Select",
-    description: "Pick channels (needs a bot to handle clicks).",
+    label: "Channel menu",
+    description: "A dropdown of the server’s channels (Discord’s channel select).",
     glyph: "▾",
   },
 };
+
+/** The add menu's name for a component type — its `addLabel` when adding reads
+ *  differently from what the tree calls the result, else its label. */
+export function addMenuLabel(type: ComponentTypeValue): string {
+  const meta = COMPONENT_META[type];
+  return meta.addLabel ?? meta.label;
+}
 
 /**
  * Components V2 component types the editor exposes in the "add" menu.

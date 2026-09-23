@@ -119,6 +119,10 @@ import { readFeatureIntent, stripFeatureIntent } from "./featureIntent";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import type { SeoEntry } from "@/core/seo/acquisition";
 
+// The error screen's blank start, exposed through this lazily loaded chunk so
+// the boundary (in the entry chunk) never imports the store itself.
+export { startBlankMessage } from "./blankStart";
+
 export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   // Share/short links outrank template links when a malformed URL contains
   // both. Until the selected source settles, keep the showcase's media-heavy
@@ -638,8 +642,8 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
         ) : null}
         <SendCoachMark />
         <UpdatePrompt />
-        {/* Renders nothing until a successful send arms it, so it costs a null
-            return on every other frame and needs no lazy chunk. */}
+        {/* Renders nothing until a successful send arms it; the card itself is
+            a lazy chunk (RatingCard) behind its own ChunkErrorBoundary. */}
         <RatingPrompt />
         <ToastViewport />
       </main>

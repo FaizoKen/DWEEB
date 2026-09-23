@@ -83,8 +83,8 @@
   background: var(--app-bg-active);
 }
 
-/* Expandable group (e.g. "Buttons Row", "Section"): the whole row is a single
- * toggle that reveals the indented variants. It adds nothing on its own. */
+/* Expandable group (e.g. "Buttons & menus", "Section"): the whole row is a
+ * single toggle that reveals the indented variants. It adds nothing on its own. */
 .group {
   display: flex;
   flex-direction: column;

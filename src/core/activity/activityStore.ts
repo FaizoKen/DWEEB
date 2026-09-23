@@ -59,8 +59,11 @@ import { browserTimezone } from "@/core/schedule/recurrence";
 import { libraryEntryMessage } from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
 import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
+import { createConnectionNotifier } from "./connectionNotice";
+import { actorDisplayName, peerReplaceNotice } from "./roomReplace";
 import { setActivityToken } from "./runtime";
 import { startHandshakeTrace } from "./telemetry";
+import { missingUploadCount, missingUploadsMessage } from "./uploads";
 
 export type ActivityStatus = "idle" | "connecting" | "ready" | "error";
 
@@ -479,6 +482,16 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         void loadPostableGuilds(set);
       }
 
+      // Losing the room used to show only as the presence ring's colour, so say
+      // it — debounced, so a blip a reconnect heals at once stays silent and a
+      // flapping socket can't stack toasts (see connectionNotice.ts).
+      const connection = createConnectionNotifier({
+        onLost: () =>
+          pushToast("Lost connection to the room — reconnecting…", "info", { durationMs: 5000 }),
+        onRestored: () =>
+          pushToast("Reconnected — your edits sync with the room again.", "success"),
+      });
+
       // Open the shared editing room. A DM launch passes no guild — the room is
       // keyed by the unguessable instance id instead (see `server/activity.rs`).
       // No token is passed: each socket connect mints its own single-use room
@@ -493,7 +506,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // launch only) so a latecomer inherits it; null on a DM launch.
         targetChannelId: guildId ? channelId : null,
         onRoster: (participants) => set({ participants }),
-        onConnectedChange: (collabConnected) => set({ collabConnected }),
+        onConnectedChange: (collabConnected) => {
+          set({ collabConnected });
+          connection.update(collabConnected);
+        },
         // A peer moved the shared destination — apply it locally WITHOUT
         // re-broadcasting (that would echo back to the room and loop). Safe to
         // apply unconditionally: the frame only ever carries a channel in the
@@ -501,21 +517,36 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         onTarget: (channelId) => {
           if (get().targetChannelId !== channelId) set({ targetChannelId: channelId });
         },
-        // The room is full for the host's plan tier — keep editing solo.
-        onRoomFull: (cap) =>
+        // The room is full for the host's plan tier — keep editing solo. Collab
+        // has stopped retrying, so there's no "reconnecting…" to announce.
+        onRoomFull: (cap) => {
+          connection.halt();
           pushToast(
             cap > 0
               ? `This room is full — the host's plan allows ${cap} live editors. You can keep editing on your own.`
               : "This collaboration room is full. You can keep editing on your own.",
             "info",
-          ),
+          );
+        },
         // The Activity's sign-in is no longer valid (revoked/expired token, or
         // membership lost) — collab has stopped for good; editing continues
         // solo. Only a relaunch can mint a fresh session, so say exactly that.
-        onAuthExpired: () =>
+        onAuthExpired: () => {
+          connection.halt();
           pushToast(
             "Your Discord session in this Activity has expired — relaunch DWEEB to reconnect with your team.",
             "error",
+          );
+        },
+        // Someone else swapped out the whole draft. Remote frames bypass our
+        // undo history, so without this the change would arrive unexplained.
+        onPeerReplace: ({ actor, cleared }) =>
+          pushToast(
+            peerReplaceNotice(actorDisplayName(actor, get().participants), cleared),
+            "info",
+            {
+              durationMs: 5000,
+            },
           ),
         // A custom bot's connect flow finished — surface it so the post dialog
         // selects it right away (see PostConfirm's consume effect).
@@ -569,8 +600,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // surface the count as a friendly toast rather than a raw server error. The
     // bar also disables Post while errors stand (see ActivityBar), so this mainly
     // guards non-UI paths and the race where a collaborator's edit invalidated the
-    // draft between the click and here.
+    // draft between the click and here. Missing uploads go first: the validator
+    // flags them too, but only this names the cause and the way out.
     const message = useMessageStore.getState().message;
+    if (!guardUploads(message)) return null;
     if (!guardValid(message, "post")) return null;
     if (!guardDestination(message)) return null;
     if (get().publishing) return null;
@@ -666,9 +699,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       pushToast("You need the “Manage Webhooks” permission to update messages here.", "error");
       return null;
     }
-    // Same up-front validation as a fresh post — an edit to an invalid draft is
-    // rejected by Discord just the same, so fail early and friendly.
+    // Same up-front checks as a fresh post — an edit to an invalid draft (or one
+    // referencing uploads this browser doesn't hold) is rejected by Discord just
+    // the same, so fail early and friendly.
     const message = useMessageStore.getState().message;
+    if (!guardUploads(message)) return null;
     if (!guardValid(message, "update")) return null;
     if (get().publishing) return null;
     set({ publishing: true });
@@ -1231,6 +1266,20 @@ function guardDestination(message: WebhookMessage): boolean {
   const issues = validateDestination(message, channelType, channelName);
   if (issues.length === 0) return true;
   pushToast(issues[0]!.message, "error");
+  return false;
+}
+
+/**
+ * Block a post/update while the draft references uploads this browser doesn't
+ * hold — a collaborator's, or one made before DWEEB was reopened. The serializer
+ * would otherwise ship a dangling `attachment://` reference Discord rejects with
+ * a raw error; this says why and what to do instead. (Scheduling refuses every
+ * upload on its own terms — the worker can never attach one — see `schedule`.)
+ */
+function guardUploads(message: WebhookMessage): boolean {
+  const missing = missingUploadCount(message);
+  if (missing === 0) return true;
+  pushToast(missingUploadsMessage(missing), "error", { durationMs: 8000 });
   return false;
 }
 

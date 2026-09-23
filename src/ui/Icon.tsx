@@ -86,6 +86,18 @@ export const MoreHorizontalIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Six-dot grip — the "you can drag this" handle on a reorderable row. */
+export const GripIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} fill="currentColor" stroke="none" {...rest}>
+    <circle cx="9" cy="6" r="1.7" />
+    <circle cx="15" cy="6" r="1.7" />
+    <circle cx="9" cy="12" r="1.7" />
+    <circle cx="15" cy="12" r="1.7" />
+    <circle cx="9" cy="18" r="1.7" />
+    <circle cx="15" cy="18" r="1.7" />
+  </svg>
+);
+
 export const SendIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M22 2L11 13" />

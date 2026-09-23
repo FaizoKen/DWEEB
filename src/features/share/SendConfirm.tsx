@@ -82,6 +82,10 @@ export interface SendConfirmProps {
   threadId?: string;
   /** Message id being overwritten, in update mode. */
   messageId?: string;
+  /** That message's own first line, when known — shown instead of the bare id. */
+  messageLabel?: string;
+  /** A link to that message, when its server and channel are known. */
+  messageUrl?: string;
   /**
    * Present when confirming a SCHEDULED post rather than an immediate send:
    * carries the human-readable local fire time. Flips the dialog's title and
@@ -89,8 +93,15 @@ export interface SendConfirmProps {
    * (webhook/destination facts, ping summary, the never-expire toggle) is shared
    * with the send confirm unchanged — so a scheduled interactive message decides
    * permanence in exactly the same place a sent one does.
+   *
+   * `editing`: saving into a scheduled post loaded from the directory — the
+   * wording says so, `destination` names where that post goes (its webhook is
+   * sealed server-side, so there may be no webhook facts to show), and the
+   * ownership note is dropped since nothing is verified on confirm.
+   * `again`: the same message, time and destination were just scheduled — the
+   * confirm says plainly that this adds a second post.
    */
-  schedule?: { at: string };
+  schedule?: { at: string; editing?: boolean; again?: boolean; destination?: string };
   /** Who the message will ping, after `allowed_mentions`. */
   pings: PingSummary;
   /**
@@ -244,14 +255,11 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
 
   if (!pings.willPing) {
     return (
-      <div className={styles.pingCalm} role="note">
-        <strong>No one will be pinged.</strong>
-        <p className={styles.pingDetail}>
-          {pings.hasMentions
-            ? "Mentions are written in the text, but allowed-mentions settings stop them resolving."
-            : "This message contains no @everyone, role, or user mentions."}
-        </p>
-      </div>
+      <p className={styles.pingQuiet}>
+        {pings.hasMentions
+          ? "No one will be pinged — your mention settings turn off the ones in the text."
+          : "No one will be pinged."}
+      </p>
     );
   }
 
@@ -510,6 +518,8 @@ export function SendConfirm({
   channelName,
   threadId,
   messageId,
+  messageLabel,
+  messageUrl,
   schedule,
   pings,
   componentRouting,
@@ -523,7 +533,9 @@ export function SendConfirm({
   onCancel,
 }: SendConfirmProps) {
   const hasOwner = ownerKind != null && ownerKind !== "unknown";
-  const targetName = webhookName?.trim() || "this webhook";
+  const editing = schedule?.editing === true;
+  const targetName =
+    webhookName?.trim() || (editing ? "The webhook it was scheduled with" : "this webhook");
 
   return (
     <Modal
@@ -531,11 +543,15 @@ export function SendConfirm({
       onClose={onCancel}
       size="sm"
       title={
-        schedule
-          ? "Schedule this message?"
-          : mode === "update"
-            ? "Update this message?"
-            : "Post this message?"
+        editing
+          ? "Save changes to this scheduled post?"
+          : schedule?.again
+            ? "Schedule another post?"
+            : schedule
+              ? "Schedule this message?"
+              : mode === "update"
+                ? "Update this message?"
+                : "Post this message?"
       }
       footer={
         <>
@@ -549,16 +565,20 @@ export function SendConfirm({
             leadingIcon={busy ? <span className={styles.spinner} aria-hidden="true" /> : undefined}
           >
             {busy
-              ? schedule
-                ? "Scheduling…"
-                : mode === "update"
-                  ? "Updating…"
-                  : "Posting…"
-              : schedule
-                ? "Schedule post"
-                : mode === "update"
-                  ? "Update message"
-                  : "Post message"}
+              ? editing
+                ? "Saving…"
+                : schedule
+                  ? "Scheduling…"
+                  : mode === "update"
+                    ? "Updating…"
+                    : "Posting…"
+              : editing
+                ? "Save changes"
+                : schedule
+                  ? "Schedule post"
+                  : mode === "update"
+                    ? "Update message"
+                    : "Post message"}
           </Button>
         </>
       }
@@ -567,11 +587,15 @@ export function SendConfirm({
         <div className={styles.fact}>
           <dt>Action</dt>
           <dd>
-            {schedule
-              ? "Schedule this message to post later"
-              : mode === "update"
-                ? "Edit a message you already posted"
-                : "Post a new message"}
+            {editing
+              ? "Update a scheduled post — this message replaces the one it had"
+              : schedule?.again
+                ? "Schedule a second post of this message — the one you just scheduled stays too"
+                : schedule
+                  ? "Schedule this message to post later"
+                  : mode === "update"
+                    ? "Edit a message you already posted"
+                    : "Post a new message"}
           </dd>
         </div>
         {schedule ? (
@@ -609,7 +633,7 @@ export function SendConfirm({
                 </span>
               ) : null}
             </div>
-            {!hasOwner ? (
+            {!hasOwner && !editing ? (
               <div className={styles.muted}>Ownership is verified when you confirm.</div>
             ) : null}
           </dd>
@@ -660,6 +684,14 @@ export function SendConfirm({
             </dd>
           </div>
         ) : null}
+        {schedule?.destination && !channelId && !channelName ? (
+          <div className={styles.fact}>
+            <dt>Posts to</dt>
+            <dd>
+              <span className={styles.destName}>{schedule.destination}</span>
+            </dd>
+          </div>
+        ) : null}
         {threadId ? (
           <div className={styles.fact}>
             <dt>Thread</dt>
@@ -672,7 +704,24 @@ export function SendConfirm({
           <div className={styles.fact}>
             <dt>Message</dt>
             <dd>
-              <code className={styles.chip}>{messageId}</code>
+              {messageLabel ? (
+                <span className={styles.destName} title={messageId}>
+                  “{messageLabel}”
+                </span>
+              ) : (
+                <code className={styles.chip}>{messageId}</code>
+              )}
+              {messageUrl ? (
+                <a
+                  className={styles.openChannel}
+                  href={messageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => handleDiscordLinkClick(e, messageUrl)}
+                >
+                  Open ↗
+                </a>
+              ) : null}
             </dd>
           </div>
         ) : null}

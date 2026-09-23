@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useRef } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { useMessageStore } from "@/core/state/messageStore";
 import { addThenScroll } from "@/features/builder/scrollTreeRow";
 import { LIMITS } from "@/core/schema/limits";
@@ -18,7 +19,7 @@ const GALLERY_ACCEPT = "image/*,video/*";
 
 export function MediaGalleryInspector({ node }: Props) {
   const addItem = useMessageStore((s) => s.addGalleryItem);
-  const fileInputId = useId();
+  const fileInputId = useUniqueId("gallery-file");
   const inputRef = useRef<HTMLInputElement>(null);
   const isFull = node.items.length >= LIMITS.GALLERY_ITEMS;
 

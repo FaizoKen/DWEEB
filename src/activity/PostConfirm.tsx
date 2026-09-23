@@ -707,6 +707,7 @@ export function PostConfirm({
                   type="button"
                   className={styles.idPill}
                   data-active={!scheduling ? "" : undefined}
+                  aria-pressed={!scheduling}
                   disabled={busy}
                   onClick={() => {
                     setWhen("now");
@@ -719,6 +720,7 @@ export function PostConfirm({
                   type="button"
                   className={styles.idPill}
                   data-active={scheduling ? "" : undefined}
+                  aria-pressed={scheduling}
                   disabled={busy}
                   onClick={() => setWhen("later")}
                 >
@@ -762,6 +764,7 @@ export function PostConfirm({
                   type="button"
                   className={styles.idPill}
                   data-active={postAs === null ? "" : undefined}
+                  aria-pressed={postAs === null}
                   disabled={busy}
                   onClick={() => {
                     identityTouched.current = true;
@@ -779,6 +782,7 @@ export function PostConfirm({
                         type="button"
                         className={styles.idPill}
                         data-active={postAs === bot.application_id ? "" : undefined}
+                        aria-pressed={postAs === bot.application_id}
                         disabled={busy}
                         onClick={() => {
                           identityTouched.current = true;

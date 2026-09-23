@@ -933,7 +933,10 @@ tbody tr:last-child td{border-bottom:0}
   .site{align-items:flex-start;flex-direction:column;gap:10px}
   .site-nav{width:100%;overflow-x:auto;gap:14px;padding-bottom:2px;scrollbar-width:thin}
   .site-nav a{white-space:nowrap}
-  .site{backdrop-filter:none}
+  /* Phones skip the backdrop blur, and without it the translucent desktop
+     fill let the page's text show through the sticky header as it scrolled
+     under — so the fill goes opaque here. */
+  .site{backdrop-filter:none;background:var(--bg)}
 }
 @media(max-width:560px){
   .site{padding:14px 16px}

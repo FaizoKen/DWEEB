@@ -13,14 +13,21 @@
  * Switching provider re-seeds the model/base-url defaults but preserves
  * whatever the user typed for the key. A BYOK key never leaves the browser
  * until a chat request is sent, and even then only to the provider they chose.
+ *
+ * The saved key can always be taken back out: "Remove key" deletes it from this
+ * browser (after saying that it lives nowhere else), and saving the built-in
+ * provider drops it — the form says so before that save, rather than leaving a
+ * key stored behind a view that reads "No API key to manage".
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
 import { TextInput } from "@/ui/TextInput";
+import { pushToast } from "@/ui/Toast";
 import { useAiStore } from "@/core/ai/aiStore";
 import { PROVIDERS, defaultSettingsFor } from "@/core/ai/providerMeta";
 import type { AiProvider, AiSettings } from "@/core/ai/types";
@@ -43,6 +50,7 @@ interface AiSettingsFormProps {
 export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsFormProps) {
   const saved = useAiStore((s) => s.settings);
   const setSettings = useAiStore((s) => s.setSettings);
+  const removeApiKey = useAiStore((s) => s.removeApiKey);
   // First run (nothing usable configured yet) gets a nudge.
   const isConfigured = useAiStore((s) => s.isConfigured());
   const authStatus = useAuthStore((s) => s.status);
@@ -52,8 +60,43 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
   // build (pure client-side builder) hides it and runs BYOK-only.
   const builtInAvailable = isProxyConfigured();
 
-  const [draft, setDraft] = useState<AiSettings>(() => saved);
+  // Saving the built-in provider drops the key (aiStore.setSettings), so a key
+  // stored beside it predates that rule. Start the field empty rather than hand
+  // it to whichever provider the advanced section opens on.
+  const [draft, setDraft] = useState<AiSettings>(() =>
+    PROVIDERS[saved.provider].builtIn ? { ...saved, apiKey: "" } : saved,
+  );
   const [revealKey, setRevealKey] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const removeQuestionId = useUniqueId("ai-remove");
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const removeKeyRef = useRef<HTMLButtonElement>(null);
+  const keepKeyRef = useRef<HTMLButtonElement>(null);
+
+  // The key actually stored in this browser — what "Remove key" deletes and a
+  // built-in save drops — as opposed to whatever the field holds right now.
+  const storedKey = saved.apiKey.trim().length > 0;
+  const storedKeyOwner = PROVIDERS[saved.provider].builtIn ? null : PROVIDERS[saved.provider].label;
+
+  // Each step moves focus to the control that replaces the one just pressed:
+  // the confirmation's safe choice, the Remove button again, or the now-empty
+  // key field. rAF lets the swapped-in element render first.
+  const askRemoveKey = () => {
+    setConfirmingRemove(true);
+    requestAnimationFrame(() => keepKeyRef.current?.focus());
+  };
+  const keepKey = () => {
+    setConfirmingRemove(false);
+    requestAnimationFrame(() => removeKeyRef.current?.focus());
+  };
+  const removeKey = () => {
+    removeApiKey();
+    setDraft((d) => ({ ...d, apiKey: "" }));
+    setConfirmingRemove(false);
+    setRevealKey(false);
+    pushToast("API key removed from this browser", "success");
+    requestAnimationFrame(() => keyInputRef.current?.focus());
+  };
   // Open the advanced section when the user is already on a BYOK provider (so
   // their live config is never hidden from them), or when built-in isn't
   // available at all and BYOK is the only option.
@@ -141,6 +184,13 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
                 to use it.
               </span>
             ) : null}
+            {storedKey ? (
+              <span className={styles.keyNote}>
+                Saving removes{" "}
+                {storedKeyOwner ? `your ${storedKeyOwner} key` : "the API key saved earlier"} from
+                this browser.
+              </span>
+            ) : null}
           </div>
           <button type="button" className={styles.advancedToggle} onClick={openAdvanced}>
             Use your own API key (advanced)
@@ -208,6 +258,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
             {(id) => (
               <div className={styles.keyRow}>
                 <TextInput
+                  ref={keyInputRef}
                   id={id}
                   masked={!revealKey}
                   spellCheck={false}
@@ -229,6 +280,36 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
               </div>
             )}
           </Field>
+
+          {storedKey ? (
+            confirmingRemove ? (
+              <div className={styles.keyConfirm} role="group" aria-labelledby={removeQuestionId}>
+                <p id={removeQuestionId} className={styles.keyConfirmText}>
+                  Remove {storedKeyOwner ? `your ${storedKeyOwner} key` : "the saved API key"} from
+                  this browser? It’s stored only here, so you’d have to paste it in again to use it.
+                </p>
+                <div className={styles.keyConfirmActions}>
+                  <Button ref={keepKeyRef} size="sm" variant="ghost" onClick={keepKey}>
+                    Keep key
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={removeKey}>
+                    Remove key
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.keySaved}>
+                <span>
+                  {storedKeyOwner
+                    ? `Your ${storedKeyOwner} key is saved in this browser.`
+                    : "An API key from before is still saved in this browser."}
+                </span>
+                <Button ref={removeKeyRef} size="sm" variant="ghost" onClick={askRemoveKey}>
+                  Remove key
+                </Button>
+              </div>
+            )
+          ) : null}
 
           <Field
             label="Model"

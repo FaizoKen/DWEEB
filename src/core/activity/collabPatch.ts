@@ -155,6 +155,44 @@ function mergeOwnProps(node: AnyComponent, data: Record<string, unknown>): AnyCo
   return out as unknown as AnyComponent;
 }
 
+// ── Whole-document replace ───────────────────────────────────────────────────
+
+/**
+ * Whether `next` swapped out `prev` wholesale rather than editing it: `prev`
+ * held at least one node and not one of its editor ids survives anywhere in
+ * `next`.
+ *
+ * Every whole-message action — a template, "Start from scratch", Restore, a
+ * JSON import, a library or scheduled load — goes through the store's id
+ * reassignment, so its result shares no id with what it replaced, while a
+ * structural edit (adding, removing, reordering or wrapping blocks) always
+ * keeps some. Ids are compared at every depth, not just the top level, so
+ * wrapping every block in a new Container (a fresh root id, the old ones now
+ * nested) doesn't read as a replace. An empty `prev` has nothing to lose, so
+ * filling it never counts. Tolerates a malformed peer frame (no component
+ * list, a node without an id) rather than throwing mid-sync.
+ */
+export function isWholeDocumentReplace(prev: WebhookMessage, next: WebhookMessage): boolean {
+  const before = collectIds(prev);
+  if (before.size === 0) return false;
+  for (const id of collectIds(next)) if (before.has(id)) return false;
+  return true;
+}
+
+/** Every editor id in `message`'s component tree (accessories included). */
+function collectIds(message: WebhookMessage): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: AnyComponent | undefined): void => {
+    if (!node || typeof node !== "object") return;
+    if (typeof node._id === "string") ids.add(node._id);
+    for (const kids of childCollections(node)) {
+      if (Array.isArray(kids)) for (const kid of kids) visit(kid);
+    }
+  };
+  if (Array.isArray(message?.components)) for (const top of message.components) visit(top);
+  return ids;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** A branch node's child-node collections, each as an array (the Section

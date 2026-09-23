@@ -24,17 +24,87 @@
  * everything in the inspector.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/cn";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
 import { GlobeIcon, PuzzleIcon } from "@/ui/Icon";
 import type { PluginManifest, PluginPreset } from "@/core/plugins/manifest";
 import type { LinkPluginManifest } from "@/core/plugins/linkManifest";
+import { fetchLinkPluginStatus, type LinkPluginStatus } from "@/core/plugins/linkStatus";
 import { presetsForTarget, type PluginTarget } from "@/core/plugins/targets";
+import { isActivityMode } from "@/core/activity/runtime";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { PluginIcon } from "./PluginIcon";
 import styles from "./PluginLibraryModal.module.css";
+
+const NO_LINK_PLUGINS: LinkPluginManifest[] = [];
+const NO_STATUSES: Readonly<Record<string, LinkPluginStatus>> = {};
+
+/** The tag a link plugin's row carries for the connected server. */
+export interface LinkSetupTag {
+  label: string;
+  tone: "ready" | "warning" | "neutral";
+  title: string;
+}
+
+/**
+ * A link plugin's setup tag: the probe's answer when it gave one, else a
+ * neutral note that the service needs a one-time setup — never a claim either
+ * way about a server nobody could ask about (no server connected, the probe
+ * failed, or the Activity, whose CSP blocks every probe host).
+ */
+export function linkSetupTag(
+  manifest: Pick<LinkPluginManifest, "setupUrl">,
+  status: LinkPluginStatus,
+): LinkSetupTag | null {
+  if (status === "ready") return { label: "Ready", tone: "ready", title: "Set up for this server" };
+  if (status === "needs-setup") {
+    return { label: "Needs setup", tone: "warning", title: "Not set up for this server yet" };
+  }
+  return manifest.setupUrl
+    ? { label: "One-time setup", tone: "neutral", title: "Set up once on the service's site" }
+    : null;
+}
+
+/**
+ * Each link plugin's setup state for the connected server, from its `statusUrl`
+ * probe — the same best-effort probe (and cache) as the attached chip, so the
+ * chip picked from here usually resolves at once. Unlike the chip there is no
+ * re-probe on window focus: nothing in the library sends anyone off to set a
+ * service up. Skipped inside the Activity, where the CSP refuses the probes.
+ */
+function useLinkSetupStatuses(
+  linkPlugins: LinkPluginManifest[],
+): Readonly<Record<string, LinkPluginStatus>> {
+  const guildId = useGuildStore((s) => s.guildId);
+  const [probed, setProbed] = useState<{
+    guildId: string;
+    byId: Record<string, LinkPluginStatus>;
+  }>({ guildId: "", byId: {} });
+
+  useEffect(() => {
+    if (!guildId || isActivityMode()) return;
+    let cancelled = false;
+    for (const manifest of linkPlugins) {
+      if (!manifest.statusUrl) continue;
+      void fetchLinkPluginStatus(manifest, guildId).then(({ status }) => {
+        if (cancelled) return;
+        setProbed((prev) => ({
+          guildId,
+          byId: { ...(prev.guildId === guildId ? prev.byId : {}), [manifest.id]: status },
+        }));
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [linkPlugins, guildId]);
+
+  // Answers for another server say nothing about this one.
+  return probed.guildId === guildId ? probed.byId : NO_STATUSES;
+}
 
 interface Props {
   /** Plugins already filtered to the current component's target type. */
@@ -67,7 +137,7 @@ const matches = (q: string, ...fields: (string | undefined)[]) =>
 export function PluginLibraryModal({
   plugins,
   target,
-  linkPlugins = [],
+  linkPlugins = NO_LINK_PLUGINS,
   onPick,
   onPickLink,
   onClose,
@@ -80,6 +150,7 @@ export function PluginLibraryModal({
   const connectedBotPresent = useAuthStore(
     (s) => !!connectedGuildId && s.guilds.some((g) => g.id === connectedGuildId && g.bot_present),
   );
+  const setupStatuses = useLinkSetupStatuses(linkPlugins);
   // Which plugin groups have their templates expanded. Collapsed by default so the
   // list reads as one row per plugin; the toggle reveals that plugin's templates.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -213,29 +284,44 @@ export function PluginLibraryModal({
     );
   };
 
-  const renderLinkRow = (manifest: LinkPluginManifest) => (
-    <li key={manifest.id} className={styles.group}>
-      <div className={styles.header}>
-        <button type="button" className={styles.row} onClick={() => onPickLink?.(manifest)}>
-          <PluginIcon manifest={manifest} />
-          <span className={styles.rowText}>
-            <span className={styles.rowNameLine}>
-              <span className={styles.rowName}>{manifest.name}</span>
-              {/* No "External" tag — every row here sits under the "Link to a
-                  service" category, whose header already says these open an
-                  external page. Repeating it per row is noise. */}
-              {/* Flags services a server manager must register with (once, on the
-                  service's own dashboard) before the link works. */}
-              {manifest.setupUrl ? <span className={styles.loginTag}>Needs setup</span> : null}
+  const renderLinkRow = (manifest: LinkPluginManifest) => {
+    // Services a server manager registers with once, on the service's own
+    // dashboard, before the link works — told apart by the live probe where it
+    // answers, so the list stops calling every one "Needs setup".
+    const tag = linkSetupTag(manifest, setupStatuses[manifest.id] ?? "unknown");
+    return (
+      <li key={manifest.id} className={styles.group}>
+        <div className={styles.header}>
+          <button type="button" className={styles.row} onClick={() => onPickLink?.(manifest)}>
+            <PluginIcon manifest={manifest} />
+            <span className={styles.rowText}>
+              <span className={styles.rowNameLine}>
+                <span className={styles.rowName}>{manifest.name}</span>
+                {/* No "External" tag — every row here sits under the "Link to a
+                    service" category, whose header already says these open an
+                    external page. Repeating it per row is noise. */}
+                {tag ? (
+                  <span
+                    className={cn(
+                      styles.loginTag,
+                      tag.tone === "ready" && styles.tagReady,
+                      tag.tone === "neutral" && styles.tagNeutral,
+                    )}
+                    title={tag.title}
+                  >
+                    {tag.label}
+                  </span>
+                ) : null}
+              </span>
+              {manifest.description ? (
+                <span className={styles.rowDesc}>{manifest.description}</span>
+              ) : null}
             </span>
-            {manifest.description ? (
-              <span className={styles.rowDesc}>{manifest.description}</span>
-            ) : null}
-          </span>
-        </button>
-      </div>
-    </li>
-  );
+          </button>
+        </div>
+      </li>
+    );
+  };
 
   const noMatches = groups.length === 0 && linkMatches.length === 0;
 

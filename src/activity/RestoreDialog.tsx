@@ -25,6 +25,8 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { parseMessageIdInput } from "@/core/webhook/send";
 import { planRestore } from "@/core/activity/restoreTarget";
+import { requestRoomReplace } from "@/core/activity/roomReplaceConfirm";
+import { RoomReplaceNote } from "./RoomReplaceConfirm";
 import styles from "./RestoreDialog.module.css";
 
 /** The other channel a restore wants to switch to, resolved for the confirm view. */
@@ -113,8 +115,14 @@ export function RestoreDialog({ open, onClose }: { open: boolean; onClose: () =>
       });
       return;
     }
-    // direct / thread — the store derives the same target from the input.
-    void runRestore();
+    // direct / thread — the store derives the same target from the input. The
+    // restored message replaces the whole shared draft, so ask first while
+    // others are editing it.
+    requestRoomReplace({
+      action: "Restoring this message",
+      confirmLabel: "Restore for everyone",
+      run: () => void runRestore(),
+    });
   };
 
   const confirmSwitch = () => {
@@ -184,6 +192,9 @@ export function RestoreDialog({ open, onClose }: { open: boolean; onClose: () =>
             {isDm ? "" : " — everyone editing here follows along"}. Your edits then update it in
             place.
           </p>
+          {/* This view is already the confirmation, so the replace warning rides
+              in it rather than stacking a second dialog on "Switch & restore". */}
+          <RoomReplaceNote action="restoring that message" />
         </>
       ) : (
         <>

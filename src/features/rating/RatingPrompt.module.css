@@ -1,12 +1,19 @@
-/* Anchored bottom-right rather than in the toast stack: this one waits for an
-   answer instead of expiring, so it must not sit above transient toasts that
-   will slide out from under it, and the bottom corner keeps it clear of the
-   action bar's Send/Restore controls at the top. */
+/* Bottom-right rather than in the toast stack: it waits (a while) for an answer
+   instead of expiring in seconds, so it must not sit among transient toasts
+   that slide out from under it, and the bottom corner keeps it clear of the
+   action bar's Send/Restore controls at the top. It is parked *above* the
+   floating action stack (`.fab-stack`, global.css), never on it — it used to
+   cover Collab and the AI launcher: the stack's 16px inset, its action row
+   (`--app-fab-h`), then a 12px gap.
+
+   Layered just under the modal layer: over the page and the mobile preview
+   sheet, but beneath every dialog, popover and the assistant panel, which are
+   what someone is working in when one is open. */
 .card {
   position: fixed;
-  bottom: calc(16px + var(--app-saib));
+  bottom: calc(16px + var(--app-fab-h) + 12px + var(--app-saib));
   right: calc(16px + var(--app-sair));
-  z-index: calc(var(--app-z-tooltip) + 20);
+  z-index: calc(var(--app-z-modal) - 1);
   width: min(340px, calc(100vw - 32px - var(--app-sail) - var(--app-sair)));
   padding: 16px;
   border-radius: var(--app-radius-lg);
@@ -15,6 +22,15 @@
   color: var(--app-text);
   box-shadow: var(--app-shadow-lg);
   animation: rise 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Where the preview is a sheet (MOBILE_SHEET_QUERY, previewSheet.ts) the stack
+   also carries the live mini preview — 104px tall (MiniPreview.module.css) —
+   and its 10px gap above the action row. */
+@media (max-width: 900px) {
+  .card {
+    bottom: calc(16px + 104px + 10px + var(--app-fab-h) + 12px + var(--app-saib));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -39,13 +55,15 @@
   line-height: 1.35;
 }
 
+/* A full 40px target; the negative margins spend the card's padding on it so
+   the header row stays as compact as the title. */
 .close {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  margin: -4px -4px 0 0;
+  width: 40px;
+  height: 40px;
+  margin: -12px -12px -8px 0;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: transparent;
@@ -56,6 +74,13 @@
 .close:hover {
   background: var(--app-bg-hover);
   color: var(--app-text);
+}
+
+.close:focus-visible,
+.star:focus-visible,
+.link:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 
 .sub {
@@ -97,6 +122,12 @@
 
 .star:disabled {
   cursor: default;
+}
+
+@media (pointer: coarse) {
+  .star {
+    min-height: 44px;
+  }
 }
 
 /* Hovering a star lights it and every star before it, the way every rating

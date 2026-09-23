@@ -1847,8 +1847,8 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   permit pool and merge one batch at a time. Add any new account-scoped cache to this reset path.
 - **Destructive editor actions acknowledge themselves with an Undo toast, and toasts can carry
   one action** (2026-09-22 UX batch, from a full audit — the remaining findings are in the
-  maintainer's notes). `pushToast(message, tone, { action, durationMs })` renders a pill button;
-  a toast with an action lives 7 s, an error 5 s, plain feedback 3 s. `features/builder/undoToast`
+  maintainer's notes). `pushToast(message, tone, { action, durationMs })` renders a pill button
+  (timing and dismissal rules: see the 2026-09-23 toast bullet below). `features/builder/undoToast`
   wraps it for the editor: capture `useMessageStore.getState().message` *before* the store action,
   and its Undo fires only while that snapshot is still the top of `past` — otherwise it says the
   message has changed since, so a stale Undo can never revert newer work. Used by "Clear current
@@ -1935,6 +1935,149 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   counts never-expire messages that sit above the rolling window (the directory subtracts them
   with data the bar doesn't have). (7) Template-page copy names the real CTA ("Use this template
   free"), not the retired "Open in DWEEB".
+- **Tree moves are planned once, and the arrows say what they do** (2026-09-23 UX batch, the audit
+  backlog plus a fresh walkthrough). `planSiblingMove` (messageStore) decides what an up/down press
+  does — reorder, step *into* the adjacent Container, step *out of* the Container at its edge, or
+  nothing (`blocked: "top-level-full"` when only the top-level cap is in the way) — using the same
+  `canAcceptChild` gate `moveToParent` applies. `moveSibling` executes the plan and the row arrows
+  label themselves from it (`treeRowActions.ts`: "Move into the Container above", "Move up out of
+  the Container"), so label and behaviour can't drift; a silent re-parent behind a bare "Move up"
+  was the old surprise. Arrows stay mounted at a list's edge as `aria-disabled` (never `disabled`,
+  which drops focus) and `keepMoveArrowFocus` re-focuses the pressed arrow after the row
+  re-mounts. Row actions are `visibility: hidden` until the row is hovered, selected or
+  focus-within — `opacity: 0` alone left four invisible buttons per row in the tab order. On touch
+  (`(hover: none), (pointer: coarse)`) only the *selected* row shows its actions, at 40 px:
+  showing all four on every row squeezed labels to "Text # 🧩 The Compon…" at 390 px. Fine
+  pointers get a decorative six-dot grip on hover (pointer-transparent; the row starts the drag),
+  and a mouse press that wandered ≤8 px without ever showing a drop target is still a click
+  (`swallowsClickAfterDrag`). Rows reveal with `scroll-margin-top: 36px` so the floating issue
+  chip (top-right, ~6–30 px) doesn't sit on their Duplicate/Delete.
+- **Never `useId` — use `useUniqueId`** (`lib/useUniqueId.ts`). Preact derives `useId` from a
+  counter kept per render *root*, and every `Modal` portal is its own root, so a dialog's ids
+  restarted at values the editor behind it already used: with the Send dialog open, the Update
+  tab's message-ID and Thread ID inputs shared ids with the builder's Username/Avatar fields and
+  their labels, hints and errors pointed at the builder (found 2026-09-23 by reading
+  `input.labels` in a live dialog). A module-level sequence can't repeat; this app never
+  server-renders, so there is nothing to hydrate against.
+- **Editor words are the UI's words** (2026-09-23). `COMPONENT_META` labels are UI-only — codegen,
+  the MCP catalog and serialization never read them (`bun run gen:mcp` produced no diff). The add
+  menu offers the Action Row as "Buttons & menus" (`addLabel` / `addMenuLabel`) because people
+  look for a button or a dropdown, never for the row that holds it; the tree calls it "Action
+  row", and the five selects are "Options menu", "Member menu", "Role menu", "Member / role menu"
+  and "Channel menu", each description keeping Discord's own term for developers. Validation
+  message *text* uses the field labels ("Min selections", "Custom ID", "Thread name", "Default
+  selections", "alt text") — only `(code, path)` is pinned by the corpus, so copy can move freely
+  but codes never do. `ui/Field` takes `counter={{ value, max }}`: an `n/max` on the label row from
+  75% of the cap (amber ≥90%, red at it), described via `aria-describedby` rather than a live
+  region, counting UTF-16 units exactly like `maxLength`.
+- **Toasts are dismissible, pausable and announced once** (`ui/toastQueue.ts`, 2026-09-23). Every
+  toast has a Dismiss ✕; its lifetime is the tone's minimum (3 s, 5 s for an error, 7 s with an
+  action) stretched by reading time to at most 10 s — an explicit `durationMs` is used as-is; at
+  most three are visible and the oldest leaves first; countdowns hold while the pointer or focus
+  is on the stack or the tab is hidden, and resume with at least 1 s left. Screen readers hear
+  each message from always-mounted hidden regions (polite, or `role="alert"` for errors) while
+  the visible copy is `aria-hidden` — never put the visible stack back in a live region, or every
+  toast is read twice. `data-modal-live-region` marks a global status surface Modal must not
+  inert (the toast root, the update pill, which now portals to `<body>` above the directory).
+  Primitives size up only under `(pointer: coarse)` (IconButton 36/40, Button 36/40, menu items
+  44, modal close 40), as overrides at the primitive's own specificity so a caller's deliberate
+  size still wins; on phones a Modal footer stacks full-width with the primary on top (keep the
+  primary last in markup). Menus have typeahead (`menuTypeahead.ts`) and a focus ring distinct
+  from hover. The rating card is lazy (`RatingCard` behind a `ChunkErrorBoundary`), docks above
+  the FAB stack (its offset copies MiniPreview's 104 px — change them together) and never takes
+  focus; its ✕ is the permanent "Don't ask again", while Escape and the 20 s timeout are soft
+  (`dismiss(false)`), so the one-time ask survives an ignored card.
+- **The error screen never imports the store — and entry-chunk code never dynamic-imports what
+  the App graph imports statically** (2026-09-23). The top `ErrorBoundary` offers "Reload" (in
+  place, so a share link survives) and, on the web, "Start a blank message", which clears through
+  the store (the old message goes onto undo), writes the draft and history itself (autosave is
+  unmounted, and `/` restores whatever draft is saved) and then goes to `/`. It reaches that code
+  via `import("@/app/App")` (`app/blankStart.ts`, re-exported by App): the first version imported
+  `messageStore`/`draftStorage`/`historyStorage` straight from the boundary, which sits in the
+  entry chunk, and Rollup split all four modules out of the App graph into chunks of their own —
+  19 critical requests against the audit's 16 and +12 kB. Reach App-graph code from the entry
+  chunk through the App chunk, never around it. The plugin library modal is lazy for the same
+  budget (like the two config modals before it).
+- **Sign-in says "Sign in", and only an answer ends a session** (2026-09-23). Signed out, the
+  account control is a labelled "Sign in" button (the arrow-into-door icon read as "exit"); the
+  bar's fit ladder drops the label only after every utility icon has folded. The web bar reserves
+  `WEB_LEFT_MAX_RESERVE` (210 px) for account + destination so the channel name stays readable
+  (at a 776 px pane it had elided to "dweeb • …"), while the step that would drop Send's label
+  still measures with the Activity's 150. In `authStore`, `/auth/me` 401/403 clears the session
+  exactly as before; status 0/408/429/5xx keeps the current state — signed in stays signed in —
+  toasts once and retries (2 s doubling to 60 s, plus `online`/`visibilitychange`) when there is
+  a session to recover (`sessionHint`, a cached server, a sign-in that just finished). A network
+  blip used to sign people out silently. Flows with no click behind them (`?plans=`, the bot-add
+  return, `?custom-bot=`) call `requestLogin(message)` — a toast whose button opens the popup —
+  never `login()` from an effect, which the browser blocks into a full-page redirect. The landing
+  directory makes no cross-origin call (Lighthouse renders it; a CORS error fails Best Practices)
+  and picks its signed-out copy from `sessionHint` + the cached server. The "add the bot" popover
+  opens once per account per browser (`addBotPrompt`).
+- **The landing directory's header is load-bearing for Core Web Vitals — measure before changing
+  it** (2026-09-23). On a first visit `/` paints the boot shell's H1 (the intended LCP), then the
+  auto-opened directory renders over it, and *any* element in its first screen larger than that
+  H1 becomes a late LCP. Three innocent-looking header edits each failed the lab gate in
+  interleaved A/B runs (412×823, simulated throttling): hiding the lone "Template" chip moved
+  the card grid up 18 px and made a template's banner image the LCP (1.1 s → 3.05 s);
+  lengthening the signed-out subtitle to ~4 lines made the *subtitle* the LCP (294×78 px beat the
+  H1); and replacing the chip row with a sign-in line kept LCP but raised simulated TBT ~90 ms,
+  right onto `lighthouserc.json`'s 600 ms cap. What shipped keeps the row and a subtitle no
+  longer than the signed-in one ("Pick a template to start. Sign in with Discord to see your
+  server's posted and saved messages." — 94 chars vs 95), measured equal to the pre-change
+  build (TBT 494 vs 495 ms, LCP 1092 vs 1092 ms median of 8). So the pointless lone chip stays
+  for now. Before touching that header, compare against the previous build with interleaved
+  local Lighthouse runs: one-off lab numbers on a dev machine swing ±150 ms, and `lhci` itself
+  crashes on Windows cleaning its temp profile (EPERM), so drive `lighthouse` directly and read
+  the JSON.
+- **Send, Update and Schedule say what they'll do** (2026-09-23). `features/builder/jumpToIssue.ts`
+  is the one issue-jump routine: the header chip and the Send panel's "Fix before sending" rows
+  (each a button that closes the dialog and lands on the component or its Message-options field).
+  A scheduled post loaded from the directory arms `core/schedule/scheduleOrigin.ts` — bound to
+  the document generation *and* the message it replaced, dropped synchronously by any replacement
+  or an undo past the load, re-checked by `currentScheduleOrigin()` at save time — and Schedule
+  mode then PATCHes that post ("Save changes", same access as the directory's Cancel) instead of
+  creating a second one; never save into a schedule from anything that skips that check. After a
+  successful schedule the primary reads "Schedule another" until the message, time or
+  destination changes (two clicks used to make two posts), and past times are refused at the
+  field (`min` + inline error). Update shows a "Replaces" card for the target message
+  (`share/updateTarget.ts`) and warns "Update replaces the whole posted message…" with "Restore
+  it first" whenever the editor wasn't loaded from that message. Web Restore infers `thread_id`
+  from a pasted link only through `core/webhook/restoreLink.ts` (never the webhook's own channel
+  or a known server channel — Discord 400s "Unknown Channel" — and it checks the webhook first
+  when its channel is unknown).
+- **Plan, install, AI and feedback dead ends** (2026-09-23). `fetchMySubscriptions` returns ok/error
+  and never turns a failure into an empty list — that list gates Manage billing, the only in-app
+  cancel path. `getStripe()` resolves `null` instead of rejecting, because
+  `EmbeddedCheckoutProvider` chains `.then` with no `catch` and a rejected Stripe.js load became an
+  unhandled rejection (a crash beacon). The pricing modal has loading, error (Retry) and signed-out
+  states; the install dialog keeps its own `prompting` flag, since `promptInstall()` spends the
+  event before the browser prompt resolves. The built-in AI provider never stores a BYOK key
+  (`setSettings` strips it; "Remove key" asks first — the key exists nowhere else); "Clear chat"
+  is undoable only back into an empty chat; an unsent feedback report lives in sessionStorage
+  (`feedbackDraft.ts`, throw-safe) until sent or discarded, since every close unmounts the dialog.
+  Plugin-library setup tags come from the real `statusUrl` probe; unknown reads as a neutral
+  "One-time setup", never "Ready".
+- **In the Activity, replacing everyone's draft asks first and is named to the others**
+  (2026-09-23). Any action that swaps the whole shared message — "Start from scratch", a template,
+  library or scheduled load, Restore, JSON import — goes through `requestRoomReplace`
+  (`core/activity/roomReplaceConfirm.ts`), never `replaceMessage`/`clearAll` directly: it asks
+  only when someone else is in the room (counted by user id) *and* the draft has content, so solo
+  use never gains a confirm. Peers can't undo a remote frame, so receivers detect a whole-draft
+  replace with no wire change — no node id surviving at any depth (`isWholeDocumentReplace`,
+  collabPatch.ts) — and name the sender from the identity each connection stamps on its `focus`
+  frames; a replacer sends one `focus` just before its draft (an existing frame, so older
+  clients behave as before), and the draft answering our own `hello` is never attributed.
+  Post/Update refuse a draft whose `session://` uploads aren't in this browser with a message
+  naming why (`core/activity/uploads.ts`), a socket drop is toasted only after 4 s and the
+  recovery after 2 s of stability (`connectionNotice.ts` — one pair per outage), and unavailable
+  bar actions are `aria-disabled` + tap-to-explain (native `disabled` only for an in-flight
+  post). The Activity's Scheduled cards load a *copy* (the web's Schedule panel is the only
+  editor of a schedule), and say so.
+- **Static guide tools work on a phone** (2026-09-23). The timestamp generator's table restyles into
+  stacked cards at ≤560 px (name + Copy, the code, "Readers see:") with explicit ARIA table roles,
+  since changing a row's `display` drops implicit table semantics in some engines; at 390 px the
+  four-column table had put Copy and the preview off-screen. The sticky site header is opaque on
+  phones — they skip its backdrop blur, and the translucent fill let text show through.
 
 ## CI
 

@@ -39,7 +39,7 @@
  * already registered just continues past it.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { getPluginSummary, setPluginSummary } from "@/core/state/pluginSummaryCache";
 import { getPlugins, LINK_PLUGINS } from "@/core/plugins/registry";
@@ -141,6 +141,8 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
 
   // Which slot's config UI is open (index into `slots`), or null for checklist.
   const [configuring, setConfiguring] = useState<number | null>(null);
+  // Ties the disabled "Review in editor" to the visible note saying why.
+  const blockedId = useId();
 
   // Nothing to wire (registry gone / unknown plugins / no matching components) —
   // bail out; the template is already applied to the editor.
@@ -247,21 +249,25 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
       onClose={handleDismiss}
       footer={
         <div className={styles.footer}>
+          {/* Why "Review in editor" is disabled, in view beside it — it used to
+              live only in the button's tooltip, which a touch screen never shows
+              (and a disabled button never shows on some browsers either). */}
+          {pending > 0 ? (
+            <p id={blockedId} className={styles.blockedNote}>
+              {pending === 1
+                ? "Connect the remaining action first, or skip it for now."
+                : `Connect the remaining ${pending} actions first, or skip them for now.`}
+            </p>
+          ) : null}
           <Button variant="ghost" onClick={handleDismiss}>
-            {pending > 0 ? "Skip & set up manually" : "Close"}
+            {pending > 0 ? "Skip for now" : "Close"}
           </Button>
           <Button
             variant="primary"
             trailingIcon={<ChevronRightIcon size={16} />}
             onClick={handleDone}
             disabled={pending > 0}
-            title={
-              pending > 0
-                ? `Connect ${
-                    pending === 1 ? "the remaining action" : `all ${interactiveCount} actions`
-                  } first, or skip to set them up manually.`
-                : undefined
-            }
+            aria-describedby={pending > 0 ? blockedId : undefined}
           >
             Review in editor
           </Button>

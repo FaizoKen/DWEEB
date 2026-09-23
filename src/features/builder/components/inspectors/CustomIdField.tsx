@@ -33,7 +33,7 @@ export function CustomIdField({ node, maxLength, hint, attachedPlugin }: Props) 
   if (attachedPlugin) {
     return (
       <Field
-        label="custom_id"
+        label="Custom ID"
         hint={
           <>
             Set by <strong>{attachedPlugin.name}</strong> — detach the plugin below to edit it
@@ -62,7 +62,7 @@ export function CustomIdField({ node, maxLength, hint, attachedPlugin }: Props) 
   }
 
   return (
-    <Field label="custom_id" hint={hint}>
+    <Field label="Custom ID" hint={hint} counter={{ value: node.custom_id, max: maxLength }}>
       {(id) => (
         <TextInput
           id={id}

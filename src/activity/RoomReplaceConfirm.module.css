@@ -1,0 +1,28 @@
+.lead {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+}
+
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* The inline form of the warning, inside a step that already confirms (Restore's
+   channel switch) — tinted like a caution so it isn't read past as a hint. */
+.note {
+  margin: var(--app-space-3) 0 0;
+  padding: var(--app-space-2) var(--app-space-3);
+  border: 1px solid var(--app-warning-soft);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-warning-soft);
+  color: var(--app-text);
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+}
+
+.note strong {
+  font-weight: 600;
+}

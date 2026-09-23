@@ -9,68 +9,51 @@
  * It collapses the whole message's error + warning count into one pill, tinted by
  * the worst severity present. Clicking it jumps to the first offending component
  * — selecting the node, scrolling its tree row into view, and scrolling the
- * rendered preview to it — the same two-sided jump the old header pills did. A
- * message-level problem with no owning node (a missing forum post title, bad
- * mentions, …) jumps to the meta header instead: the card scrolls into view and,
- * when the issue lives in a Message-options lane, that lane expands with its
- * field focused (see `optionsReveal.ts`) — so the chip is clickable for every
- * kind of issue, not just component ones.
+ * rendered preview to it. A message-level problem with no owning node (a missing
+ * forum post title, bad mentions, …) jumps to its field instead: the Message
+ * options lane that hosts it expands with the field focused (see
+ * `optionsReveal.ts`). The jump itself is `jumpToIssue`, shared with the Send
+ * panel's "Fix before sending" rows so both land in the same place.
  */
 
-import { useMessageStore } from "@/core/state/messageStore";
-import { scrollPreviewNodeIntoView, scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
-import { fieldForIssueCode, useOptionsRevealStore } from "@/features/builder/optionsReveal";
+import { chipJumpTarget, issueDestination, jumpToIssue } from "@/features/builder/jumpToIssue";
 import type { ValidationView } from "@/features/builder/useValidation";
 import { AlertCircleIcon, AlertTriangleIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./HeaderIssueChip.module.css";
 
 export function HeaderIssueChip({ view }: { view: ValidationView }) {
-  const select = useMessageStore((s) => s.select);
-  const reveal = useOptionsRevealStore((s) => s.reveal);
-  const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId, messageIssues } = view;
+  const { errorCount, warningCount, messageIssues } = view;
   const total = errorCount + warningCount;
   if (total === 0) return null;
   // An empty message is an "error" the validator reports, but the tree's own
   // empty-state card already says "add your first component" — a red pill on
-  // top of it (whose jump lands on the Message options card, since the issue
-  // owns no node) reads as something broken right after the user hit Clear.
+  // top of it (with nowhere to jump, since the issue owns no node) reads as
+  // something broken right after the user hit Clear.
   const onlyEmptyMessage =
     view.byNode.size === 0 && messageIssues.every((i) => i.code === "EMPTY_MESSAGE");
   if (onlyEmptyMessage) return null;
 
-  // Errors dominate the tint and the jump target; only when there are none does
-  // a warning-only message colour the chip amber and point at the first warning.
+  // Errors dominate the tint; the jump target prefers the dominant severity but
+  // falls back to anything reachable (see `chipJumpTarget`).
   const isError = errorCount > 0;
-  const targetId = isError ? firstErrorNodeId : firstWarningNodeId;
-  // With no component to land on, fall back to the first message-level issue of
-  // the dominant severity — its home is the meta header / Message options card.
-  const messageTarget = targetId
-    ? null
-    : messageIssues.find((i) => (isError ? i.severity === "error" : i.severity === "warning"));
+  const target = chipJumpTarget(view);
+  const destination = target ? issueDestination(target) : null;
   const label = `${total} ${total === 1 ? "issue" : "issues"}`;
-
-  const jump = () => {
-    if (targetId) {
-      select(targetId);
-      scrollTreeRowIntoView(targetId);
-      scrollPreviewNodeIntoView(targetId);
-    } else if (messageTarget) {
-      reveal(fieldForIssueCode(messageTarget.code));
-    }
-  };
 
   return (
     <button
       type="button"
       className={cn(styles.chip, isError ? styles.chipError : styles.chipWarn)}
-      onClick={jump}
-      disabled={!targetId && !messageTarget}
+      onClick={() => {
+        if (target) jumpToIssue(target);
+      }}
+      disabled={!destination}
       aria-label={`${label} to fix — jump to the first one`}
       title={
-        targetId
+        destination?.kind === "node"
           ? "Jump to the first component that needs fixing"
-          : messageTarget
+          : destination
             ? "Jump to the message setting that needs fixing"
             : "This message has a problem to fix before sending"
       }

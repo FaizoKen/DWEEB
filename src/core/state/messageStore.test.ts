@@ -19,11 +19,18 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getMessageDocumentGeneration, uniqueCustomId, useMessageStore } from "./messageStore";
+import {
+  getMessageDocumentGeneration,
+  planSiblingMove,
+  uniqueCustomId,
+  useMessageStore,
+} from "./messageStore";
 import {
   ButtonStyle,
   ComponentType,
+  LIMITS,
   walk,
+  type AnyComponent,
   type TopLevelComponent,
   type WebhookMessage,
 } from "@/core/schema";
@@ -177,5 +184,286 @@ describe("custom_id uniqueness on insert and duplicate", () => {
     expect(uniqueCustomId("btn_action", new Set(["btn_action", "btn_action_2"]))).toBe(
       "btn_action_3",
     );
+  });
+});
+
+/*
+ * Tree fixtures for the move tests. Ids double as labels, so a tree reads back
+ * as a compact string: `t0 c1[a b] t9` is a text, a Container holding a and b,
+ * then another text. A Section's accessory isn't a list entry and never moves,
+ * so `shape` leaves it out.
+ */
+const text = (id: string) => ({ _id: id, type: ComponentType.TextDisplay, content: id });
+const container = (id: string, children: unknown[]) => ({
+  _id: id,
+  type: ComponentType.Container,
+  components: children,
+});
+const section = (id: string, texts: unknown[]) => ({
+  _id: id,
+  type: ComponentType.Section,
+  components: texts,
+  accessory: { _id: `${id}_acc`, type: ComponentType.Thumbnail, media: { url: "" } },
+});
+const buttonRow = (id: string, ids: string[]) => ({
+  _id: id,
+  type: ComponentType.ActionRow,
+  components: ids.map((b) => ({
+    _id: b,
+    type: ComponentType.Button,
+    style: ButtonStyle.Primary,
+    label: b,
+    custom_id: b,
+  })),
+});
+const tree = (...components: unknown[]): WebhookMessage => ({
+  components: components as TopLevelComponent[],
+});
+/** `count` texts with ids `${prefix}1`…, for filling a list to its limit. */
+const texts = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => text(`${prefix}${i + 1}`));
+
+function shape(message: WebhookMessage = useMessageStore.getState().message): string {
+  const node = (n: AnyComponent): string => {
+    const kids = (n as { components?: AnyComponent[] }).components;
+    return Array.isArray(kids) ? `${n._id}[${kids.map(node).join(" ")}]` : n._id;
+  };
+  return message.components.map(node).join(" ");
+}
+
+function move(message: WebhookMessage, id: string, direction: -1 | 1): string {
+  seed(message);
+  useMessageStore.getState().moveSibling(id, direction);
+  return shape();
+}
+
+/**
+ * The arrow buttons' contract. Between the top level and Containers an arrow
+ * can cross a boundary — step into an adjacent Container, or out of the one it
+ * sits in at either edge — while Section texts and Buttons Row children only
+ * ever reorder inside their own parent. Pinned against the pre-refactor store,
+ * so extracting the decision into `planSiblingMove` changed nothing.
+ */
+describe("moveSibling", () => {
+  it("swaps top-level siblings", () => {
+    expect(move(tree(text("t1"), text("t2"), text("t3")), "t2", -1)).toBe("t2 t1 t3");
+    expect(move(tree(text("t1"), text("t2"), text("t3")), "t2", 1)).toBe("t1 t3 t2");
+  });
+
+  it("steps into the Container above, landing last", () => {
+    expect(move(tree(container("c1", [text("a")]), text("t1")), "t1", -1)).toBe("c1[a t1]");
+  });
+
+  it("steps into the Container below, landing first", () => {
+    expect(move(tree(text("t1"), container("c1", [text("a")])), "t1", 1)).toBe("c1[t1 a]");
+  });
+
+  it("moves a whole Section or Buttons Row into a Container too", () => {
+    const withSection = tree(container("c1", [text("a")]), section("s1", [text("x")]));
+    expect(move(withSection, "s1", -1)).toBe("c1[a s1[x]]");
+    const withRow = tree(buttonRow("r1", ["b1"]), container("c1", [text("a")]));
+    expect(move(withRow, "r1", 1)).toBe("c1[r1[b1] a]");
+  });
+
+  it("swaps past a full Container instead of entering it", () => {
+    const full = () => container("c1", texts("f", LIMITS.CONTAINER_CHILDREN));
+    expect(move(tree(full(), text("t1")), "t1", -1).startsWith("t1 c1[")).toBe(true);
+    expect(move(tree(text("t1"), full()), "t1", 1).endsWith("] t1")).toBe(true);
+  });
+
+  it("never nests a Container in a Container — it swaps past instead", () => {
+    const pair = () => tree(container("c1", [text("a")]), container("c2", [text("b")]));
+    expect(move(pair(), "c2", -1)).toBe("c2[b] c1[a]");
+    expect(move(pair(), "c1", 1)).toBe("c2[b] c1[a]");
+  });
+
+  it("reorders a Container's children inside it", () => {
+    const c = () => tree(container("c1", [text("a"), text("b"), text("c")]));
+    expect(move(c(), "b", -1)).toBe("c1[b a c]");
+    expect(move(c(), "b", 1)).toBe("c1[a c b]");
+  });
+
+  it("steps out of a Container at its first child, landing just above it", () => {
+    const m = tree(text("t0"), container("c1", [text("a"), text("b")]), text("t9"));
+    expect(move(m, "a", -1)).toBe("t0 a c1[b] t9");
+  });
+
+  it("steps out of a Container at its last child, landing just below it", () => {
+    const m = tree(text("t0"), container("c1", [text("a"), text("b")]), text("t9"));
+    expect(move(m, "b", 1)).toBe("t0 c1[a] b t9");
+  });
+
+  it("refuses to step out while the top level is full, without an undo step", () => {
+    const m = tree(
+      container("c1", [text("a"), text("b")]),
+      ...texts("t", LIMITS.TOP_LEVEL_COMPONENTS - 1),
+    );
+    const before = shape(m);
+    expect(move(m, "a", -1)).toBe(before);
+    expect(move(m, "b", 1)).toBe(before);
+    expect(useMessageStore.getState().past).toHaveLength(0);
+    // Reordering inside the Container still works.
+    expect(move(m, "a", 1).startsWith("c1[b a]")).toBe(true);
+  });
+
+  it("reorders Section texts only inside their Section", () => {
+    const m = () => tree(text("t0"), section("s1", [text("x"), text("y")]), text("t9"));
+    expect(move(m(), "x", -1)).toBe("t0 s1[x y] t9");
+    expect(move(m(), "y", 1)).toBe("t0 s1[x y] t9");
+    expect(move(m(), "x", 1)).toBe("t0 s1[y x] t9");
+    // Inside a Container too: the text still can't leave its Section.
+    expect(move(tree(container("c1", [section("s1", [text("x")])])), "x", -1)).toBe("c1[s1[x]]");
+  });
+
+  it("never moves a Section's accessory", () => {
+    const m = tree(section("s1", [text("x")]), text("t1"));
+    expect(move(m, "s1_acc", -1)).toBe("s1[x] t1");
+    expect(move(m, "s1_acc", 1)).toBe("s1[x] t1");
+    expect(useMessageStore.getState().message.components[0]).toMatchObject({
+      accessory: { _id: "s1_acc" },
+    });
+  });
+
+  it("reorders Buttons Row children only inside their row", () => {
+    const m = () => tree(buttonRow("r1", ["b1", "b2"]), buttonRow("r2", ["b3"]));
+    expect(move(m(), "b2", 1)).toBe("r1[b1 b2] r2[b3]");
+    expect(move(m(), "b1", -1)).toBe("r1[b1 b2] r2[b3]");
+    expect(move(m(), "b1", 1)).toBe("r1[b2 b1] r2[b3]");
+    expect(move(m(), "b3", -1)).toBe("r1[b1 b2] r2[b3]");
+  });
+
+  it("does nothing at the absolute edges, and records no undo step", () => {
+    expect(move(tree(text("t1"), text("t2")), "t1", -1)).toBe("t1 t2");
+    expect(useMessageStore.getState().past).toHaveLength(0);
+    expect(move(tree(text("t1"), text("t2")), "t2", 1)).toBe("t1 t2");
+    expect(useMessageStore.getState().past).toHaveLength(0);
+  });
+
+  it("records one undo step for a move that happens", () => {
+    move(tree(text("t1"), text("t2")), "t2", -1);
+    expect(useMessageStore.getState().past).toHaveLength(1);
+    useMessageStore.getState().undo();
+    expect(shape()).toBe("t1 t2");
+  });
+});
+
+/** The decision `moveSibling` carries out, and the tree's arrows describe. */
+describe("planSiblingMove", () => {
+  it("plans a swap as a reorder with moveToParent's pre-removal index", () => {
+    const m = tree(text("t1"), text("t2"), text("t3"));
+    expect(planSiblingMove(m, "t2", -1)).toEqual({
+      kind: "reorder",
+      targetParentId: null,
+      targetIndex: 0,
+    });
+    expect(planSiblingMove(m, "t2", 1)).toEqual({
+      kind: "reorder",
+      targetParentId: null,
+      targetIndex: 3,
+    });
+    const inside = tree(container("c1", [text("a"), text("b")]));
+    expect(planSiblingMove(inside, "a", 1)).toEqual({
+      kind: "reorder",
+      targetParentId: "c1",
+      targetIndex: 2,
+    });
+  });
+
+  it("plans entering the Container above at its end, and the one below at its start", () => {
+    const above = tree(container("c1", [text("a"), text("b")]), text("t1"));
+    expect(planSiblingMove(above, "t1", -1)).toEqual({
+      kind: "enter",
+      targetParentId: "c1",
+      targetIndex: 2,
+    });
+    const below = tree(text("t1"), container("c1", [text("a")]));
+    expect(planSiblingMove(below, "t1", 1)).toEqual({
+      kind: "enter",
+      targetParentId: "c1",
+      targetIndex: 0,
+    });
+  });
+
+  it("plans a plain reorder past a full Container, or a Container past a Container", () => {
+    const full = tree(container("c1", texts("f", LIMITS.CONTAINER_CHILDREN)), text("t1"));
+    expect(planSiblingMove(full, "t1", -1).kind).toBe("reorder");
+    const pair = tree(container("c1", []), container("c2", []));
+    expect(planSiblingMove(pair, "c2", -1).kind).toBe("reorder");
+  });
+
+  it("plans stepping out of a Container to just above or below it", () => {
+    const m = tree(text("t0"), container("c1", [text("a"), text("b")]), text("t9"));
+    expect(planSiblingMove(m, "a", -1)).toEqual({
+      kind: "exit",
+      targetParentId: null,
+      targetIndex: 1,
+    });
+    expect(planSiblingMove(m, "b", 1)).toEqual({
+      kind: "exit",
+      targetParentId: null,
+      targetIndex: 2,
+    });
+  });
+
+  it("says why stepping out is blocked when the top level is full", () => {
+    const m = tree(
+      container("c1", [text("a"), text("b")]),
+      ...texts("t", LIMITS.TOP_LEVEL_COMPONENTS - 1),
+    );
+    expect(planSiblingMove(m, "a", -1)).toEqual({ kind: "none", blocked: "top-level-full" });
+    expect(planSiblingMove(m, "b", 1)).toEqual({ kind: "none", blocked: "top-level-full" });
+  });
+
+  it("plans nothing at a list's edge, for an accessory, or for an unknown id", () => {
+    const m = tree(section("s1", [text("x"), text("y")]), buttonRow("r1", ["b1"]), text("t1"));
+    expect(planSiblingMove(m, "s1", -1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "t1", 1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "x", -1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "y", 1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "b1", -1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "s1_acc", 1)).toEqual({ kind: "none" });
+    expect(planSiblingMove(m, "missing", 1)).toEqual({ kind: "none" });
+  });
+
+  it("is what moveSibling does, for every node in both directions", () => {
+    // `moveSibling` must be exactly "apply the plan": the tree labels its
+    // arrows from the plan, so any divergence would make an arrow lie.
+    const fixtures: WebhookMessage[] = [
+      tree(
+        text("t0"),
+        container("c1", [
+          text("a"),
+          section("s1", [text("x"), text("y")]),
+          buttonRow("r1", ["b1"]),
+        ]),
+        buttonRow("r2", ["b2", "b3"]),
+        container("c2", [text("d")]),
+        container("c3", []),
+        section("s2", [text("z")]),
+      ),
+      tree(container("c1", [text("a"), text("b")]), ...texts("t", LIMITS.TOP_LEVEL_COMPONENTS - 1)),
+      tree(container("c1", texts("f", LIMITS.CONTAINER_CHILDREN)), text("t1"), container("c2", [])),
+    ];
+    for (const fixture of fixtures) {
+      const ids = [...walk(fixture)].map((n) => n._id);
+      for (const id of ids) {
+        for (const direction of [-1, 1] as const) {
+          const plan = planSiblingMove(fixture, id, direction);
+          seed(fixture);
+          useMessageStore.getState().moveSibling(id, direction);
+          const moved = useMessageStore.getState();
+          seed(fixture);
+          if (plan.kind !== "none") {
+            useMessageStore.getState().moveToParent(id, plan.targetParentId, plan.targetIndex);
+          }
+          const planned = useMessageStore.getState();
+          const where = `${id} ${direction === -1 ? "up" : "down"} (${plan.kind})`;
+          expect(moved.message, where).toEqual(planned.message);
+          expect(moved.past.length, where).toBe(planned.past.length);
+          // A planned move always changes the tree; `none` never does.
+          expect(shape(moved.message) === shape(fixture), where).toBe(plan.kind === "none");
+        }
+      }
+    }
   });
 });

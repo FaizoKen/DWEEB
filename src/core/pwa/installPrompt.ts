@@ -118,6 +118,12 @@ export function getInstallSnapshot(): InstallSnapshot {
  * or "unavailable" when there is no prompt to show (non-Chromium browsers, a
  * spent prompt, or the app already installed) — the caller should fall back
  * to the manual-instructions dialog then.
+ *
+ * The event is spent — `canPrompt` drops and subscribers are notified — the
+ * moment this is called, *before* the browser's sheet resolves. A caller that
+ * renders from the snapshot must hold its own "prompting" state until this
+ * settles (as `InstallDialog` does), or it re-renders as if there were no
+ * prompt while the user is still answering it.
  */
 export async function promptInstall(): Promise<InstallPromptOutcome> {
   const evt = deferred;

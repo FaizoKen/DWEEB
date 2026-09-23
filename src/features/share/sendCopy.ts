@@ -27,6 +27,8 @@ const LEAD_SIGNED_OUT =
   "Sign in to pick a channel, or paste a webhook URL below — your message goes straight from this browser to Discord. We never see or store it.";
 const LEAD_DESTINATION_PICKED =
   "Check the channel below and hit send — your message goes straight from this browser to Discord. We never see or store it.";
+const LEAD_EDIT_SCHEDULE =
+  "Your changes go into the post that's already scheduled — it keeps its channel and posts at the time below.";
 const LEAD_PICK_CHANNEL =
   "Pick a channel below and hit send — your message goes straight from this browser to Discord. We never see or store it.";
 
@@ -42,8 +44,11 @@ export function sendLeadCopy(input: {
   destinationPicked: boolean;
   /** Definitively signed out, on a deployment where signing in is possible. */
   signedOut: boolean;
+  /** Schedule mode is saving into a scheduled post loaded from the directory. */
+  editingSchedule?: boolean;
 }): string {
   if (input.mode === "update") return LEAD_UPDATE;
+  if (input.editingSchedule) return LEAD_EDIT_SCHEDULE;
   if (input.signedOut && !input.pickerActive) return LEAD_SIGNED_OUT;
   if (input.pickerActive && input.destinationPicked) return LEAD_DESTINATION_PICKED;
   return LEAD_PICK_CHANNEL;

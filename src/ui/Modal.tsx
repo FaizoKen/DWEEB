@@ -1,4 +1,5 @@
-import { useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import styles from "./Modal.module.css";
@@ -20,6 +21,16 @@ interface ModalProps {
   /** Inline overrides for the backdrop — e.g. a raised `zIndex` so the dialog
    *  clears another full-screen overlay it's opened on top of. */
   backdropStyle?: CSSProperties;
+  /**
+   * Render `children` as the whole dialog: no header, close button, body or
+   * footer, and none of the card styling — `className` supplies the look. For
+   * surfaces with their own chrome (the intro film) that still need the modal
+   * behaviour: focus trap, inert background, Escape, focus restore. Name it
+   * with `ariaLabel`, since there is no visible title element to point at.
+   */
+  bare?: boolean;
+  /** Extra class for the dialog element (its only styling when `bare`). */
+  className?: string;
   children: ReactNode;
 }
 
@@ -64,9 +75,12 @@ function syncBodyModality() {
   for (const child of Array.from(document.body.children)) {
     if (!(child instanceof HTMLElement)) continue;
 
-    // Status toasts are a non-focusable aria-live portal. Keep announcements
-    // available when a modal action succeeds or fails without reopening any
-    // interactive background surface.
+    // Global status surfaces — the toast stack and the update prompt — opt out
+    // with `data-modal-live-region`: a dialog action's success or failure must
+    // still be announced, and a toast's Undo/Dismiss (or the update pill) still
+    // clickable, while the dialog is up. The trap keeps Tab inside the dialog,
+    // and `onFocusIn` below pulls back any focus a click lands there, so this
+    // reopens no keyboard path into the background.
     const isLiveRegion = child.dataset.modalLiveRegion === "true";
     if (child === topBackdrop || isLiveRegion) {
       const snapshot = inertSnapshots.get(child);
@@ -137,9 +151,11 @@ export function Modal({
   size = "md",
   anchor = "center",
   backdropStyle,
+  bare = false,
+  className,
   children,
 }: ModalProps) {
-  const titleId = useId();
+  const titleId = useUniqueId("dialog-title");
   const tokenRef = useRef(Symbol("modal"));
   const lastFocused = useRef<HTMLElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -246,35 +262,49 @@ export function Modal({
         }
       }}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        aria-labelledby={ariaLabel ? undefined : titleId}
-        tabIndex={-1}
-        className={cn(
-          styles.dialog,
-          size === "sm" && styles.dialogSm,
-          anchor === "top" && styles.dialogTop,
-        )}
-      >
-        <header className={styles.header}>
-          <h2 id={titleId} className={styles.title}>
-            {title}
-          </h2>
-          <button
-            type="button"
-            aria-label="Close dialog"
-            onClick={() => onCloseRef.current()}
-            className={styles.close}
-          >
-            ×
-          </button>
-        </header>
-        <div className={styles.body}>{children}</div>
-        {footer ? <footer className={styles.footer}>{footer}</footer> : null}
-      </div>
+      {bare ? (
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel ?? (typeof title === "string" ? title : undefined)}
+          tabIndex={-1}
+          className={cn(styles.bare, className)}
+        >
+          {children}
+        </div>
+      ) : (
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabel ? undefined : titleId}
+          tabIndex={-1}
+          className={cn(
+            styles.dialog,
+            size === "sm" && styles.dialogSm,
+            anchor === "top" && styles.dialogTop,
+            className,
+          )}
+        >
+          <header className={styles.header}>
+            <h2 id={titleId} className={styles.title}>
+              {title}
+            </h2>
+            <button
+              type="button"
+              aria-label="Close dialog"
+              onClick={() => onCloseRef.current()}
+              className={styles.close}
+            >
+              ×
+            </button>
+          </header>
+          <div className={styles.body}>{children}</div>
+          {footer ? <footer className={styles.footer}>{footer}</footer> : null}
+        </div>
+      )}
     </div>,
     document.body,
   );

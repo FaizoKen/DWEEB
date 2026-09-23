@@ -8,9 +8,11 @@
  * pointed at the server the user was just building for.
  *
  * Auth-aware: the pricing/checkout flow needs a signed-in session, so when the
- * user lands signed out we start Discord login and remember the intent (in
- * sessionStorage, so it survives a popup-blocked full-page redirect through
- * OAuth); once the session resolves we open pricing for the remembered server.
+ * user lands signed out we ask them to sign in (a toast whose button opens the
+ * Discord popup — a page load carries no click to open it with) and remember
+ * the intent (in sessionStorage, so it survives a popup-blocked full-page
+ * redirect through OAuth); once the session resolves we open pricing for the
+ * remembered server.
  * An already-signed-in visitor opens it immediately.
  */
 
@@ -35,7 +37,7 @@ function stripPlansParam(): void {
 
 export function usePlansDeepLink(): void {
   const status = useAuthStore((s) => s.status);
-  const login = useAuthStore((s) => s.login);
+  const requestLogin = useAuthStore((s) => s.requestLogin);
   const openPricing = usePlanStore((s) => s.openPricing);
 
   // The server we owe a pricing modal, captured once from the URL (or a persisted
@@ -80,14 +82,17 @@ export function usePlansDeepLink(): void {
       openPricing(pending);
       setPending(null);
     } else if (status === "anon") {
-      // Signed out: send them through Discord login once. The intent persists in
+      // Signed out: ask once for a sign-in the user starts. Opening the popup
+      // from here, with no click behind it, is blocked and falls back to
+      // navigating the whole page to Discord. The intent persists in
       // sessionStorage, so the return trip (this effect re-running as "authed",
-      // or a fresh mount after a redirect) opens pricing for the same server.
+      // or a fresh mount after a redirect) opens pricing for the same server —
+      // however they end up signing in.
       if (!loginStarted.current) {
         loginStarted.current = true;
-        login();
+        requestLogin("Sign in with Discord to see this server’s plans.");
       }
     }
     // "unknown" / "loading": wait for the session to resolve, then act.
-  }, [pending, status, login, openPricing]);
+  }, [pending, status, requestLogin, openPricing]);
 }

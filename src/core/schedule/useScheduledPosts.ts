@@ -30,6 +30,7 @@ import { decodeJson } from "@/core/serialization";
 import type { WebhookMessage } from "@/core/schema/types";
 import { cancelSchedule, getSchedule, listForGuild, listMine, type ScheduleView } from "./api";
 import { forgetSchedule, getManageToken, loadLocalSchedules } from "./localStore";
+import { clearScheduleOrigin } from "./scheduleOrigin";
 
 /** Live (still going to post) first, then posted/failed by recency. */
 const STATUS_ORDER: Record<string, number> = {
@@ -206,6 +207,9 @@ export function useScheduledPosts(
     setBusyId(null);
     if (!res.ok) return false;
     forgetSchedule(s.id);
+    // The editor may be holding this post to save changes into — it no longer
+    // exists, so saving must not try (the Send panel falls back to a new post).
+    clearScheduleOrigin(s.id);
     setItems((prev) => prev.filter((i) => i.id !== s.id));
     return true;
   }, []);

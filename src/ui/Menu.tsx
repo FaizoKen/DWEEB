@@ -10,7 +10,18 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { typeaheadIndex } from "./menuTypeahead";
 import styles from "./Menu.module.css";
+
+/** Typed characters within this long of each other build one search ("ex", "exp"…). */
+const TYPEAHEAD_RESET_MS = 500;
+
+function isTextEntry(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+  );
+}
 
 interface TriggerProps {
   onClick?: (e: ReactMouseEvent) => void;
@@ -52,6 +63,7 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const initialFocusRef = useRef<"first" | "last">("first");
   const needsInitialFocusRef = useRef(false);
+  const typeaheadRef = useRef({ text: "", at: 0 });
 
   const triggerElement = () =>
     wrapperRef.current?.querySelector<HTMLElement>("[aria-haspopup='menu']") ?? null;
@@ -157,6 +169,7 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
   const openMenu = (initial: "first" | "last" = "first") => {
     initialFocusRef.current = initial;
     needsInitialFocusRef.current = true;
+    typeaheadRef.current = { text: "", at: 0 };
     measureAnchor();
     setPos(null);
     setOpen(true);
@@ -225,6 +238,25 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
                   event.preventDefault();
                   focusPastTrigger(event.shiftKey);
                   return;
+                } else if (
+                  event.key.length === 1 &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.altKey &&
+                  // A search field inside the panel (the emoji picker) keeps its keys.
+                  !isTextEntry(event.target)
+                ) {
+                  // Typeahead: jump to the item whose label starts with what was
+                  // typed. Space still activates the focused item unless a search
+                  // is under way, where it's part of the label ("export as").
+                  const now = Date.now();
+                  const last = typeaheadRef.current;
+                  const pending = now - last.at <= TYPEAHEAD_RESET_MS ? last.text : "";
+                  if (event.key === " " && !pending) return;
+                  const text = pending + event.key;
+                  typeaheadRef.current = { text, at: now };
+                  const labels = items.map((item) => item.textContent ?? "");
+                  target = items[typeaheadIndex(labels, index, text)];
                 } else {
                   return;
                 }

@@ -1,8 +1,9 @@
 /**
  * Account control for the action bar (top-left).
  *
- * One compact icon that reflects the Discord auth state:
- *   - Signed out → a log-in icon; clicking starts the Discord login redirect.
+ * One compact control that reflects the Discord auth state:
+ *   - Signed out → a labelled "Sign in" button (icon-only on the bar's tightest
+ *     steps); clicking starts the Discord login popup.
  *   - Signed in  → the user's avatar; clicking opens a popover to pick a server
  *     (only servers the DWEEB bot is already in), add the bot to another server,
  *     refresh the server list and the connected guild's data, or sign out.
@@ -24,6 +25,7 @@ import {
 } from "@/core/guild/pendingGuild";
 import { botInviteUrl } from "@/core/guild/config";
 import { botAddFlow, startBotAddPopup } from "@/core/oauth/flows";
+import { claimAddBotPrompt } from "@/core/auth/addBotPrompt";
 import { subscribePopupResult } from "@/core/oauth/popupFlow";
 import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
@@ -73,13 +75,20 @@ function clearBotAddQuery(): void {
   window.history.replaceState(null, "", `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
 }
 
-export function AccountMenu() {
+export function AccountMenu({
+  signInLabel = true,
+}: {
+  /** Show the signed-out control's "Sign in" text. The action bar drops it on
+   *  one of its tightest fit steps, leaving the icon (and its tooltip). */
+  signInLabel?: boolean;
+}) {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const guilds = useAuthStore((s) => s.guilds);
   const guildsStatus = useAuthStore((s) => s.guildsStatus);
   const initAuth = useAuthStore((s) => s.init);
   const login = useAuthStore((s) => s.login);
+  const requestLogin = useAuthStore((s) => s.requestLogin);
   const loadGuilds = useAuthStore((s) => s.loadGuilds);
 
   // A connected server lights up a presence dot on the avatar so you can tell
@@ -128,10 +137,10 @@ export function AccountMenu() {
   // manual "Refresh". Re-armed on sign-out so a later sign-in repeats it.
   const autoRan = useRef(false);
   // Whether *this* page load arrived straight from a bot-add redirect. Drives
-  // the "sign in to finish" auto-login below; reset by a full reload, so it only
+  // the "sign in to finish" prompt below; reset by a full reload, so it only
   // fires on the genuine return from Discord, never on a random signed-out load.
   const arrivedFromBotAdd = useRef(readJustAddedGuildId() !== null);
-  // One-shot guard for that auto-login redirect.
+  // One-shot guard for that prompt.
   const loginKicked = useRef(false);
 
   // Resolve the session once on mount.
@@ -175,11 +184,11 @@ export function AccountMenu() {
 
   // Pick a server automatically once the session resolves.
   //   1. A server the user just added the bot to (pending id) → connect to it.
-  //      If they're signed out, start sign-in first; the pending id survives the
-  //      redirect and connects on return.
+  //      If they're signed out, ask them to sign in first; the pending id
+  //      survives the popup (or a redirect) and connects on return.
   //   2. Otherwise reconnect to the last server, or the first available one.
   //   3. No server has the bot → open the menu so the add prompt is front
-  //      and centre.
+  //      and centre — once per account in this browser, not on every load.
   useEffect(() => {
     if (status === "unknown" || status === "loading") return;
 
@@ -188,10 +197,12 @@ export function AccountMenu() {
     if (status === "anon") {
       autoRan.current = false;
       // Came back from adding the bot but signed out — sign-in is required to
-      // load it. Kick off login once; the pending id is parked for the return.
+      // load it. Ask once, with a button: this effect has no click behind it,
+      // so opening the popup from here is blocked and falls back to navigating
+      // the whole page to Discord. The pending id is parked for the return.
       if (pending && arrivedFromBotAdd.current && !loginKicked.current) {
         loginKicked.current = true;
-        login();
+        requestLogin("Bot added — sign in with Discord to load that server.");
       }
       return;
     }
@@ -219,13 +230,17 @@ export function AccountMenu() {
 
     const botGuilds = guilds.filter((g) => g.bot_present);
     if (botGuilds.length === 0) {
-      triggerRef.current?.click();
+      // The per-mount `autoRan` guard alone popped this open on every page
+      // load; the persisted claim makes it a one-time pointer. After that the
+      // chevron on the account control is what leads to the same menu.
+      const trigger = triggerRef.current;
+      if (trigger && user && claimAddBotPrompt(user.id)) trigger.click();
       return;
     }
     const lastId = loadLastGuildId();
     const target = botGuilds.find((g) => g.id === lastId) ?? botGuilds[0];
     if (target) void connect(target.id);
-  }, [status, guildsStatus, connectedId, guilds, connect, loadGuilds, login]);
+  }, [status, guildsStatus, connectedId, guilds, user, connect, loadGuilds, requestLogin]);
 
   // Still loading something — hold a single breathing skeleton (no icon) so the
   // trigger resolves straight to its final icon in one smooth step, with no
@@ -244,17 +259,22 @@ export function AccountMenu() {
     );
   }
 
-  // Signed out — the icon *is* the login button.
+  // Signed out — the control *is* the login button, and it says so: the bare
+  // arrow-into-a-door read as "exit" to first-timers, and signing in is what
+  // unlocks the channel picker (posting without a webhook URL). The bar drops
+  // the text only on its tightest steps (see Builder's fit ladder); the
+  // accessible name starts with the visible label either way.
   if (status === "anon") {
     return (
       <button
         type="button"
-        className={styles.trigger}
+        className={cn(styles.trigger, styles.signIn, !signInLabel && styles.signInIconOnly)}
         onClick={login}
-        title="Sign in with Discord to load server roles, channels, and emoji"
+        title="Sign in with Discord to pick a channel to post to and load your server’s roles, channels and emoji"
         aria-label="Sign in with Discord"
       >
-        <LogInIcon size={22} className={styles.reveal} />
+        <LogInIcon size={18} className={cn(styles.signInIcon, styles.reveal)} />
+        {signInLabel ? <span className={styles.reveal}>Sign in</span> : null}
       </button>
     );
   }

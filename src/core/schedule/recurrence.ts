@@ -19,6 +19,17 @@ export function browserTimezone(): string {
   }
 }
 
+/**
+ * An instant as a `<input type="datetime-local">` value — `YYYY-MM-DDTHH:MM` in
+ * the viewer's local wall clock, the only format that input reads or writes
+ * (and what its `min` must use). Seconds are dropped, like the input does.
+ */
+export function localDateTimeValue(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Format an absolute unix-seconds instant in a given timezone. */
 export function formatInstant(unixSecs: number, tz: string): string {
   try {

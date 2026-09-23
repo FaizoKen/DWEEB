@@ -12,14 +12,15 @@
  * floats above whatever scroll container holds the trigger. Outside-clicks
  * close the menu; Escape closes the menu and restores focus to the trigger.
  * Arrow keys move between rows (wrapping); ArrowRight/ArrowLeft expand and
- * collapse group rows.
+ * collapse group rows. Enter activates the focused row exactly as a click
+ * does — a leaf adds, a group opens or closes — and the preview pane's key
+ * hint says which (`keyHintFor`).
  */
 
 import {
   cloneElement,
   isValidElement,
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -27,8 +28,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
 } from "react";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { createPortal } from "react-dom";
-import { COMPONENT_META } from "@/core/schema/metadata";
+import { COMPONENT_META, addMenuLabel } from "@/core/schema/metadata";
 import { ComponentType, type ComponentTypeValue } from "@/core/schema/types";
 import { ChevronDownIcon, ChevronRightIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
@@ -88,23 +90,42 @@ const CATEGORY: Partial<Record<ComponentTypeValue, string>> = {
 /** What the preview pane shows for the highlighted row. */
 interface RowDescriptor {
   id: string;
+  type: ComponentTypeValue;
   kind: AddPreviewKind;
   title: string;
   desc: string;
+  /** A group header: activating it opens or closes its variants, adding nothing. */
+  isGroup: boolean;
 }
 
-function descriptorFor(type: ComponentTypeValue, group?: ComponentTypeValue): RowDescriptor {
-  const meta = COMPONENT_META[type];
+function descriptorFor(node: AddMenuNode, group?: ComponentTypeValue): RowDescriptor {
+  const { type } = node;
   // Under Section the child adds a whole section-with-accessory, so the
-  // preview title says so; a Buttons Row child stands on its own.
+  // preview title says so; a child of the buttons-and-menus group stands on
+  // its own.
   const title =
-    group === ComponentType.Section ? `${COMPONENT_META[group].label} · ${meta.label}` : meta.label;
+    group === ComponentType.Section
+      ? `${addMenuLabel(group)} · ${addMenuLabel(type)}`
+      : addMenuLabel(type);
   return {
     id: group !== undefined ? `${group}:${type}` : String(type),
+    type,
     kind: previewKindFor(type, group),
     title,
-    desc: meta.description,
+    desc: COMPONENT_META[type].description,
+    isGroup: (node.children?.length ?? 0) > 0,
   };
+}
+
+/**
+ * The preview pane's keyboard hint for the highlighted row. Enter does what a
+ * click does, so on a group row it opens (or closes) the variants rather than
+ * adding anything — the hint has to say so, or "Enter to add" on a group reads
+ * as a promise the key then breaks.
+ */
+export function keyHintFor(row: { isGroup: boolean } | null, expanded: boolean): string {
+  const action = !row?.isGroup ? "add" : expanded ? "close" : "open";
+  return `↑↓ to browse · Enter to ${action}`;
 }
 
 export function AddComponentMenu({
@@ -126,7 +147,7 @@ export function AddComponentMenu({
   const triggerRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const innerMenuRef = useRef<HTMLDivElement | null>(null);
-  const labelId = useId();
+  const labelId = useUniqueId("add-menu");
 
   // Nodes grouped onto their library shelves, preserving first-appearance
   // order. A single shelf means headers add nothing — render flat.
@@ -183,7 +204,7 @@ export function AddComponentMenu({
     setLeftShift(0);
     setExpanded(new Set());
     const first = shelves[0]?.nodes[0];
-    setActive(first ? descriptorFor(first.type) : null);
+    setActive(first ? descriptorFor(first) : null);
     setOpen(true);
   };
 
@@ -296,7 +317,7 @@ export function AddComponentMenu({
 
   const renderLeaf = (node: AddMenuNode, group?: ComponentTypeValue) => {
     const meta = COMPONENT_META[node.type];
-    const d = descriptorFor(node.type, group);
+    const d = descriptorFor(node, group);
     return (
       <button
         key={d.id}
@@ -313,7 +334,7 @@ export function AddComponentMenu({
       >
         <span className={styles.itemGlyph}>{meta.glyph}</span>
         <span className={styles.itemBody}>
-          <span className={styles.itemTitle}>{meta.label}</span>
+          <span className={styles.itemTitle}>{addMenuLabel(node.type)}</span>
           <span className={styles.itemSub}>{meta.description}</span>
         </span>
       </button>
@@ -324,8 +345,11 @@ export function AddComponentMenu({
   // itself, since its children cover every case.
   const renderGroup = (node: AddMenuNode) => {
     const meta = COMPONENT_META[node.type];
-    const d = descriptorFor(node.type);
+    const d = descriptorFor(node);
     const isExpanded = expanded.has(node.type);
+    // The verb-first label replaces the row's text as its name, so the
+    // description is handed back as the row's description.
+    const descId = `${labelId}-${d.id}-desc`;
     return (
       <div key={d.id} className={styles.group}>
         <button
@@ -335,15 +359,18 @@ export function AddComponentMenu({
           data-group="true"
           data-active={active?.id === d.id || undefined}
           aria-expanded={isExpanded}
-          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${meta.label} options`}
+          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${d.title}`}
+          aria-describedby={descId}
           onMouseEnter={() => setActive(d)}
           onFocus={() => setActive(d)}
           onClick={() => toggleExpanded(node.type)}
         >
           <span className={styles.itemGlyph}>{meta.glyph}</span>
           <span className={styles.itemBody}>
-            <span className={styles.itemTitle}>{meta.label}</span>
-            <span className={styles.itemSub}>{meta.description}</span>
+            <span className={styles.itemTitle}>{d.title}</span>
+            <span id={descId} className={styles.itemSub}>
+              {meta.description}
+            </span>
           </span>
           <span className={styles.groupChevron} aria-hidden="true">
             {isExpanded ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}
@@ -421,7 +448,9 @@ export function AddComponentMenu({
                       <div className={styles.previewDesc}>{active.desc}</div>
                     </>
                   ) : null}
-                  <div className={styles.previewKeys}>↑↓ to browse · Enter to add</div>
+                  <div className={styles.previewKeys}>
+                    {keyHintFor(active, active ? expanded.has(active.type) : false)}
+                  </div>
                 </div>
               </div>
             </div>,

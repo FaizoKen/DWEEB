@@ -20,6 +20,13 @@
  *  - A server-authored `resync` means our socket missed relayed frames (the
  *    room's broadcast backlog overflowed) — we re-send `hello` so peers hand us
  *    their full draft again, closing any silent divergence.
+ *  - A peer's full `draft` that shares no node with what we had is someone
+ *    replacing the whole message (a template, "Start from scratch", Restore, an
+ *    import) — `onPeerReplace` tells the shell so it can say who did it. Nothing
+ *    on the wire marks it: every replace re-ids the whole tree, so no id
+ *    surviving *is* the signal (`isWholeDocumentReplace`), and who sent it comes
+ *    from the identity each connection already stamps on its `focus` frames — a
+ *    replacer sends one just before its draft.
  *
  * The server relays every frame opaquely, so this protocol is entirely
  * client-side. It's intentionally not a CRDT: concurrent edits to the *same*
@@ -39,14 +46,25 @@ import type { WebhookMessage } from "@/core/schema/types";
 import type { EditorId } from "@/core/schema/types";
 import { PROXY_BASE_URL } from "@/core/guild/config";
 import { mintRoomTicket } from "./api";
-import { applyOps, diffMessage, type CollabOp } from "./collabPatch";
+import { applyOps, diffMessage, isWholeDocumentReplace, type CollabOp } from "./collabPatch";
 import { usePresenceStore } from "./presence";
+import type { ReplaceActor } from "./roomReplace";
 
 /** One participant, as the server's `roster` frame lists them. */
 export interface CollabParticipant {
   id: string;
   name: string;
   avatar: string | null;
+}
+
+/** A peer's whole-message replace that just landed in our editor. */
+export interface PeerReplace {
+  /** Who sent it, when their connection has identified itself — null when it
+   *  hasn't, or when the draft only arrived as a peer answering our own `hello`
+   *  (a reconnect / resync), where the sender isn't necessarily who replaced it. */
+  actor: ReplaceActor | null;
+  /** The new draft is empty — someone cleared it rather than loading another. */
+  cleared: boolean;
 }
 
 interface StartOptions {
@@ -86,6 +104,10 @@ interface StartOptions {
    *  elapsed. Lets the shell reveal the editor only once its real starting content
    *  is in place, never flashing the fresh-open default first. */
   onHydrated?: () => void;
+  /** A peer replaced the whole shared message and we just adopted it — a
+   *  remote frame bypasses our undo history, so this is the only sign of what
+   *  happened. Never fired for the room's initial sync or a `resume`. */
+  onPeerReplace?: (replace: PeerReplace) => void;
 }
 
 const SEND_DEBOUNCE_MS = 180;
@@ -152,6 +174,22 @@ let diverged = false;
  * place. Reset on each `startCollab`.
  */
 let hydratedFired = false;
+/**
+ * Who each peer connection is — its `cid` mapped to the identity it stamps on
+ * every `focus` frame. Draft frames carry only the `cid`, so this is how a
+ * replace gets a name. Pruned against the roster; cleared on teardown.
+ */
+const peers = new Map<string, ReplaceActor>();
+/**
+ * Set whenever we send `hello`: the next full draft is almost certainly a peer
+ * *answering* it with the room's current state, not that peer replacing
+ * anything. `afterHydration` tells a re-sync of a live session (a reconnect or
+ * `resync` — worth a nameless notice if the draft changed wholesale meanwhile)
+ * from the initial sync (never worth one). Consumed by the first draft, and
+ * ignored once stale so a genuine replace much later isn't read as an answer.
+ */
+let pendingAnswer: { at: number; afterHydration: boolean } | null = null;
+const ANSWER_WINDOW_MS = 10_000;
 let opts: StartOptions | null = null;
 
 /** Open the room socket and start syncing the message store. Idempotent-ish:
@@ -213,6 +251,8 @@ export function stopCollab(): void {
   lastSent = null;
   currentTarget = null;
   currentFocus = null;
+  peers.clear();
+  pendingAnswer = null;
   // Clear everyone's per-node presence rings — the room is gone.
   usePresenceStore.getState().reset();
   if (socket) {
@@ -288,7 +328,7 @@ function openSocket(o: StartOptions, ticket: string): void {
     // patch here first would advance the baseline and let a peer's *stale* draft
     // (sent before our patch reached it) overwrite us — the race `applyFull` avoids
     // by reconciling against the un-advanced baseline instead.
-    send({ type: "hello", cid });
+    sendHello();
     // Re-announce where we're editing so a reconnect restores our presence ring
     // for everyone (peers dropped it when our socket closed).
     if (currentFocus) sendFocus(currentFocus);
@@ -334,7 +374,9 @@ function handleFrame(frame: Record<string, unknown>): void {
     // Drop per-node presence for anyone no longer in the room, so a peer who
     // left stops haunting the block they had open (their socket close doesn't
     // send a focus-clear; the roster is the authority on who's still here).
-    usePresenceStore.getState().retain(participants.map((p) => p.id));
+    const present = new Set(participants.map((p) => p.id));
+    usePresenceStore.getState().retain([...present]);
+    for (const [peerCid, peer] of peers) if (!present.has(peer.userId)) peers.delete(peerCid);
     return;
   }
   if (type === "room_full") {
@@ -362,7 +404,7 @@ function handleFrame(frame: Record<string, unknown>): void {
     // `applyFull` reconciles against our un-broadcast local edits (nothing
     // pending is lost), and we re-announce our focus so our presence ring
     // survives the round trip. Handled before the echo guard (no `cid`).
-    send({ type: "hello", cid });
+    sendHello();
     if (currentFocus) sendFocus(currentFocus);
     return;
   }
@@ -391,10 +433,15 @@ function handleFrame(frame: Record<string, unknown>): void {
     const name = typeof frame.name === "string" ? frame.name : "Someone";
     const avatar = typeof frame.avatar === "string" ? frame.avatar : null;
     usePresenceStore.getState().setFocus({ userId, name, avatar }, nodeId);
+    // Remember who this connection is, so a whole-draft replace it sends later
+    // can be attributed (draft frames carry only the `cid`).
+    if (typeof frame.cid === "string") {
+      peers.set(frame.cid, { userId, name: typeof frame.name === "string" ? frame.name : "" });
+    }
     return;
   }
   if (type === "draft" && frame.message && typeof frame.message === "object") {
-    applyFull(frame.message as WebhookMessage);
+    receiveDraft(frame.message as WebhookMessage, typeof frame.cid === "string" ? frame.cid : "");
     return;
   }
   if (type === "resume" && frame.message && typeof frame.message === "object") {
@@ -434,6 +481,32 @@ function signalHydrated(): void {
   opts?.onHydrated?.();
 }
 
+/**
+ * Take in a peer's full `draft`, and tell the shell when it replaced the whole
+ * message out from under us (see `onPeerReplace`). The room's initial sync
+ * never counts — a latecomer adopting the room's draft over its fresh-open
+ * default replaced nothing anyone made — and neither does a draft we kept our
+ * own structure over (`applyFull` adopted nothing).
+ */
+function receiveDraft(message: WebhookMessage, senderCid: string): void {
+  const answer =
+    pendingAnswer && Date.now() - pendingAnswer.at < ANSWER_WINDOW_MS ? pendingAnswer : null;
+  pendingAnswer = null;
+  const wasHydrated = hydratedFired;
+  const before = useMessageStore.getState().message;
+  if (!applyFull(message)) return;
+  if (answer ? !answer.afterHydration : !wasHydrated) return;
+  const after = useMessageStore.getState().message;
+  if (!isWholeDocumentReplace(before, after)) return;
+  opts?.onPeerReplace?.({
+    // An answer to our own `hello` comes from whichever peer replied first —
+    // not necessarily whoever replaced the draft while we were away — so it's
+    // left unnamed rather than pinned on the wrong person.
+    actor: answer ? null : (peers.get(senderCid) ?? null),
+    cleared: Array.isArray(after.components) && after.components.length === 0,
+  });
+}
+
 /** Adopt a peer's full-message snapshot (latecomer sync, a top-level structural
  *  change, or a reconnect peer answering our `hello`) — but reconcile it with any
  *  local edits we haven't managed to broadcast yet, so an inbound full message
@@ -445,8 +518,9 @@ function signalHydrated(): void {
  *  peer's structural `draft` landed) survive. Without it, a peer's reconnect
  *  snapshot overwrites edits made while our socket was down — the offline-edit
  *  data-loss bug. When nothing is pending this reduces to adopting the peer's
- *  state verbatim, exactly as before. */
-function applyFull(message: WebhookMessage): void {
+ *  state verbatim, exactly as before. Returns whether the peer's message was
+ *  written to the store (false when our own unbroadcast structure was kept). */
+function applyFull(message: WebhookMessage): boolean {
   const ours = useMessageStore.getState().message;
   const pending = lastSent ? diffMessage(lastSent, ours) : [];
 
@@ -462,7 +536,7 @@ function applyFull(message: WebhookMessage): void {
     // We received the room's draft (kept ours for a structural conflict, but the
     // initial sync is settled) — safe to reveal.
     signalHydrated();
-    return;
+    return false;
   }
 
   const next = pending.length > 0 ? applyOps(message, pending) : message;
@@ -484,6 +558,7 @@ function applyFull(message: WebhookMessage): void {
   // We now hold live room state; a later server `resume` must not revert us.
   diverged = true;
   if (pending.length > 0) scheduleSync();
+  return true;
 }
 
 /** Apply a peer's per-node ops, touching only the named nodes so a concurrent
@@ -562,6 +637,11 @@ function syncNow(): void {
   }
   const ops = diffMessage(base, current);
   if (ops === null) {
+    // Replacing the whole message lands on everyone here, and peers name who did
+    // it from the identity on `focus` frames — so send ours first. An existing
+    // frame with its usual meaning (our selection, which the replace just
+    // cleared), so peers on an older build handle it exactly as before.
+    if (isWholeDocumentReplace(base, current)) sendFocus(currentFocus);
     if (sendSnapshot(current)) {
       lastSent = current;
       schedulePersist();
@@ -572,6 +652,14 @@ function syncNow(): void {
   if (send({ type: "patch", cid, ops })) {
     lastSent = current;
     schedulePersist();
+  }
+}
+
+/** Ask the room for its current draft (connect, reconnect, `resync`), noting
+ *  that the next draft to arrive is most likely an answer (`pendingAnswer`). */
+function sendHello(): void {
+  if (send({ type: "hello", cid })) {
+    pendingAnswer = { at: Date.now(), afterHydration: hydratedFired };
   }
 }
 

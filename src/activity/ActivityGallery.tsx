@@ -31,7 +31,9 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useActivityStore } from "@/core/activity/activityStore";
+import { requestRoomReplace } from "@/core/activity/roomReplaceConfirm";
 import { useMessageStore } from "@/core/state/messageStore";
+import { toastWithUndo } from "@/features/builder/undoToast";
 import {
   libraryEntryHasDetails,
   libraryEntryMessage,
@@ -320,24 +322,29 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
           isPosted ? "Posted" : "Server draft",
           message ? libraryEntrySearchText(entry) : undefined,
         ),
-        onPick: () => {
-          void (async () => {
-            const full = hasDetails
-              ? entry
-              : await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
-            // loadLibraryEntry loads into the shared editor (collab broadcasts
-            // to the room), re-wires Update-in-place for a posted entry, and
-            // toasts.
-            if (full && loadEntry(full)) {
-              onClose();
-            } else {
-              pushToast(
-                "This entry couldn't be read — it may predate a server key change.",
-                "error",
-              );
-            }
-          })();
-        },
+        onPick: () =>
+          // Loading replaces the whole shared draft, so ask first when others
+          // are editing it (asked before the fetch, so the answer is instant).
+          requestRoomReplace({
+            action: isPosted ? "Loading this posted message" : "Loading this server draft",
+            run: () =>
+              void (async () => {
+                const full = hasDetails
+                  ? entry
+                  : await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
+                // loadLibraryEntry loads into the shared editor (collab
+                // broadcasts to the room), re-wires Update-in-place for a
+                // posted entry, and toasts.
+                if (full && loadEntry(full)) {
+                  onClose();
+                } else {
+                  pushToast(
+                    "This entry couldn't be read — it may predate a server key change.",
+                    "error",
+                  );
+                }
+              })(),
+          }),
         onDelete: holdsSlot
           ? undefined
           : () =>
@@ -378,9 +385,12 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       const tags: CardData["tags"] = [];
       if (s.status === "suspended") tags.push({ text: "Over plan limit", tone: "warn" });
       if (s.make_permanent) tags.push({ text: "Never expires", tone: "ok" });
+      // The Activity has no way to save into a schedule (the web's Schedule
+      // panel does), so loading one is a copy — say so, or posting it reads as
+      // an edit while the original still goes out as scheduled.
       const description = s.dest_label
-        ? `Scheduled for ${s.dest_label}. Load it back to keep editing together.`
-        : "One-time scheduled post. Load it back to keep editing together.";
+        ? `Scheduled for ${s.dest_label}. Load a copy to edit together — the scheduled post stays as it is.`
+        : "One-time scheduled post. Load a copy to edit together — the scheduled post stays as it is.";
       return {
         kind: "scheduled",
         key: `sched:${s.id}`,
@@ -405,15 +415,20 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
             pushToast("That post's message isn't available to load.", "error");
             return;
           }
-          replaceMessage(m);
-          onClose();
-          const validation = validateMessage(m);
-          pushToast(
-            validation.ok
-              ? "Loaded the scheduled message into the editor."
-              : `Loaded with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
-            validation.ok ? "success" : "info",
-          );
+          requestRoomReplace({
+            action: "Loading this scheduled post",
+            run: () => {
+              replaceMessage(m);
+              onClose();
+              const validation = validateMessage(m);
+              pushToast(
+                validation.ok
+                  ? "Loaded the scheduled message into the editor."
+                  : `Loaded with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
+                validation.ok ? "success" : "info",
+              );
+            },
+          });
         },
         onDelete: () =>
           setPendingDelete({
@@ -447,14 +462,18 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
           t.pairsWith,
           messageSearchText(t.message),
         ),
-        onPick: () => {
+        onPick: () =>
           // Straight into the room's shared editor — the Activity has no plugin
           // setup checklist (that guided flow lives on the web), so the template
           // lands ready to edit together and post.
-          replaceMessage(t.message);
-          onClose();
-          pushToast(`Loaded the "${t.name}" template — everything's editable.`, "success");
-        },
+          requestRoomReplace({
+            action: `Loading the “${t.name}” template`,
+            run: () => {
+              replaceMessage(t.message);
+              onClose();
+              pushToast(`Loaded the "${t.name}" template — everything's editable.`, "success");
+            },
+          }),
       })),
     [replaceMessage, onClose],
   );
@@ -586,11 +605,19 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     shown.length > effectiveVisibleCount ? shown.slice(0, effectiveVisibleCount) : shown;
   const revealMore = useCallback(() => setVisibleCount((n) => n + CARD_PAGE_SIZE), []);
 
-  const startBlank = () => {
-    clearAll();
-    onClose();
-    pushToast("Started a blank message", "info");
-  };
+  // One tap here used to wipe the whole room's draft; it now asks first when
+  // others are editing, and — like the web app's Clear — offers Undo either way.
+  const startBlank = () =>
+    requestRoomReplace({
+      action: "Starting from scratch",
+      confirmLabel: "Clear for everyone",
+      run: () => {
+        const before = useMessageStore.getState().message;
+        clearAll();
+        onClose();
+        toastWithUndo("Started a blank message.", before);
+      },
+    });
 
   const confirmDelete = () => {
     if (!pendingDelete) return;

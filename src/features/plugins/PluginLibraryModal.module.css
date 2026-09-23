@@ -195,6 +195,17 @@
   background: var(--app-warning-soft);
   color: var(--app-warning-text);
 }
+/* A link service's setup state for the connected server: amber (above) when its
+   probe says it isn't set up, green once it is, and neutral while nobody could
+   ask — no server connected, the probe failed, or inside the Activity. */
+.tagReady {
+  background: var(--app-success-soft);
+  color: var(--app-success-text);
+}
+.tagNeutral {
+  background: var(--app-bg-active);
+  color: var(--app-text-muted);
+}
 
 .rowDesc {
   font-size: 12px;

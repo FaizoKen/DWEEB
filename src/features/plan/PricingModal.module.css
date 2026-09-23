@@ -225,6 +225,92 @@
   font-weight: 600;
 }
 
+/* Stands in for the plan-dependent controls when there's no plan to hang them
+   on — a failed load (with Retry) or a lapsed sign-in (with Sign in). */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--app-danger) 40%, var(--app-border));
+  background: var(--app-danger-soft);
+}
+.noticeText {
+  flex: 1 1 240px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.noticeText strong {
+  font-weight: 600;
+}
+
+/* A failed subscriptions load, in the footer where Manage billing would be —
+   the reason on the left, its Retry in the button's slot. */
+.footerNote {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 auto 0 0;
+  align-self: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--app-danger-text);
+}
+@media (max-width: 640px) {
+  /* The footer wraps on phones: give the reason its own line above the buttons. */
+  .footerNote {
+    flex-basis: 100%;
+  }
+}
+
+/* ── Loading placeholders ───────────────────────────────────────────────── */
+/* Stand-ins, sized like what replaces them, for the parts that wait on the
+   server's plan: the tier chip, the promo field and its hint, and each card's
+   CTA. The slow opacity pulse matches the account menu's loading skeleton. */
+.skeleton {
+  display: block;
+  flex: none;
+  border-radius: 999px;
+  background: var(--app-bg-active);
+  animation: pricingBreathe 1.6s ease-in-out infinite;
+}
+.tierSkeleton {
+  width: 46px;
+  height: 21px;
+}
+.promoSkeleton {
+  width: 165px;
+  height: 29px;
+}
+.hintSkeleton {
+  align-self: center;
+  width: min(380px, 80%);
+  height: 10px;
+  margin: 3px 0;
+}
+.ctaSkeleton {
+  flex: 1;
+}
+@media (pointer: coarse) {
+  /* Matches the promo pill's touch metrics (see .promoField above). */
+  .promoSkeleton {
+    width: 204px;
+    height: 37px;
+  }
+}
+@keyframes pricingBreathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Shown above the embedded form when the applied code makes the plan free, so the
    missing card fields read as intended rather than as a broken form. */
 .noCardNote {
@@ -751,7 +837,8 @@
   .pass,
   .passSheen,
   .successBang,
-  .perk {
+  .perk,
+  .skeleton {
     animation: none;
   }
 }

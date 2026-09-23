@@ -1,9 +1,22 @@
-/* Footer button row. */
+/* Footer button row. Wraps so the "why is Review disabled" note can take its
+   own line above the buttons on a narrow screen. */
 .footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   width: 100%;
+}
+
+/* The disabled primary's reason, shown beside it rather than in a tooltip. Fills
+   the space left of the buttons; drops to its own line once it's under ~200px. */
+.blockedNote {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
 }
 
 /* ── Progress stepper ────────────────────────────────────────────────────── */

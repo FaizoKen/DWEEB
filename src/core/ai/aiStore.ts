@@ -22,6 +22,7 @@ import type { WebhookMessage } from "@/core/schema/types";
 import type { AiSettings, ChatMessage } from "./types";
 import type { AiPrompt, AiTurn } from "./providers";
 import { useAiUsageStore } from "./usageStore";
+import { PROVIDERS } from "./providerMeta";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
 // `attachEditorFields` (normalize) and `validateMessage` (validation) are on the
 // app's critical path already — the editor store, draft persistence, and live
@@ -57,11 +58,14 @@ interface AiState {
   togglePanel(): void;
 
   setSettings(next: AiSettings): void;
+  /** Delete the API key saved in this browser, keeping the rest of the settings. */
+  removeApiKey(): void;
   /** True when the assistant is ready to chat — a provider API key is configured. */
   isConfigured(): boolean;
 
   send(prompt: string): Promise<void>;
   cancel(): void;
+  /** Empty the transcript; `undoClearChat` can bring it back until the chat moves on. */
   clearChat(): void;
 }
 
@@ -102,16 +106,26 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   setSettings(next) {
-    saveAiSettings(next);
+    // The built-in relay has no key of its own. A BYOK key saved beside it would
+    // sit in storage unseen, then resurface in the key field of whichever
+    // provider the form next opens on — so switching to built-in drops it.
+    const settings = next.provider === "dweeb" ? { ...next, apiKey: "" } : next;
+    saveAiSettings(settings);
     // Clear the transcript: prior turns were produced under the old provider/
-    // model/key and shouldn't carry into a freshly configured assistant.
+    // model/key and shouldn't carry into a freshly configured assistant — nor
+    // come back through a pending "Clear chat" Undo.
     supersedeActiveSend();
+    lastCleared = null;
     set({
-      settings: next,
+      settings,
       messages: [],
       thinking: false,
       error: null,
     });
+  },
+
+  removeApiKey() {
+    get().setSettings({ ...get().settings, apiKey: "" });
   },
 
   isConfigured() {
@@ -119,7 +133,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     // The built-in relay needs no key — only a configured proxy. Sign-in is
     // checked at send time (the auth state may still be resolving here).
     if (settings.provider === "dweeb") return isProxyConfigured();
-    return settings.apiKey.trim().length > 0;
+    // A keyless provider (self-hosted Ollama) is ready without one — the form
+    // already lets it save with the key left blank.
+    return !PROVIDERS[settings.provider].requiresKey || settings.apiKey.trim().length > 0;
   },
 
   async send(prompt) {
@@ -501,10 +517,40 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   clearChat() {
+    const { messages } = get();
     supersedeActiveSend();
+    // Keep what was cleared for Undo. A turn caught mid-stream is superseded
+    // and will never finish, so it is kept settled: a bubble with no prose yet
+    // is dropped, and one with prose loses its caret.
+    if (messages.length > 0) {
+      lastCleared = messages.flatMap((m) =>
+        !m.streaming ? [m] : m.content ? [{ ...m, streaming: false }] : [],
+      );
+    }
     set({ messages: [], thinking: false, error: null });
   },
 }));
+
+/**
+ * The transcript the last "Clear chat" removed, for its Undo toast. Module-level
+ * like `lastApplied`: a reload forgets it, and a settings change retires it.
+ */
+let lastCleared: ChatMessage[] | null = null;
+
+/**
+ * Bring back the transcript "Clear chat" removed — only while the chat is still
+ * empty, i.e. nothing was sent since. Once a new turn exists (or the settings
+ * changed), restoring would splice old turns into a conversation they were never
+ * part of, so it declines instead. Returns whether it restored.
+ */
+export function undoClearChat(): boolean {
+  const cleared = lastCleared;
+  const { messages, thinking } = useAiStore.getState();
+  if (!cleared || messages.length > 0 || thinking) return false;
+  lastCleared = null;
+  useAiStore.setState({ messages: cleared, error: null });
+  return true;
+}
 
 /**
  * The last AI edit committed to the editor: which assistant bubble it belongs

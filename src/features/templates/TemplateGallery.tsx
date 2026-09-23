@@ -43,6 +43,9 @@ import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/savedMessagesStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { readSessionHint } from "@/core/auth/sessionHint";
+import { isProxyConfigured } from "@/core/guild/config";
 import {
   addPermanentMessage,
   fetchPermanentSlots,
@@ -67,6 +70,11 @@ import { attachEditorFields } from "@/core/serialization/normalize";
 import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
 import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
 import { formatInstant } from "@/core/schedule/recurrence";
+import {
+  isScheduleEditable,
+  loadScheduledPost,
+  scheduleOriginFromView,
+} from "@/core/schedule/scheduleOrigin";
 import { validateMessage } from "@/core/schema/validation";
 import { messageHeadline } from "@/core/schema/headline";
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
@@ -155,6 +163,20 @@ export function TemplateGallery() {
   // shows the real server icon straight away instead of the generic glyph.
   const connectedGuild = useGuildIdentity(connectedGuildId);
   const connectedGuildName = connectedGuild?.name;
+
+  // Signed out, the header leads with templates and says what signing in adds,
+  // instead of promising posted and saved messages it can't show. On the landing
+  // screen the session is usually still unknown — the editor, whose account
+  // control checks it, isn't mounted yet — and the directory deliberately
+  // doesn't ask the proxy itself: that screen is what every crawler and the
+  // Lighthouse gate render, and it makes no cross-origin request today. So until
+  // the session resolves, a browser with no sign of a past one (no session hint,
+  // no connected server) reads as signed out.
+  const authStatus = useAuthStore((s) => s.status);
+  const login = useAuthStore((s) => s.login);
+  const [hadSession] = useState(readSessionHint);
+  const signedOut =
+    authStatus === "anon" || (authStatus !== "authed" && !hadSession && !connectedGuildId);
 
   const [query, setQuery] = useState("");
   // Filtering runs against the deferred value so typing stays responsive even
@@ -711,9 +733,16 @@ export function TemplateGallery() {
       const tags: CardData["tags"] = [];
       if (s.status === "suspended") tags.push({ text: "Over plan limit", tone: "warn" });
       if (s.make_permanent) tags.push({ text: "Never expires", tone: "ok" });
-      const description = s.dest_label
-        ? `Scheduled for ${s.dest_label}. Load it back to edit or reschedule.`
-        : "One-time scheduled post. Load it back to edit or reschedule.";
+      // Loading an upcoming post arms it as the editor's schedule origin, so the
+      // Send panel saves changes into it (message and time) instead of
+      // scheduling a second post. One already going out can't take edits — it
+      // loads as a copy, and the card says exactly that.
+      const editable = isScheduleEditable(s);
+      const description = editable
+        ? s.dest_label
+          ? `Scheduled for ${s.dest_label}. Open it to change the message or the time.`
+          : "One-time scheduled post. Open it to change the message or the time."
+        : "Posting right now — opening it loads a copy to reuse.";
       return {
         kind: "scheduled",
         key: `sched:${s.id}`,
@@ -732,19 +761,24 @@ export function TemplateGallery() {
           paused ? "Paused" : "Scheduled",
           message ? messageSearchText(message) : undefined,
         ),
+        actionLabel: editable ? "Edit schedule →" : "Load a copy →",
         onPick: () => {
           const m = sched.messages.get(s.id);
           if (!m) {
             pushToast("That post's message isn't available to load.", "error");
             return;
           }
-          replaceMessage(m);
+          if (editable) loadScheduledPost(m, scheduleOriginFromView(s));
+          else replaceMessage(m);
           closeGallery();
           const validation = validateMessage(m);
+          const issues = validation.ok
+            ? ""
+            : ` It has ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`;
           pushToast(
-            validation.ok
-              ? "Loaded the scheduled message into the editor."
-              : `Loaded with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
+            editable
+              ? `Loaded the scheduled post — edit it, then save from Send.${issues}`
+              : `Loaded a copy — scheduling it makes a new post.${issues}`,
             validation.ok ? "success" : "info",
           );
         },
@@ -1017,9 +1051,32 @@ export function TemplateGallery() {
                   )}
                   Message directory
                 </h2>
+                {/* Signed out, the directory can only offer templates, so it says so
+                    instead of promising posted and saved messages it can't show,
+                    with the sign-in that unlocks them inline. The sentence is kept
+                    no longer than the signed-in one (and the chip row stays in
+                    place) on purpose: this header is the landing page's first
+                    paint, and in the lab gate a taller header, a longer
+                    subtitle or a missing chip row each made a gallery element
+                    the late Largest Contentful Paint (1.1 s → 3 s) or raised
+                    Total Blocking Time past its cap. */}
                 <p className={styles.subtitle}>
-                  Reload a posted message, reuse a saved one, or pick a template — everything is
-                  fully editable.
+                  {signedOut && isProxyConfigured() ? (
+                    <>
+                      Pick a template to start.{" "}
+                      {/* A click, so the Discord popup is allowed to open; the
+                          editor's account control connects a server once it
+                          mounts, as on any sign-in. */}
+                      <button type="button" className={styles.signInLink} onClick={login}>
+                        Sign in with Discord
+                      </button>{" "}
+                      to see your server’s posted and saved messages.
+                    </>
+                  ) : signedOut ? (
+                    "Pick a template to start — every part is fully editable."
+                  ) : (
+                    "Reload a posted message, reuse a saved one, or pick a template — everything is fully editable."
+                  )}
                 </p>
               </div>
               <button
@@ -1089,7 +1146,7 @@ export function TemplateGallery() {
                   ref={chipsRef}
                   className={styles.chips}
                   role="group"
-                  aria-label="Filter templates by category"
+                  aria-label="Filter the directory"
                   onScroll={updateChipScroll}
                 >
                   {!revealed ? (

@@ -1,3 +1,32 @@
+/* Shown when the dialog opens on a report left unsent earlier in this tab —
+   says why the fields are already filled, and offers the way to start over. */
+.restored {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  color: var(--app-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.restoredDiscard {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 /* Intro / explanatory copy, matching the Share-dialog panels. */
 .lead {
   margin: 0;

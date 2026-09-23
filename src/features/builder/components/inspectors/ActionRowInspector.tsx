@@ -11,14 +11,14 @@ export function ActionRowInspector({ node }: Props) {
   if (isSelectRow(node)) {
     return (
       <p className={styles.note}>
-        This row holds a select menu. Edit it from its own row just below this one.
+        This row holds a menu. Edit it from its own row just below this one.
       </p>
     );
   }
   return (
     <p className={styles.note}>
-      Rows hold {node.components.length} of {LIMITS.ACTION_ROW_BUTTONS} buttons. Edit each button
-      from its own row just below this one.
+      This row holds {node.components.length} of {LIMITS.ACTION_ROW_BUTTONS} buttons. Edit each
+      button from its own row just below this one.
     </p>
   );
 }

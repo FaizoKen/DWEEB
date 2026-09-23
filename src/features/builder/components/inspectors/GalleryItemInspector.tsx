@@ -60,7 +60,7 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
       <Disclosure label="Advanced media options">
         <Field
           label="Attachment ID (optional)"
-          hint="Reference an already-uploaded attachment by snowflake."
+          hint="Use instead of a URL to show a file already uploaded to Discord, by its ID."
         >
           {(id) => (
             <TextInput
@@ -81,7 +81,10 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
           )}
         </Field>
       </Disclosure>
-      <Field label="Alt text">
+      <Field
+        label="Alt text"
+        counter={{ value: item.description ?? "", max: LIMITS.MEDIA_DESCRIPTION }}
+      >
         {(id) => (
           <PlaceholderInput
             id={id}

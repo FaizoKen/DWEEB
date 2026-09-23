@@ -13,6 +13,32 @@
   color: var(--app-text);
 }
 
+/* Label + character count, only for a field given a `counter`. Baseline-
+ * aligned so the smaller count sits on the label's line; the label may wrap,
+ * the count never does. */
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.labelRow .label {
+  min-width: 0;
+}
+
+.count {
+  flex: none;
+  font-size: var(--app-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-subtle);
+}
+.countWarning {
+  color: var(--app-warning);
+}
+.countDanger {
+  color: var(--app-danger-text);
+}
+
 .labelHidden {
   position: absolute;
   width: 1px;

@@ -88,6 +88,32 @@
   max-width: 60ch;
 }
 
+/* Signed out, the subtitle ends with "Sign in with Discord": a button styled as
+ * a link inside the sentence (so it's exempt from the target-size floor as
+ * inline text), underlined at rest like the editor's empty-state links
+ * (Builder.module.css `.startLink`) — against the muted text, colour alone is
+ * nowhere near enough to mark it. */
+.signInLink {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.signInLink:hover {
+  color: var(--app-text);
+}
+.signInLink:focus-visible {
+  border-radius: var(--app-radius-sm);
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 .discoveryLinks {
   display: flex;
   flex-wrap: wrap;

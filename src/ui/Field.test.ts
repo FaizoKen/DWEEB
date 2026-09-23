@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { wireControl } from "@/ui/Field";
+import { counterState, wireControl } from "@/ui/Field";
 
 const CONTROL_ID = "field-1";
 const DESCRIBED_BY = ["field-1-hint"];
@@ -107,5 +107,56 @@ describe("wireControl", () => {
     const control = single(wireControl(tree, CONTROL_ID, DESCRIBED_BY, undefined));
 
     expect(propsOf(control)["aria-describedby"]).toBe("caller-said-this field-1-hint");
+  });
+});
+
+/**
+ * The character count a clamped field shows as it fills. Hidden below 75% of
+ * the cap, neutral from there, amber from 90%, red at the cap — and measured in
+ * the unit `maxLength` clamps in, or the count and the input would disagree
+ * about where the wall is.
+ */
+describe("counterState", () => {
+  const at = (length: number, max: number) => counterState({ value: "x".repeat(length), max });
+
+  it("stays hidden below three quarters of the cap", () => {
+    expect(at(0, 80)).toBeNull();
+    expect(at(59, 80)).toBeNull();
+    // 75% of 150 is 112.5 — the count appears on the first whole character past it.
+    expect(at(112, 150)).toBeNull();
+  });
+
+  it("appears at three quarters, neutral until nine tenths", () => {
+    expect(at(60, 80)).toEqual({ length: 60, max: 80, tone: "neutral" });
+    expect(at(113, 150)?.tone).toBe("neutral");
+    expect(at(71, 80)?.tone).toBe("neutral");
+  });
+
+  it("turns amber from nine tenths and red at the cap", () => {
+    expect(at(72, 80)?.tone).toBe("warning");
+    expect(at(79, 80)?.tone).toBe("warning");
+    expect(at(80, 80)?.tone).toBe("danger");
+    expect(at(1024, 1024)?.tone).toBe("danger");
+  });
+
+  it("reads a value already over the cap as danger, with its true length", () => {
+    // `maxLength` stops typing, not an imported value that was already longer.
+    expect(at(120, 100)).toEqual({ length: 120, max: 100, tone: "danger" });
+  });
+
+  it("counts UTF-16 code units, the unit maxLength and the schema limits use", () => {
+    // 40 emoji are 80 code units: exactly as full as the input thinks it is.
+    expect(counterState({ value: "😀".repeat(40), max: 80 })).toEqual({
+      length: 80,
+      max: 80,
+      tone: "danger",
+    });
+    expect(counterState({ value: "😀".repeat(30), max: 80 })?.tone).toBe("neutral");
+  });
+
+  it("shows nothing for a missing or nonsensical cap", () => {
+    expect(at(10, 0)).toBeNull();
+    expect(at(10, -5)).toBeNull();
+    expect(at(10, Number.NaN)).toBeNull();
   });
 });

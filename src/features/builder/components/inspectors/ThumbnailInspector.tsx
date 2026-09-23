@@ -47,7 +47,7 @@ export function ThumbnailInspector({ node }: Props) {
       <Disclosure label="Advanced media options">
         <Field
           label="Attachment ID (optional)"
-          hint="Discord snowflake. Use instead of URL to reference an already-uploaded file."
+          hint="Use instead of a URL to show a file already uploaded to Discord, by its ID."
         >
           {(id) => (
             <TextInput
@@ -65,7 +65,10 @@ export function ThumbnailInspector({ node }: Props) {
           )}
         </Field>
       </Disclosure>
-      <Field label="Alt text">
+      <Field
+        label="Alt text"
+        counter={{ value: node.description ?? "", max: LIMITS.MEDIA_DESCRIPTION }}
+      >
         {(id) => (
           <PlaceholderInput
             id={id}

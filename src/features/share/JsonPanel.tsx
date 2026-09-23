@@ -40,9 +40,25 @@ import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import styles from "./ShareDialog.module.css";
 
-export function JsonPanel({ onDone }: { onDone: () => void }) {
+export function JsonPanel({
+  onDone,
+  confirmReplace,
+}: {
+  onDone: () => void;
+  /** Gate the import: called with the replace, which it runs now or once the
+   *  user confirms. The Activity asks first when others share the draft. */
+  confirmReplace?: (apply: () => void) => void;
+}) {
   const message = useMessageStore((s) => s.message);
-  const replace = useMessageStore((s) => s.replaceMessage);
+  const replaceNow = useMessageStore((s) => s.replaceMessage);
+  const replace = (next: Parameters<typeof replaceNow>[0], then: () => void) => {
+    const apply = () => {
+      replaceNow(next);
+      then();
+    };
+    if (confirmReplace) confirmReplace(apply);
+    else apply();
+  };
   // The live wire-format export. The dialog blocks editing the message behind
   // it, so this is frozen while the panel is open — safe to seed the field once.
   const exported = useMemo(() => encodeJson(message), [message]);
@@ -79,16 +95,17 @@ export function JsonPanel({ onDone }: { onDone: () => void }) {
     if (v1Preview.kind === "v1") {
       try {
         const { message: converted, notes } = convertV1Payload(v1Preview.parsed);
-        replace(converted);
         const dropped = notes.filter((n) => n.level === "warning").length;
-        pushToast(
-          dropped > 0
-            ? `Converted V1 payload to V2 — ${dropped} field${dropped === 1 ? "" : "s"} dropped (see preview).`
-            : "Converted V1 payload to V2.",
-          dropped > 0 ? "info" : "success",
-        );
-        setError(null);
-        onDone();
+        replace(converted, () => {
+          pushToast(
+            dropped > 0
+              ? `Converted V1 payload to V2 — ${dropped} field${dropped === 1 ? "" : "s"} dropped (see preview).`
+              : "Converted V1 payload to V2.",
+            dropped > 0 ? "info" : "success",
+          );
+          setError(null);
+          onDone();
+        });
         return;
       } catch (e) {
         setError((e as Error).message);
@@ -104,17 +121,18 @@ export function JsonPanel({ onDone }: { onDone: () => void }) {
       return;
     }
     const validation = validateMessage(result.message);
-    replace(result.message);
-    setError(null);
-    if (!validation.ok) {
-      pushToast(
-        `Imported with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
-        "info",
-      );
-    } else {
-      pushToast("Imported.", "success");
-    }
-    onDone();
+    replace(result.message, () => {
+      setError(null);
+      if (!validation.ok) {
+        pushToast(
+          `Imported with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
+          "info",
+        );
+      } else {
+        pushToast("Imported.", "success");
+      }
+      onDone();
+    });
   }
 
   const copyJson = async () => {

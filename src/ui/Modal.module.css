@@ -85,6 +85,20 @@
   color: var(--app-text);
 }
 
+/* Touch: a finger needs a bigger target than a cursor. Fine pointers keep 32px. */
+@media (pointer: coarse) {
+  .close {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* `bare` dialogs bring their own surface (see Modal.tsx); focus lands on the
+   container when it opens, which must not draw an outline around the whole thing. */
+.bare {
+  outline: none;
+}
+
 .body {
   /* Exposed so a sticky full-bleed footer inside the body (e.g. the Share
      dialog's floating action bar) can cancel this padding with negative margins
@@ -129,9 +143,12 @@
     --modal-pad: 14px;
     padding: var(--modal-pad);
   }
+  /* Footers list the primary action last (Cancel → Post), so a plain wrap
+     dropped it onto a second line *below* the secondary. Wrapping in reverse
+     puts whatever wraps — the primary — on the upper line instead. */
   .dialog .footer {
     padding: 12px 14px;
-    flex-wrap: wrap;
+    flex-wrap: wrap-reverse;
   }
 
   /* Compact variant stays a small centered card on mobile too. */
@@ -143,6 +160,18 @@
   }
   .dialogSm .body {
     padding: 14px 16px;
+  }
+}
+
+/* Phones: stack the actions full-width, primary on top — the last action in
+   the footer lifted first by column-reverse, and every one the full width to
+   tap. A footer that wraps its buttons in one element (TemplateSetup) gets the
+   same treatment through that lone child. */
+@media (max-width: 480px) {
+  .dialog .footer,
+  .dialog .footer > div:only-child {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 }
 
