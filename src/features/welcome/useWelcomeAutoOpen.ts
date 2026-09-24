@@ -64,7 +64,7 @@ export function useWelcomeAutoOpen(suppress = false, ready = true): void {
       // Written only now, with the editor (and its More menu) actually on
       // screen — the record means "the offer was made", not "a timer fired".
       writeWelcomeRecord("announced");
-      pushToast("New here? A 90-second intro shows how DWEEB works.", "info", {
+      pushToast("New here? A one-minute intro shows how DWEEB works.", "info", {
         // One tap plays it; the More menu's "Watch the intro" covers replays.
         action: {
           label: "Watch the intro",

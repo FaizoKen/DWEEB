@@ -5,10 +5,15 @@
    video playback feel heavy on phones, and even on desktop it buys little over
    a slightly deeper plain scrim. */
 
+/* Up to 1280 CSS px wide: the film is UI footage, and every extra pixel is
+   legibility (the landscape cut is a 1080p source, sharp to 1920 device px).
+   On most laptops the height cap binds first — so the width is also capped at
+   what that height allows (the video's `max-height` × its aspect), or the
+   stage would pillarbox the film with black bars. */
 .panel {
   display: flex;
   flex-direction: column;
-  max-width: min(960px, 94vw);
+  max-width: min(1280px, 94vw, (94dvh - 50px) * 16 / 9);
   width: 100%;
   max-height: 94dvh;
   border-radius: var(--app-radius-lg);
@@ -23,7 +28,7 @@
 /* The vertical cut is a phone-shaped stage — cap the panel's width so the
    9:16 video (bounded by the viewport height) isn't flanked by dead space. */
 .portrait {
-  max-width: min(440px, 94vw);
+  max-width: min(440px, 94vw, (94dvh - 50px) * 9 / 16);
 }
 
 .title {

@@ -143,8 +143,6 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   useKeyboardShortcuts();
   useAutoSaveDraft();
   useAttachmentGc();
-  // First-visit onboarding: plays the intro film once, layered over the
-  // landing gallery; see the hook for the gating.
 
   // Decide the first-visit gallery before the first editor render. The gallery
   // still opens from an effect (state ownership stays in its store), but the
@@ -276,9 +274,9 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   const closeMcp = useMcpStore((s) => s.closeMcp);
   const closeInstall = useInstallStore((s) => s.closeInstall);
 
-  // The intro film — auto-played once for brand-new users (layered over the
-  // landing gallery) and replayable from the "More" menu. Mounted lazily only
-  // while open so the video modal never weighs on the initial bundle.
+  // The intro film — opt-in: opened from More ▸ "Watch the intro" or the
+  // one-time offer toast (useWelcomeAutoOpen). Mounted lazily only while open
+  // so the video modal never weighs on the initial bundle.
   const welcomeOpen = useWelcomeStore((s) => s.open);
   const closeWelcome = useWelcomeStore((s) => s.closeWelcome);
 
