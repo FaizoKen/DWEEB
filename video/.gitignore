@@ -1,3 +1,30 @@
 node_modules/
 out/
-public/audio/
+
+# Audio. Commit what the film needs to typecheck and render reproducibly: the
+# manifest (src/timeline.ts imports it), the voice-over takes + their word
+# timings (TTS takes cannot be re-synthesized identically), the SFX kit and its
+# frame table. Everything else in public/audio stays ignored — in particular
+# music.wav, which is cut from the licensed track.
+public/audio/*
+!public/audio/manifest.json
+!public/audio/hook.mp3
+!public/audio/reveal.mp3
+!public/audio/templates.mp3
+!public/audio/build.mp3
+!public/audio/assistant.mp3
+!public/audio/plugins.mp3
+!public/audio/send.mp3
+!public/audio/activity.mp3
+!public/audio/cta.mp3
+!public/audio/*.words.json
+!public/audio/*.wav
+!public/audio/sfx.json
+public/audio/music.wav
+public/audio/*.tmp-*
+
+# The licensed Pixabay track (provenance: scripts/lib/music-edit.mjs). Its
+# licence allows use inside the film but not redistribution as a standalone
+# file, so it lives outside public/ (never copied into a render bundle) and is
+# never committed.
+assets-src/

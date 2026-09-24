@@ -1,0 +1,240 @@
+{
+  "id": "build",
+  "text": "Shape it with real Discord components while a high-fidelity preview updates live, and every limit is checked for you.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+8%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "2c8463cc1faf0a0ac193f0057b6eb7e71199866041587d63f111f19ab9e2eb0c",
+  "recordedAt": "2026-09-23T12:58:58.520Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 925830,
+        "Duration": 2315000,
+        "text": {
+          "Text": "Shape",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 3240830,
+        "Duration": 810000,
+        "text": {
+          "Text": "it",
+          "Length": 2,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 4050830,
+        "Duration": 1851660,
+        "text": {
+          "Text": "with",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 5902910,
+        "Duration": 3472080,
+        "text": {
+          "Text": "real",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 9375000,
+        "Duration": 3819580,
+        "text": {
+          "Text": "Discord",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 13194580,
+        "Duration": 5324160,
+        "text": {
+          "Text": "components",
+          "Length": 10,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 18634160,
+        "Duration": 1388750,
+        "text": {
+          "Text": "while",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 20023330,
+        "Duration": 462909,
+        "text": {
+          "Text": "a",
+          "Length": 1,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 20601660,
+        "Duration": 6597080,
+        "text": {
+          "Text": "high-fidelity",
+          "Length": 13,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 27199160,
+        "Duration": 4397910,
+        "text": {
+          "Text": "preview",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 31597080,
+        "Duration": 4050830,
+        "text": {
+          "Text": "updates",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 35763750,
+        "Duration": 3935000,
+        "text": {
+          "Text": "live",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 43750000,
+        "Duration": 1504580,
+        "text": {
+          "Text": "and",
+          "Length": 3,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 46180410,
+        "Duration": 2430410,
+        "text": {
+          "Text": "every",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 48611250,
+        "Duration": 4282500,
+        "text": {
+          "Text": "limit",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 54629580,
+        "Duration": 1041660,
+        "text": {
+          "Text": "is",
+          "Length": 2,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 55787080,
+        "Duration": 2893330,
+        "text": {
+          "Text": "checked",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 58680410,
+        "Duration": 2083330,
+        "text": {
+          "Text": "for",
+          "Length": 3,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 60763750,
+        "Duration": 1967500,
+        "text": {
+          "Text": "you",
+          "Length": 3,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

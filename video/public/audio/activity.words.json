@@ -1,0 +1,204 @@
+{
+  "id": "activity",
+  "text": "Need another pair of hands? Invite your team, then build together inside Discord — in real time.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+8%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "ee1333ccd516b183afad17950076708a618311c82205178e1674a972ccb570f6",
+  "recordedAt": "2026-09-23T13:00:38.695Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 810000,
+        "Duration": 1157500,
+        "text": {
+          "Text": "Need",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 2083330,
+        "Duration": 2199160,
+        "text": {
+          "Text": "another",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 4282500,
+        "Duration": 1620410,
+        "text": {
+          "Text": "pair",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 5902910,
+        "Duration": 578750,
+        "text": {
+          "Text": "of",
+          "Length": 2,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 6481660,
+        "Duration": 5555410,
+        "text": {
+          "Text": "hands",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 15740830,
+        "Duration": 2662080,
+        "text": {
+          "Text": "Invite",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 18402910,
+        "Duration": 1041660,
+        "text": {
+          "Text": "your",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 19444580,
+        "Duration": 3703750,
+        "text": {
+          "Text": "team",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 28240830,
+        "Duration": 2199160,
+        "text": {
+          "Text": "then",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 31481660,
+        "Duration": 4398330,
+        "text": {
+          "Text": "build",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 35995410,
+        "Duration": 4976660,
+        "text": {
+          "Text": "together",
+          "Length": 8,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 41087910,
+        "Duration": 6712910,
+        "text": {
+          "Text": "inside",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 47916660,
+        "Duration": 5092500,
+        "text": {
+          "Text": "Discord",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 56365830,
+        "Duration": 1388750,
+        "text": {
+          "Text": "in",
+          "Length": 2,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 57754580,
+        "Duration": 2199160,
+        "text": {
+          "Text": "real",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 60069580,
+        "Duration": 3935000,
+        "text": {
+          "Text": "time",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

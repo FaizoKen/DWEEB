@@ -1,0 +1,132 @@
+{
+  "id": "templates",
+  "text": "Start with a ready-made template, then make every detail yours.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+8%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "265e20ffe8e40c73e6358f5bfbd8d8643a0d3dd901329c43f2793b93ec0ec6d9",
+  "recordedAt": "2026-09-23T12:58:55.720Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 925830,
+        "Duration": 2893330,
+        "text": {
+          "Text": "Start",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 3819580,
+        "Duration": 1272910,
+        "text": {
+          "Text": "with",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 5092500,
+        "Duration": 347080,
+        "text": {
+          "Text": "a",
+          "Length": 1,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 5440000,
+        "Duration": 6018330,
+        "text": {
+          "Text": "ready-made",
+          "Length": 10,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 11574160,
+        "Duration": 4166660,
+        "text": {
+          "Text": "template",
+          "Length": 8,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 19328750,
+        "Duration": 1157500,
+        "text": {
+          "Text": "then",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 20486250,
+        "Duration": 1967500,
+        "text": {
+          "Text": "make",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 24305410,
+        "Duration": 2546250,
+        "text": {
+          "Text": "every",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 26851660,
+        "Duration": 4166660,
+        "text": {
+          "Text": "detail",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 31134160,
+        "Duration": 4629580,
+        "text": {
+          "Text": "yours",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

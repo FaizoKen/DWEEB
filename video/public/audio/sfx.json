@@ -1,0 +1,123 @@
+{
+  "fps": 30,
+  "sampleRate": 44100,
+  "sounds": {
+    "click-1": {
+      "file": "audio/click-1.wav",
+      "frames": 3,
+      "sec": 0.1,
+      "peakDbfs": -6.05
+    },
+    "click-2": {
+      "file": "audio/click-2.wav",
+      "frames": 3,
+      "sec": 0.1,
+      "peakDbfs": -3.94
+    },
+    "click-3": {
+      "file": "audio/click-3.wav",
+      "frames": 3,
+      "sec": 0.1,
+      "peakDbfs": -7.5
+    },
+    "pop-1": {
+      "file": "audio/pop-1.wav",
+      "frames": 6,
+      "sec": 0.2,
+      "peakDbfs": -8.63
+    },
+    "pop-2": {
+      "file": "audio/pop-2.wav",
+      "frames": 6,
+      "sec": 0.2,
+      "peakDbfs": -8.33
+    },
+    "pop-3": {
+      "file": "audio/pop-3.wav",
+      "frames": 6,
+      "sec": 0.2,
+      "peakDbfs": -8.49
+    },
+    "tick-1": {
+      "file": "audio/tick-1.wav",
+      "frames": 2,
+      "sec": 0.0667,
+      "peakDbfs": -12.7
+    },
+    "tick-2": {
+      "file": "audio/tick-2.wav",
+      "frames": 2,
+      "sec": 0.0667,
+      "peakDbfs": -10.72
+    },
+    "tick-3": {
+      "file": "audio/tick-3.wav",
+      "frames": 2,
+      "sec": 0.0667,
+      "peakDbfs": -11.51
+    },
+    "chime": {
+      "file": "audio/chime.wav",
+      "frames": 24,
+      "sec": 0.8,
+      "peakDbfs": -10.39
+    },
+    "shimmer": {
+      "file": "audio/shimmer.wav",
+      "frames": 27,
+      "sec": 0.9,
+      "peakDbfs": -12.5
+    },
+    "ping": {
+      "file": "audio/ping.wav",
+      "frames": 15,
+      "sec": 0.5,
+      "peakDbfs": -7.93
+    },
+    "whoosh": {
+      "file": "audio/whoosh.wav",
+      "frames": 17,
+      "sec": 0.55,
+      "peakDbfs": -8.13
+    },
+    "whoosh-soft": {
+      "file": "audio/whoosh-soft.wav",
+      "frames": 21,
+      "sec": 0.7,
+      "peakDbfs": -11.11
+    },
+    "riser": {
+      "file": "audio/riser.wav",
+      "frames": 36,
+      "sec": 1.2,
+      "peakDbfs": -19.47
+    },
+    "impact": {
+      "file": "audio/impact.wav",
+      "frames": 45,
+      "sec": 1.5,
+      "peakDbfs": -3.75
+    },
+    "click": {
+      "file": "audio/click.wav",
+      "frames": 3,
+      "sec": 0.1,
+      "peakDbfs": -6.05,
+      "aliasOf": "click-1"
+    },
+    "pop": {
+      "file": "audio/pop.wav",
+      "frames": 6,
+      "sec": 0.2,
+      "peakDbfs": -8.63,
+      "aliasOf": "pop-1"
+    },
+    "tick": {
+      "file": "audio/tick.wav",
+      "frames": 2,
+      "sec": 0.0667,
+      "peakDbfs": -12.7,
+      "aliasOf": "tick-1"
+    }
+  }
+}

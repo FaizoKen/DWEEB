@@ -1,17 +1,10 @@
-// Regenerate the whole UI sound-effects kit — click, tick, chime, pop, whoosh,
-// riser and impact — WITHOUT touching the voice-over or the manifest. Runs fully
-// offline (no TTS / network), so you can iterate on sound design freely:
+// Rebuild the UI sound kit + public/audio/sfx.json WITHOUT touching the
+// voice-over, the manifest or the score. Offline and deterministic (seeded), so
+// sound design can be iterated freely and the committed files only change when
+// a sound's source does:
 //
 //   npm run sfx
-//
-// The voice-over + timeline come from `npm run audio` instead.
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildAllSfx } from "./audio-synth.mjs";
+import { buildSfxKit } from "./audio-synth.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(__dirname, "..", "public", "audio");
-
-buildAllSfx(OUT);
-console.log("\nSFX kit regenerated.");
+buildSfxKit();

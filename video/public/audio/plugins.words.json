@@ -1,0 +1,204 @@
+{
+  "id": "plugins",
+  "text": "Then turn that button into a real giveaway. Visual plugins power tickets, roles, forms, and more.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+8%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "fa51471c3d40d5b21bbddeef2e4750853d9846bb2c1216d56536f1b39a1f538d",
+  "recordedAt": "2026-09-23T12:59:02.654Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 925830,
+        "Duration": 1041660,
+        "text": {
+          "Text": "Then",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 1967500,
+        "Duration": 2199160,
+        "text": {
+          "Text": "turn",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 4166660,
+        "Duration": 1967500,
+        "text": {
+          "Text": "that",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 6134160,
+        "Duration": 2662080,
+        "text": {
+          "Text": "button",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 10300830,
+        "Duration": 2199160,
+        "text": {
+          "Text": "into",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 12500000,
+        "Duration": 810000,
+        "text": {
+          "Text": "a",
+          "Length": 1,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 13310000,
+        "Duration": 4629580,
+        "text": {
+          "Text": "real",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 18055410,
+        "Duration": 5555410,
+        "text": {
+          "Text": "giveaway",
+          "Length": 8,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 27315000,
+        "Duration": 3125000,
+        "text": {
+          "Text": "Visual",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 30440000,
+        "Duration": 3356660,
+        "text": {
+          "Text": "plugins",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 33912080,
+        "Duration": 3125000,
+        "text": {
+          "Text": "power",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 37152910,
+        "Duration": 5208330,
+        "text": {
+          "Text": "tickets",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 44097080,
+        "Duration": 6018330,
+        "text": {
+          "Text": "roles",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 51967500,
+        "Duration": 7638750,
+        "text": {
+          "Text": "forms",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 61342500,
+        "Duration": 1157500,
+        "text": {
+          "Text": "and",
+          "Length": 3,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 62500000,
+        "Duration": 4050830,
+        "text": {
+          "Text": "more",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

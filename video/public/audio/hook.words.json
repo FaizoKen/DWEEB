@@ -1,0 +1,144 @@
+{
+  "id": "hook",
+  "text": "Here's a boring Discord message. Let's turn it into something better.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+4%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "ca40c5e3bdb0b82b6bc7ff42f97c60972c76028a4c4cd453f93399910d73b944",
+  "recordedAt": "2026-09-23T12:58:55.065Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 1081660,
+        "Duration": 1322080,
+        "text": {
+          "Text": "Here's",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 2403750,
+        "Duration": 721250,
+        "text": {
+          "Text": "a",
+          "Length": 1,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 3245000,
+        "Duration": 4206660,
+        "text": {
+          "Text": "boring",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 8172910,
+        "Duration": 4327080,
+        "text": {
+          "Text": "Discord",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 12500000,
+        "Duration": 4927910,
+        "text": {
+          "Text": "message",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 21274160,
+        "Duration": 1201660,
+        "text": {
+          "Text": "Let's",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 22475830,
+        "Duration": 1922910,
+        "text": {
+          "Text": "turn",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 24399160,
+        "Duration": 600830,
+        "text": {
+          "Text": "it",
+          "Length": 2,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 25000000,
+        "Duration": 1322080,
+        "text": {
+          "Text": "into",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 26442500,
+        "Duration": 3846250,
+        "text": {
+          "Text": "something",
+          "Length": 9,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 30408750,
+        "Duration": 4206660,
+        "text": {
+          "Text": "better",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

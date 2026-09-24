@@ -1,0 +1,96 @@
+{
+  "id": "cta",
+  "text": "Build better Discord messages. Start free today.",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "rate": "+8%",
+  "pitch": "+0Hz",
+  "mp3Sha256": "76245167fdc90bd60166e06546ad58a4a90ac338c469cb56d4087c04656cd0bd",
+  "recordedAt": "2026-09-23T12:59:09.900Z",
+  "Metadata": [
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 925830,
+        "Duration": 2546250,
+        "text": {
+          "Text": "Build",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 3587910,
+        "Duration": 2893330,
+        "text": {
+          "Text": "better",
+          "Length": 6,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 7523330,
+        "Duration": 4397910,
+        "text": {
+          "Text": "Discord",
+          "Length": 7,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 11921250,
+        "Duration": 6597080,
+        "text": {
+          "Text": "messages",
+          "Length": 8,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 22337910,
+        "Duration": 2315000,
+        "text": {
+          "Text": "Start",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 24768330,
+        "Duration": 3240830,
+        "text": {
+          "Text": "free",
+          "Length": 4,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    },
+    {
+      "Type": "WordBoundary",
+      "Data": {
+        "Offset": 28009160,
+        "Duration": 3703750,
+        "text": {
+          "Text": "today",
+          "Length": 5,
+          "BoundaryType": "WordBoundary"
+        }
+      }
+    }
+  ]
+}

@@ -43,7 +43,10 @@ export const COLORS = {
 
 export const FONT =
   '"Inter", "gg sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-export const MONO =
-  'ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas, monospace';
 
-export const FPS = 30;
+/**
+ * The film's stage: the darkest stop of the Background gradient. The `dip`
+ * transition fades through exactly this colour, so a dip reads as the stage
+ * going dark rather than a black flash.
+ */
+export const STAGE_COLOR = "#08090d";

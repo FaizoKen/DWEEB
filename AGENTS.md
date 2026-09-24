@@ -1577,14 +1577,40 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **The intro film is opt-in.** First-time visitors get one quiet pointer to
   **More ▸ Watch intro**; never auto-open or autoplay the multi-megabyte film on page load.
   Keep it lazy-mounted and use `preload="metadata"`; an explicit Watch intro action may start
-  playback (while respecting reduced-motion) because the user asked for it.
-- **Promo-film story locks** (`video/`, settled 2026-07-17): the opening is a direct
-  boring-message → visual-message makeover on a neutral preview surface — never an
-  announcement being buried in `#general`. The Build Together beat starts directly in the
-  Discord Activity editor and clicks its bottom-right invite/presence dock; do not restore the
-  voice-call shelf/launch detour. The outro promise is “Build better Discord messages” and its
-  action is a Google-style search bar for “DWEEB Discord builder,” with the G at the far
-  end. Keep `video/SCRIPT.md`, generated narration/manifest, and both aspect-ratio beats aligned.
+  playback (while respecting reduced-motion) because the user asked for it — and since
+  2026-09-24 it first tries playback **with sound** (muted + a "Tap for sound" pill only when
+  the browser refuses; a poster + "Play with sound" when even muted autoplay is refused).
+  The web cuts are made by `npm run deliver:web` in `video/` (never hand-encoded): AV1 + H.264
+  per aspect as codec-tagged `<source>`s (portrait AV1 only when MediaCapabilities says it is
+  power-efficient), trimmed of the master's black fades, keyframes on the scene cuts, a
+  −16 LUFS mix, posters from the settled end card, and `intro.en.vtt` narration captions
+  generated from the VO word timings (off by default — the story is burned in). If an encode
+  changes profile or level, update the `codecs` strings in `WelcomeVideo.tsx` from `ffprobe`.
+  `/media/*` stays out of the service-worker precache.
+- **Promo-film story locks** (`video/`, settled 2026-07-17; v6 2026-09-24): the opening is a
+  direct boring-message → visual-message makeover on a neutral preview surface — never an
+  announcement being buried in `#general` — and the makeover's AFTER card **is** the message
+  the film builds and delivers, so the promise and the payoff are one card. The Build Together
+  beat **starts in a Discord voice channel with members in the call and launches the DWEEB
+  Activity from it** (maintainer, 2026-09-24 — this reverses the 2026-07-17 "start directly in
+  the Activity editor, no voice-call detour" lock): the call's rocket → the Activities shelf
+  (DWEEB only, its real cover art) → Discord's launch splash → the Activity in the call, then the
+  edits. Show ONE teammate joining the editing (Free rooms allow 2 co-editors — the other call
+  members stay in the call). The outro promise is “Build better Discord
+  messages” and its action is a Google-style search bar for “DWEEB Discord builder,” with the
+  G at the far end. The editor act (reveal → send) is one continuous take joined by `hold`
+  cuts whose boundary frames are pinned in `video/src/scenes/contracts.ts` and checked by
+  `npm run qa:cuts`; the vertical cut is portrait-native (a 540×960 stage, locked camera),
+  never a crop of the landscape. On-screen product strings follow the app source (tree labels
+  from `COMPONENT_META`, a valid CV2 tree whose stat pills match `countComponents`). Keep
+  `video/SCRIPT.md`, generated narration/manifest, and both aspect-ratio beats aligned. The
+  licensed music source lives in the gitignored `video/assets-src/`; never commit it or
+  `video/public/audio/music.wav`. **`video/src/index.ts` must import `remotion/no-react`
+  first**: `src/fonts.ts` holds rendering with a module-level `delayRender`, and Remotion's
+  render entry — evaluated after the root — resets the delayRender timeout registry on its
+  `no-react` import, orphaning that timer, which then kills every full render one timeout in
+  while single stills (done in seconds) never notice. Don't "fix" it with a longer timeout or
+  fewer tabs (both were tried on a misdiagnosis).
 - index.html's JSON-LD `softwareVersion`/`dateModified` and `og:updated_time` are stamped
   at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
   throws if the patterns vanish. Marketing claims there must match the plans model

@@ -1,257 +1,177 @@
 import React from "react";
-import { COLORS } from "../theme";
-import { INTER } from "../fonts";
-import { AddComponentBtn, TreeRow } from "./AppUI";
-import { DMsg, DContainer, DHeading, DBody, DGallery, DBtn, DSelect } from "./DiscordUI";
-import { Chip } from "./Bits";
-import { Icon } from "./Icon";
+import {
+  AUTHOR,
+  CAMPAIGN_ACCENT,
+  PREVIEW_TIME,
+  SELECT,
+  campaignAdders,
+  campaignRows,
+  campaignState,
+  textContent,
+  type CampaignStage,
+  type CampaignState,
+  type CastMember,
+} from "../story/campaign";
+import { DBtn, DContainer, DGallery, DMsg, DRow, DSelect, DSelected, DTextDisplay, type TileArt } from "./DiscordUI";
+import { TreeView, type TreeEditorSlot } from "./editor/Tree";
 
-export const CAMPAIGN_PROMPT = "Make the opening punchier and add a giveaway button.";
+/**
+ * The Season 4 campaign as the editor shows it — the live preview and the
+ * component tree — both derived from ONE story state (story/campaign.ts), so
+ * the hold cuts between build → assistant → plugins → send match by
+ * construction: same props in, same pixels out.
+ */
 
-// Row order and the trailing Add-component button mirror the build scene's
-// pane exactly — assistant/plugins/send continue that scene through hold cuts,
-// so any drift here would pop on screen at the boundary.
-export const CampaignTree: React.FC<{
-  giveawayReveal?: number;
-  selectedGiveaway?: boolean;
-  attached?: boolean;
-}> = ({ giveawayReveal = 1, selectedGiveaway = false, attached = false }) => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1, minHeight: 0 }}>
-    <TreeRow icon="▤" label="Container" depth={0} />
-    <TreeRow icon="◧" label="Section" depth={1} />
-    <TreeRow icon="¶" label="Text — Season 4 is live" depth={2} />
-    <TreeRow icon="▦" label="Media Gallery" depth={1} />
-    <TreeRow icon="⬚" label="Buttons Row" depth={1} />
-    <TreeRow icon="▢" label="Button — Patch notes" depth={2} />
-    <TreeRow icon="▢" label="Button — Claim reward" depth={2} />
-    <TreeRow
-      icon="▢"
-      label="Button — Enter giveaway"
-      depth={2}
-      reveal={giveawayReveal}
-      sel={selectedGiveaway}
-      chip={attached ? "Giveaway" : undefined}
-      chipColor="#f0b232"
-    />
-    <TreeRow icon="☰" label="String Select" depth={1} />
-    <div style={{ marginTop: "auto" }}>
-      <AddComponentBtn />
-    </div>
-  </div>
-);
+/* ── Preview ────────────────────────────────────────────────────────────── */
 
-export const CampaignPreview: React.FC<{
-  giveawayReveal?: number;
-  giveawayGlow?: boolean;
+export type PreviewTarget = "container" | "text" | "gallery" | "row1" | "row2" | string;
+
+export type CampaignPreviewProps = {
+  /** The message state; defaults to `stage` (or the final message). */
+  state?: CampaignState;
+  stage?: CampaignStage;
+  /** Header time: PREVIEW_TIME in the editor, DISCORD_TIME once posted. */
   time?: string;
-  scale?: number;
-  punchy?: boolean;
-}> = ({
-  giveawayReveal = 1,
-  giveawayGlow = false,
-  time = "live preview",
-  scale = 1,
-  punchy = true,
-}) => (
-  <div
-    style={{
-      width: "100%",
-      maxWidth: 720,
-      transform: `scale(${scale})`,
-      transformOrigin: "top center",
-    }}
-  >
-    <DMsg author="Nebula Gaming" mascot time={time}>
-      <DContainer accent={COLORS.green}>
-        <DHeading icon="rocket">Season 4 is live</DHeading>
-        <DBody>
-          {punchy
-            ? "New worlds. Bigger rewards. Season 4 starts now — claim your founder badge before the weekend."
-            : "New maps, ranked rewards, and a fresh battle pass. Jump in and claim your founder badge before the weekend."}
-        </DBody>
-        <DGallery h={150} />
-        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-          <DBtn label="Patch notes" kind="primary" />
-          <DBtn label="Claim reward" kind="success" emoji="🎁" />
-          {giveawayReveal > 0.01 && (
-            <div
-              style={{
-                opacity: giveawayReveal,
-                transform: `translateX(${(1 - giveawayReveal) * 18}px) scale(${0.9 + giveawayReveal * 0.1})`,
-              }}
-            >
-              <DBtn label="Enter giveaway" emoji="🎉" glow={giveawayGlow} />
-            </div>
-          )}
-        </div>
-        <DSelect placeholder="Choose your platform…" />
+  /** The preview's selection ring (a selected tree row mirrors here). */
+  selected?: PreviewTarget | null;
+  /** 0..1 glow per button id ("giveaway", "claim", …). */
+  glow?: Partial<Record<string, number>>;
+  /** Override a button's glow colour (e.g. ATTACH_GOLD at the plugin attach). */
+  glowColor?: Partial<Record<string, string>>;
+  /** 0..1 entrance per button id or "select" (the frame a component is added). */
+  pop?: Partial<Record<string, number>>;
+  hover?: string | null;
+  pressed?: string | null;
+  /** The giveaway button's public count ("Enter giveaway (129)"). */
+  count?: number;
+  /** 0..1 green wipe over the AI's rewritten body. */
+  bodyHighlight?: number;
+  /** Crossfade one gallery tile (the build beat's gallery check). */
+  gallerySwap?: { index: 0 | 1 | 2; to: TileArt; t: number };
+  /** Max width of the message column (Discord caps Components V2 at 600px ×zoom). */
+  maxWidth?: number;
+};
+
+const Popped: React.FC<{ p?: number; children: React.ReactNode; origin?: string }> = ({ p = 1, children, origin = "center" }) => {
+  if (p <= 0.001) return null;
+  if (p >= 1) return <>{children}</>;
+  return (
+    <div
+      style={{
+        opacity: Math.min(1, p * 1.6),
+        transform: `scale(${0.6 + 0.4 * p})`,
+        transformOrigin: origin,
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+export const CampaignPreview: React.FC<CampaignPreviewProps> = ({
+  state,
+  stage,
+  time = PREVIEW_TIME,
+  selected = null,
+  glow = {},
+  glowColor = {},
+  pop = {},
+  hover = null,
+  pressed = null,
+  count,
+  bodyHighlight = 0,
+  gallerySwap,
+  maxWidth,
+}) => {
+  const s = state ?? campaignState(stage ?? "final");
+  const body = (
+    <DMsg author={AUTHOR} avatar="nebula" time={time}>
+      <DContainer accent={CAMPAIGN_ACCENT} selected={selected === "container" ? 1 : 0}>
+        <DSelected on={selected === "text" ? 1 : 0}>
+          <DTextDisplay
+            content={textContent(s)}
+            highlight={bodyHighlight > 0 ? { text: s.body, t: bodyHighlight } : undefined}
+          />
+        </DSelected>
+        <DGallery selected={selected === "gallery" ? 1 : 0} swap={gallerySwap} />
+        <DSelected on={selected === "row1" ? 1 : 0}>
+          <DRow>
+            {s.buttons.map((b) => (
+              <Popped key={b.id} p={pop[b.id]} origin="left center">
+                <DSelected on={selected === b.id ? 1 : 0}>
+                  <DBtn
+                    label={b.label}
+                    kind={b.kind}
+                    emoji={b.emoji}
+                    glow={glow[b.id] ?? 0}
+                    glowColor={glowColor[b.id]}
+                    hover={hover === b.id}
+                    pressed={pressed === b.id}
+                    count={b.id === "giveaway" ? count : undefined}
+                  />
+                </DSelected>
+              </Popped>
+            ))}
+          </DRow>
+        </DSelected>
+        {s.hasSelect && (
+          <Popped p={pop.select} origin="left center">
+            <DSelected on={selected === "row2" || selected === "select" ? 1 : 0} maxWidth={400}>
+              <DSelect placeholder={SELECT.placeholder} />
+            </DSelected>
+          </Popped>
+        )}
       </DContainer>
     </DMsg>
-  </div>
-);
+  );
+  return <div style={{ width: "100%", maxWidth }}>{body}</div>;
+};
 
-export const AssistantDock: React.FC<{
-  reveal: number;
-  prompt: React.ReactNode;
-  status: "prompt" | "thinking" | "done";
-  replyReveal?: number;
-}> = ({ reveal, prompt, status, replyReveal = 1 }) => (
-  <div
-    style={{
-      position: "absolute",
-      top: 44,
-      bottom: 0,
-      right: 0,
-      width: 400,
-      background: COLORS.bgElevated,
-      borderLeft: `1px solid ${COLORS.borderStrong}`,
-      boxShadow: "-24px 0 70px rgba(0,0,0,.48)",
-      transform: `translateX(${(1 - reveal) * 420}px)`,
-      display: "flex",
-      flexDirection: "column",
-      fontFamily: INTER,
-      zIndex: 12,
-    }}
-  >
-    <div
-      style={{
-        height: 54,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "0 16px",
-        borderBottom: `1px solid ${COLORS.border}`,
-        flexShrink: 0,
-      }}
-    >
-      <div
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 9,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "linear-gradient(135deg, rgba(88,101,242,.28), rgba(235,69,158,.22))",
-        }}
-      >
-        <Icon name="sparkle" size={18} color={COLORS.green} />
-      </div>
-      <span style={{ fontSize: 16, fontWeight: 800, color: COLORS.text }}>AI Assistant</span>
-      <div style={{ flex: 1 }} />
-      <span style={{ color: COLORS.textSubtle, fontSize: 17, fontWeight: 700 }}>✕</span>
-    </div>
+/* ── Tree ───────────────────────────────────────────────────────────────── */
 
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 13,
-      }}
-    >
-      <div
-        style={{
-          alignSelf: "flex-end",
-          maxWidth: 318,
-          background: "linear-gradient(135deg, #5865f2, #6f5de7)",
-          color: "#fff",
-          borderRadius: "14px 14px 4px 14px",
-          padding: "11px 14px",
-          fontSize: 14,
-          lineHeight: 1.45,
-          boxShadow: "0 10px 26px rgba(41,45,120,.3)",
-        }}
-      >
-        {prompt}
-      </div>
+export type CampaignTreeProps = {
+  state?: CampaignState;
+  stage?: CampaignStage;
+  selected?: string | null;
+  /** The inline editor under the selected row. */
+  editor?: TreeEditorSlot | null;
+  /** Show the dashed adders ("+ Add button", "+ Add to container"). */
+  adders?: boolean | { addButton?: boolean; addToContainer?: boolean };
+  presence?: Record<string, CastMember[]>;
+  reveal?: Record<string, number>;
+  highlight?: Record<string, number>;
+  hover?: string | null;
+  pressed?: string | null;
+};
 
-      {status === "thinking" && (
-        <div
-          style={{
-            alignSelf: "flex-start",
-            display: "flex",
-            gap: 6,
-            background: COLORS.bgSubtle,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: "14px 14px 14px 4px",
-            padding: "13px 15px",
-          }}
-        >
-          {[0.35, 0.65, 1].map((opacity, i) => (
-            <div
-              key={i}
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: COLORS.textMuted,
-                opacity,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      {status === "done" && (
-        <div
-          style={{
-            alignSelf: "flex-start",
-            maxWidth: 326,
-            opacity: replyReveal,
-            transform: `translateY(${(1 - replyReveal) * 12}px)`,
-            background: COLORS.bgSubtle,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: "14px 14px 14px 4px",
-            padding: "12px 14px",
-            fontSize: 14,
-            lineHeight: 1.48,
-            color: COLORS.text,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-        >
-          <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
-            <Icon name="wand" size={18} color={COLORS.green} />
-            <span>Punched up the opening and added an Enter giveaway button.</span>
-          </div>
-          <Chip icon="check" color={COLORS.green}>
-            Applied to your message
-          </Chip>
-        </div>
-      )}
-    </div>
-
-    <div style={{ padding: 14, borderTop: `1px solid ${COLORS.border}`, display: "flex", gap: 9 }}>
-      <div
-        style={{
-          flex: 1,
-          background: COLORS.bgInput,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 10,
-          padding: "10px 12px",
-          fontSize: 13,
-          color: COLORS.textSubtle,
-        }}
-      >
-        Ask for another change…
-      </div>
-      <div
-        style={{
-          width: 38,
-          height: 38,
-          borderRadius: 10,
-          background: COLORS.blurple,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Icon name="send" size={16} color="#fff" />
-      </div>
-    </div>
-  </div>
-);
+export const CampaignTree: React.FC<CampaignTreeProps> = ({
+  state,
+  stage,
+  selected = null,
+  editor = null,
+  adders = false,
+  presence,
+  reveal,
+  highlight,
+  hover = null,
+  pressed = null,
+}) => {
+  const s = state ?? campaignState(stage ?? "final");
+  const rows = campaignRows(s);
+  const adderModels = campaignAdders(s).filter((a) =>
+    adders === true ? true : adders === false ? false : a.id === "addButton" ? !!adders.addButton : !!adders.addToContainer,
+  );
+  return (
+    <TreeView
+      rows={rows}
+      adders={adderModels}
+      selected={selected}
+      editor={editor}
+      presence={presence}
+      reveal={reveal}
+      highlight={highlight}
+      hover={hover}
+      pressed={pressed}
+    />
+  );
+};

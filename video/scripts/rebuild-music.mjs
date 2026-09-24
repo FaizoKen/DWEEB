@@ -1,35 +1,20 @@
-// Rebuilds ONLY music.wav from the existing manifest — no TTS, no network, and
-// no timing changes (the manifest, and therefore every scene cut, stays put).
-// Use after tweaking the score or the baked-in ducking in audio-synth.mjs:
+// Re-edit ONLY music.wav from the current manifest — no TTS, no network, no
+// timing change (the voice-over and every scene cut stay put). The edit is
+// planned by the same code `npm run audio` uses (lib/music-edit.mjs on
+// lib/film-timing.mjs), so both always land the drop on the same frame.
 //
-//   npm run music
+//   npm run music                  # from the licensed track in assets-src/
+//   npm run music -- --synth-music # synthesized stand-in, no track needed
+//   npm run music -- --plan        # print the edit plan only
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildMusicAuto } from "./audio-synth.mjs";
+import { readManifest, writeManifest } from "./lib/film-timing.mjs";
+import { buildFilmMusic, planMusicEdit } from "./lib/music-edit.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(__dirname, "..", "public", "audio");
-
-const manifest = JSON.parse(fs.readFileSync(path.join(OUT, "manifest.json"), "utf8"));
-const FPS = manifest.fps;
-const timeline = manifest.timeline;
-
-const at = (id) => timeline.find((l) => l.id === id).startFrame / FPS;
-const cutSecs = timeline.map((l) => l.startFrame / FPS);
-const voWindows = timeline.map((l) => ({
-  start: l.startFrame / FPS,
-  end: (l.startFrame + l.frames) / FPS,
-}));
-
-const marks = {
-  grooveSec: at("build"),
-  liftSec: at("templates"),
-  breakdownSec: at("activity"),
-  riseSec: at("cta") - 5,
-  ctaSec: at("cta"),
-};
-
-buildMusicAuto(OUT, manifest.totalFrames / FPS, cutSecs, marks, voWindows);
-console.log("music.wav rebuilt (ducking baked in).");
+const manifest = readManifest();
+if (process.argv.includes("--plan")) {
+  const plan = planMusicEdit(manifest);
+  console.log(JSON.stringify({ ...plan.report, segments: plan.segments }, null, 2));
+} else {
+  const music = await buildFilmMusic(manifest, { synth: process.argv.includes("--synth-music") });
+  writeManifest({ ...manifest, music });
+}

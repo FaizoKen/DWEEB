@@ -1,218 +1,240 @@
 import React from "react";
-import { AbsoluteFill, Audio, Sequence, staticFile } from "remotion";
+import { AbsoluteFill, Audio, Easing, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { Background } from "../components/Background";
 import { Camera, Shot, useVertical } from "../components/Camera";
-import { Caption } from "../components/Caption";
-import { ActionBar, AppTabs, AppWindow, TreeRow } from "../components/AppUI";
-import {
-  DBody,
-  DBtn,
-  DContainer,
-  DGallery,
-  DHeading,
-  DMsg,
-} from "../components/DiscordUI";
-import { Mascot } from "../components/Mascot";
-import { Wordmark } from "../components/Wordmark";
-import { useSpr } from "../components/Bits";
-import { CHIME, POP, SCENES, voDelay, WHOOSH } from "../timeline";
+import type { CaptionCue } from "../components/Caption";
+import { settle } from "../components/Bits";
+import { CHIME, SFX_FRAMES, VOL, sfxVariant } from "../audio";
+import { SCENES, TRANSITION_FRAMES, at, atAbs, speechStartAbs } from "../timeline";
 import { COLORS } from "../theme";
-import { INTER } from "../fonts";
-
-const MESSAGE_TITLE = "Season 4 is live";
-const MESSAGE_BODY = "New maps, ranked rewards, and a fresh battle pass.";
-const MESSAGE_REWARD = "Jump in and claim your founder badge before the weekend.";
+import { CUT_A, EDITOR_GLOW, EDITOR_WIDE_L } from "./contracts";
+import { FINAL, LandscapeStage, MATCH_L, MATCH_V, PortraitStage, SHEET_HIDDEN, type StageSheen } from "./hook/stage";
+import { campaignAdders, campaignRows } from "../story/campaign";
+import { BrandLockup, type LockupSize } from "./reveal/lockup";
 
 /**
- * REVEAL — the rich card from the hook holds its exact screen position while
- * the DWEEB editor physically assembles around it: preview surface first, then
- * the chrome drops in, the builder pane slides in, and the component tree
- * populates. The product is literally built around the message — cause, not
- * cutaway.
+ * REVEAL — "Meet DWEEB: the visual Discord message builder…". The hook's card
+ * is already in the editor's preview pane; the reveal builds the editor around
+ * it, and ends on cut A — the plain, fully assembled editor, held still.
+ *
+ *  0–16   the match cut: static, the exact frame the hook ends on.
+ *  16→    landscape pulls back (short, slow) to the whole-window wide and is
+ *         settled as the name is spoken; portrait stays locked.
+ *  "DWEEB" the brand lockup lands, crisp, in frame, with a pop — in the
+ *         builder column (landscape) / the top band (portrait).
+ *  "the visual Discord message builder" the lockup clears and the builder
+ *         assembles: browser chrome drops over the makeover title bar, the
+ *         builder pane slides in (portrait: the action bar drops into the title
+ *         band and the builder sheet slides up over the card), rows populate.
+ *  "Components V2" the settled editor catches the light once: it runs down
+ *         the tree's component glyphs, then crosses the card (the makeover's
+ *         light, narrower and fainter) — the one move in an otherwise still wide.
+ *  end    whole-window wide, nothing in flight = cut A (contracts.ts).
  */
+
+const T = TRANSITION_FRAMES;
+
+/* ── Beats (scene-local) ────────────────────────────────────────────────── */
+
+const DWEEB = at("reveal", "DWEEB");
+/** The pause after the name, before "the visual…". */
+const DWEEB_END = at("reveal", "DWEEB", { edge: "end" });
+const THE_VISUAL = at("reveal", "the visual");
+
+/** The lockup enters 8 frames before the name, so the whole word reads on it. */
+const LOCKUP_IN = DWEEB - 8;
+/** It holds through "the visual" and lifts away as the builder assembles. */
+const LOCKUP_OUT = THE_VISUAL + 10;
+/** Assembly on "…Discord message builder": chrome / action bar as the lockup
+ *  lifts (the title bar's text clears just before), then the pane / sheet. */
+const CHROME_AT = LOCKUP_OUT + 2;
+const TITLE_OUT = CHROME_AT - 4;
+const PANE_AT = CHROME_AT + 6;
+const SHEET_AT = CHROME_AT + 4;
+const SHEET_FRAMES = 24;
+/** Rows populate top-down as the pane lands, under "for webhooks, embeds…". */
+const ROWS_AT = PANE_AT + 8;
+const ROW_STAGGER = 4;
+/** The makeover panel is fully behind the assembled window by now. */
+const PANEL_OUT = ROWS_AT + 12;
+/**
+ * "…and Components V2": after the assembly the wide would otherwise sit
+ * perfectly still for two seconds. On "Components" a glint runs down the
+ * tree's glyph tiles, one row after another; on "V2" the light crosses the
+ * card. A film light — nothing in the UI changes — and it is over at least
+ * T frames before cut A, so the hold cut still opens on a still frame.
+ */
+const GLINT_AT = at("reveal", "Components", { offset: -2 });
+const GLINT_STAGGER = 1.5;
+const GLINT_FRAMES = 8;
+const SHEEN_AT = at("reveal", "V2", { offset: -5 });
+const SHEEN_FRAMES = 14;
+
+/* ── Framing ────────────────────────────────────────────────────────────── */
+
+/** Static on the match framing through the overlap, then a short pull to the
+ *  wide that has settled by the name. */
+const SHOTS_L: Shot[] = [
+  { f: 0, ...MATCH_L },
+  { f: T, ...MATCH_L },
+  { f: DWEEB, ...EDITOR_WIDE_L },
+];
+const SHOTS_V: Shot[] = [{ f: 0, ...MATCH_V }];
+
+/**
+ * Lockups. Landscape: the brand's stacked lockup, centred in the builder
+ * column the pane will slide over (world x 120…720), level with the card.
+ * Portrait: the row variant, centred in the top band the AFTER super has just
+ * vacated (canvas y ≈ 245–380; world units are half canvas px there).
+ */
+const LOCKUP_L: LockupSize = { layout: "stacked", mascot: 104, word: 84, line: 24, gap: 22 };
+const LOCKUP_L_CENTER = { x: 420, y: 470 } as const;
+const LOCKUP_V: LockupSize = { layout: "row", mascot: 60, word: 36, line: 14, gap: 14 };
+const LOCKUP_V_CENTER = { x: 960, y: 216 } as const;
+
+/** Tree entrance order: the rows and adders as the tree lays them out. */
+const ROW_ORDER: string[] = (() => {
+  const rows = campaignRows(FINAL).map((r) => r.id);
+  const adders = campaignAdders(FINAL);
+  const out: string[] = [];
+  for (const id of rows) {
+    out.push(id);
+    for (const a of adders) if (a.after === id && a.id === "addButton") out.push(a.id);
+  }
+  out.push("addToContainer");
+  return out;
+})();
+
+/**
+ * Beat sanity, checked at load so a VO re-record fails loudly: the lockup must
+ * not start during the match overlap, and the editor must be fully assembled
+ * (the last row's spring snapped to 1 — it needs 16 frames; 20 allowed) with
+ * at least T still frames before cut A, which the templates scene opens on.
+ */
+const ROW_SETTLE = 20;
+const ASSEMBLED_BY = ROWS_AT + (ROW_ORDER.length - 1) * ROW_STAGGER + ROW_SETTLE;
+const LAST_FRAME = SCENES.reveal.durationInFrames + T - 1;
+/** The tree's rows, in order (the glint's cascade). */
+const TREE_ROWS = campaignRows(FINAL).length;
+const LIGHT_DONE = Math.max(GLINT_AT + (TREE_ROWS - 1) * GLINT_STAGGER + GLINT_FRAMES, SHEEN_AT + SHEEN_FRAMES);
+if (LOCKUP_IN <= T || ASSEMBLED_BY > LAST_FRAME - T) {
+  throw new Error(
+    `S02Reveal: beats no longer fit the VO (lockup in at ${LOCKUP_IN}, match overlap ends at ${T}; assembled by ${ASSEMBLED_BY}, cut A at ${LAST_FRAME}) — re-key them.`,
+  );
+}
+// The light plays on the settled editor only, and ends T frames before cut A.
+if (GLINT_AT < ASSEMBLED_BY || SHEEN_AT < ASSEMBLED_BY || LIGHT_DONE > LAST_FRAME - T) {
+  throw new Error(
+    `S02Reveal: the "Components V2" light (${GLINT_AT}–${LIGHT_DONE}) no longer sits between the assembly (${ASSEMBLED_BY}) and cut A − T (${LAST_FRAME - T}) — re-key it.`,
+  );
+}
+
+/* ── Captions ───────────────────────────────────────────────────────────── */
+
+/**
+ * MEET DWEEB rises as the lockup hands the screen to the builder, on "…Discord
+ * message builder": the lockup already says the name and the product line on
+ * "DWEEB", so the super follows it rather than repeating it beside it — and
+ * in portrait the top band is free again. It clears before the templates line.
+ */
+export const captions: CaptionCue[] = [
+  {
+    id: "reveal",
+    label: "MEET DWEEB",
+    parts: ["The visual", { text: "Discord message builder.", hl: true }],
+    // The lockup has cleared by now (LOCKUP_OUT + 10 = "the visual" + 20).
+    from: atAbs("reveal", "the visual", { offset: 20 }),
+    to: speechStartAbs("templates") - 6,
+    accent: COLORS.blurple,
+  },
+];
+
+/** The lockup centred on a world point. */
+const LockupAt: React.FC<{ center: { x: number; y: number }; size: LockupSize }> = ({ center, size }) => (
+  <div style={{ position: "absolute", left: center.x, top: center.y, transform: "translate(-50%, -50%)" }}>
+    <BrandLockup size={size} enter={LOCKUP_IN} exit={LOCKUP_OUT} />
+  </div>
+);
+
+/* ── Scene ──────────────────────────────────────────────────────────────── */
+
+/** A sheet rising from below: quick off the mark (≈2.4× average speed), long settle. */
+const SHEET_EASE = Easing.bezier(0.25, 0.6, 0.3, 1);
+
 export const SceneReveal: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const vert = useVertical();
-  const d = voDelay("reveal");
 
-  // Assembly starts as the dissolve ends, so the cross-fade only ever blends
-  // the two matched cards — never a fully-drawn editor over the hook shot.
-  const chromeIn = useSpr(d - 5, { damping: 19, stiffness: 140, mass: 0.7 });
-  const leftIn = useSpr(d + 2, { damping: 19, stiffness: 135, mass: 0.75 });
+  const spr = (from: number, config: { damping?: number; mass?: number; stiffness?: number } = {}) =>
+    settle(spring({ frame: frame - from, fps, config: { damping: 19, mass: 0.7, stiffness: 140, ...config } }));
+  const ramp = (from: number, frames: number) => Math.max(0, Math.min(1, (frame - from) / frames));
 
-  const brandIn = useSpr(d + 6, { damping: 17, stiffness: 155 });
-  const containerIn = useSpr(d + 26, { damping: 17, stiffness: 150 });
-  const textIn = useSpr(d + 36, { damping: 17, stiffness: 150 });
-  const galleryIn = useSpr(d + 46, { damping: 17, stiffness: 150 });
-  const buttonsIn = useSpr(d + 56, { damping: 17, stiffness: 150 });
-  const previewTagIn = useSpr(d + 14, { damping: 18, stiffness: 150 });
+  // Only mounted while it is on screen, so the match-cut frames carry nothing extra.
+  const lockupOn = frame >= LOCKUP_IN && frame < LOCKUP_OUT + 10;
+  const title = 1 - ramp(TITLE_OUT, 6);
+  const rows: Record<string, number> = {};
+  ROW_ORDER.forEach((id, i) => {
+    rows[id] = spr(ROWS_AT + i * ROW_STAGGER, { damping: 18, mass: 0.6, stiffness: 170 });
+  });
+  const rowsDone = ROW_ORDER.every((id) => rows[id] >= 1);
+  const sheen: StageSheen = {
+    tile: (row) => ramp(GLINT_AT + row * GLINT_STAGGER, GLINT_FRAMES),
+    card: ramp(SHEEN_AT, SHEEN_FRAMES),
+  };
 
-  // Start locked on the exact screen framing the hook ended on (the card sits
-  // dead-center on both sides of the dissolve), then pull wide once the shell
-  // has assembled.
-  const shots: Shot[] = vert
-    ? [
-        { f: 0, x: 1286, y: 462, s: 1.0 },
-        { f: d + 10, x: 1286, y: 462, s: 1.03 },
-        { f: d + 58, x: 430, y: 490, s: 1.08 },
-        { f: d + 108, x: 750, y: 510, s: 0.9 },
-        { f: SCENES.reveal.durationInFrames - 18, x: 750, y: 510, s: 0.93 },
-      ]
-    : [
-        { f: 0, x: 1286, y: 428, s: 1.2 },
-        { f: d + 10, x: 1286, y: 428, s: 1.22 },
-        { f: d + 64, x: 960, y: 520, s: 1.01 },
-        { f: SCENES.reveal.durationInFrames - 18, x: 960, y: 520, s: 1.05 },
-      ];
+  let stage: React.ReactNode;
+  if (vert) {
+    const bar = spr(CHROME_AT);
+    const sheetT = SHEET_EASE(ramp(SHEET_AT, SHEET_FRAMES));
+    const sheetY = SHEET_HIDDEN + (CUT_A.sheetTop - SHEET_HIDDEN) * sheetT;
+    const settled = bar >= 1 && sheetT >= 1 && rowsDone;
+    stage = (
+      <PortraitStage
+        sweep={1}
+        upgraded={1}
+        title={title}
+        // The title bar's fill gives way as the action bar lands in its band.
+        band={1 - bar}
+        assembly={settled ? undefined : { bar, sheetY, rows }}
+        sheen={sheen}
+      />
+    );
+  } else {
+    const chrome = spr(CHROME_AT);
+    const left = spr(PANE_AT, { damping: 20, mass: 0.7, stiffness: 130 });
+    const fabs = ramp(PANE_AT + 10, 10);
+    const panel = 1 - ramp(PANEL_OUT, 10);
+    const settled = chrome >= 1 && left >= 1 && fabs >= 1 && rowsDone;
+    stage = (
+      <LandscapeStage
+        sweep={1}
+        upgraded={1}
+        title={title}
+        panel={panel}
+        assembly={settled ? undefined : { chrome, left, fabs, rows }}
+        sheen={sheen}
+      />
+    );
+  }
 
   return (
     <AbsoluteFill>
-      <Background glow="dual" />
-      <Camera shots={shots} blur={0.45}>
-        <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ position: "relative" }}>
-            <AppWindow
-              width={1760}
-              height={930}
-              leftWidth={600}
-              assembly={{ chrome: chromeIn, left: leftIn }}
-              left={
-                <>
-                  <div
-                    style={{
-                      minHeight: 82,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 15,
-                      opacity: brandIn,
-                      transform: `translateY(${(1 - brandIn) * 16}px)`,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 18,
-                        background: `linear-gradient(145deg, ${COLORS.blurple}, ${COLORS.blurpleHover})`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: `0 14px 40px ${COLORS.blurple}4d`,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Mascot size={55} glow={false} look={false} />
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                        gap: 4,
-                      }}
-                    >
-                      <Wordmark size={52} delay={d + 4} underline={false} />
-                      <span
-                        style={{
-                          color: COLORS.textMuted,
-                          fontFamily: INTER,
-                          fontSize: 14,
-                          fontWeight: 680,
-                          letterSpacing: ".02em",
-                        }}
-                      >
-                        Visual Discord message builder
-                      </span>
-                    </div>
-                  </div>
-
-                  <ActionBar />
-                  <AppTabs />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <TreeRow icon="▤" label="Container" depth={0} sel reveal={containerIn} />
-                    <TreeRow icon="¶" label="Text" depth={1} reveal={textIn} />
-                    <TreeRow icon="▦" label="Media Gallery" depth={1} reveal={galleryIn} />
-                    <TreeRow icon="⬚" label="Buttons Row" depth={1} reveal={buttonsIn} />
-                  </div>
-                </>
-              }
-              right={
-                <div style={{ width: 920, marginTop: 58, position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: 0,
-                      top: -42,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      color: COLORS.dTextMuted,
-                      background: "rgba(0,0,0,.25)",
-                      border: `1px solid ${COLORS.dBgTertiary}`,
-                      fontFamily: INTER,
-                      fontSize: 11.5,
-                      fontWeight: 820,
-                      letterSpacing: ".09em",
-                      opacity: previewTagIn,
-                      transform: `translateY(${(1 - previewTagIn) * 8}px)`,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 7,
-                        height: 7,
-                        borderRadius: "50%",
-                        background: COLORS.green,
-                        boxShadow: `0 0 12px ${COLORS.green}`,
-                      }}
-                    />
-                    LIVE PREVIEW
-                  </div>
-
-                  <DMsg author="Nebula Gaming" mascot time="Today at 9:41 AM">
-                    <DContainer accent={COLORS.green} width={860}>
-                      <DHeading icon="rocket" size={29}>
-                        {MESSAGE_TITLE}
-                      </DHeading>
-                      <DBody size={18}>
-                        {MESSAGE_BODY} {MESSAGE_REWARD}
-                      </DBody>
-                      <DGallery h={176} />
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <DBtn label="Claim founder badge" kind="success" icon="gift" />
-                        <DBtn label="Read the patch notes" kind="primary" icon="notes" />
-                        <DBtn label="Enter the launch giveaway" icon="sparkle" />
-                      </div>
-                    </DContainer>
-                  </DMsg>
-                </div>
-              }
-            />
-
-          </div>
-        </AbsoluteFill>
+      <Background glow={EDITOR_GLOW} />
+      <Camera shots={vert ? SHOTS_V : SHOTS_L} blur={0.6}>
+        {stage}
+        {/* Above the forming window: it lifts away cleanly instead of being
+            dimmed behind the shell, and is gone before the pane's content shows. */}
+        {lockupOn && <LockupAt center={vert ? LOCKUP_V_CENTER : LOCKUP_L_CENTER} size={vert ? LOCKUP_V : LOCKUP_L} />}
       </Camera>
 
-      {/* the shell sliding together gets a soft air movement, then the brand
-          lands with a pop and the finished assembly rings out */}
-      <Sequence from={d - 4} durationInFrames={16}>
-        <Audio src={staticFile(WHOOSH)} volume={0.16} />
+      {/* The name lands with a pop; the chime answers in the pause after it. */}
+      <Sequence from={DWEEB} durationInFrames={SFX_FRAMES.pop} name="brand pop">
+        <Audio src={staticFile(sfxVariant("pop", 0))} volume={VOL.pop * 1.3} />
       </Sequence>
-      <Sequence from={d + 7} durationInFrames={18}>
-        <Audio src={staticFile(POP)} volume={0.62} />
+      <Sequence from={DWEEB_END + 1} durationInFrames={SFX_FRAMES.chime} name="brand chime">
+        <Audio src={staticFile(CHIME)} volume={VOL.chime} />
       </Sequence>
-      <Sequence from={d + 72} durationInFrames={26}>
-        <Audio src={staticFile(CHIME)} volume={0.5} />
-      </Sequence>
-
-      <Caption
-        label="ONE VISUAL BUILDER"
-        parts={["webhooks · embeds ·", { hl: "Components V2" }]}
-        delay={d + 72}
-        out={SCENES.reveal.durationInFrames - 22}
-        accent={COLORS.blurple}
-      />
     </AbsoluteFill>
   );
 };

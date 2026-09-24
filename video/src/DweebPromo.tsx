@@ -1,25 +1,21 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
-import { SCENES, SCENE_IDS, VO, MUSIC, WHOOSH, RISER, TOTAL, SceneId } from "./timeline";
-import { SceneTransition, TRANSITION_FRAMES, TransitionType } from "./components/SceneTransition";
+import { SCENES, SCENE_IDS, SceneId, TOTAL, VO, seqFrom } from "./timeline";
+import { MUSIC, MUSIC_BASE, voiceVolume } from "./audio";
+import { CAPTIONS } from "./captions";
+import { FILM_SFX, SfxTrack } from "./sfxTrack";
+import { SceneClock } from "./components/Camera";
+import { CaptionTrack } from "./components/CaptionTrack";
+import { SceneTransition, TransitionType } from "./components/SceneTransition";
 import { SceneHook } from "./scenes/S01Hook";
 import { SceneReveal } from "./scenes/S02Reveal";
-import { SceneBuild } from "./scenes/S03Build";
-import { SceneAssistant } from "./scenes/S04Assistant";
-import { ScenePlugins } from "./scenes/S05Plugins";
-import { SceneSend } from "./scenes/S06Send";
-import { SceneTemplates } from "./scenes/S07Templates";
+import { SceneTemplates } from "./scenes/S03Templates";
+import { SceneBuild } from "./scenes/S04Build";
+import { SceneAssistant } from "./scenes/S05Assistant";
+import { ScenePlugins } from "./scenes/S06Plugins";
+import { SceneSend } from "./scenes/S07Send";
 import { SceneActivity } from "./scenes/S08Activity";
 import { SceneCta } from "./scenes/S09Cta";
-
-// Music bus. music.wav is the licensed bed baked to length by the audio
-// scripts — trimmed, faded, and with the duck under the narration already in
-// the waveform (a per-frame volume function would expand into a huge ffmpeg
-// expression and blow the Windows command-line limit at stitch time). So the
-// prop stays a constant. VO and music are lifted together to leave the finished
-// web master close to -16 LUFS without flattening the deliberately gentle bed.
-const MUSIC_BASE = 0.35;
-const VOICE_GAIN = 1.55;
 
 const Fades: React.FC<{ total: number }> = ({ total }) => {
   const frame = useCurrentFrame();
@@ -32,98 +28,88 @@ const Fades: React.FC<{ total: number }> = ({ total }) => {
   );
 };
 
-const COMPONENTS: Record<SceneId, React.FC> = {
+/** One component per scene, in play order (SceneProbe renders these alone). */
+export const SCENE_COMPONENTS: Record<SceneId, React.FC> = {
   hook: SceneHook,
   reveal: SceneReveal,
+  templates: SceneTemplates,
   build: SceneBuild,
   assistant: SceneAssistant,
   plugins: ScenePlugins,
   send: SceneSend,
-  templates: SceneTemplates,
   activity: SceneActivity,
   cta: SceneCta,
 };
 
-// Cut style per scene entrance — dissolves for tone shifts, one push into the
-// editor act, then HOLD cuts all the way to delivery: build → assistant →
-// plugins → send match camera framing on both sides of every boundary, so the
-// whole middle of the film reads as one continuous take on one message. (A
-// push between two shots of the same window at different zooms smeared two
-// copies of the UI across the screen — that is why send is not a push.)
-const TRANSITIONS: Record<SceneId, TransitionType> = {
-  hook: "dissolve",
-  reveal: "dissolve",
-  build: "push",
+/**
+ * How each scene enters (see SceneTransition). The film is one take on one
+ * message: a MATCH cut from the hook's finished card into the editor that
+ * assembles around it, then HOLD cuts — invisible, identical state on both
+ * sides — from the assembled editor through the templates overlay, the build,
+ * the assistant, the plugin and the send, a DIP through the stage colour into
+ * the collaboration coda (a new place and a new message, where a crossfade
+ * would double-expose two cards), and a hard CUT on the CTA hit.
+ */
+export const TRANSITIONS: Record<SceneId, TransitionType | null> = {
+  hook: null,
+  reveal: "match",
+  templates: "hold",
+  build: "hold",
   assistant: "hold",
   plugins: "hold",
   send: "hold",
-  templates: "push",
-  activity: "dissolve",
-  cta: "dissolve",
+  activity: "dip",
+  cta: "cut",
 };
 
-// Sound only the structural turns. A whoosh on every edit made the old cut feel
-// like a slide deck and weakened the transitions that actually change context.
-const AUDIBLE_TRANSITIONS = new Set<SceneId>(["reveal", "templates", "activity", "cta"]);
-
 export const DweebPromo: React.FC = () => {
-  const T = TRANSITION_FRAMES;
-
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       <Audio src={staticFile(MUSIC)} volume={MUSIC_BASE} />
 
-      {/* Voice-over per line (absolute timeline — never shifted by transitions).
-          Each line's window runs until the NEXT line begins, not just its
-          estimated length: `frames` is derived from CBR byte math and can
-          undershoot the real mp3 by a few frames, which used to clip word
-          tails. The mp3 ends inside the window, so the slack is silence. */}
+      {/* Voice-over per line (absolute timeline — never shifted by transitions),
+          each at its take's normalized level (voiceVolume). Each line's window
+          runs until the NEXT line begins, not just its estimated length, so a
+          word tail can never be clipped; the mp3 ends inside the window and
+          the slack is silence. */}
       {SCENE_IDS.map((id, i) => {
         const v = VO[id];
         const end = i === SCENE_IDS.length - 1 ? TOTAL : VO[SCENE_IDS[i + 1]].startFrame;
         return (
-          <Sequence key={v.id} from={v.startFrame} durationInFrames={end - v.startFrame}>
-            <Audio src={staticFile(v.file)} volume={VOICE_GAIN} />
+          <Sequence key={v.id} from={v.startFrame} durationInFrames={end - v.startFrame} name={`vo:${id}`}>
+            <Audio src={staticFile(v.file)} volume={voiceVolume(id)} />
           </Sequence>
         );
       })}
 
-      {/* Riser into the end card — ends exactly on the CTA impact (the scene
-          plays the impact itself at its 2nd frame; riser.wav peaks on its last
-          sample and runs 36 frames). */}
-      <Sequence from={SCENES.cta.from - 54} durationInFrames={38}>
-        <Audio src={staticFile(RISER)} volume={0.55} />
-      </Sequence>
+      {/* Sounds no scene can own — the transition whooshes, the riser into
+          the CTA hit, and the chimes that ring across a hold cut — in
+          absolute frames, outside every scene, so each plays its full length
+          (see sfxTrack.tsx). */}
+      <SfxTrack cues={FILM_SFX} />
 
-      {/* Transition whooshes at each cut (skip the first scene; a "hold" is a
-          matched cut meant to be inaudible — the scene plays its own panel
-          whoosh instead). */}
-      {SCENE_IDS.slice(1).map((id) => {
-        const type = TRANSITIONS[id];
-        if (type === "hold" || !AUDIBLE_TRANSITIONS.has(id)) return null;
-        const vol = type === "whip" ? 0.55 : type === "push" ? 0.42 : 0.28;
-        return (
-          <Sequence key={`w-${id}`} from={SCENES[id].from - T} durationInFrames={22}>
-            <Audio src={staticFile(WHOOSH)} volume={vol} />
-          </Sequence>
-        );
-      })}
-
-      {/* Scenes overlap by T frames so the incoming transition plays over the
-          outgoing shot. */}
+      {/* Each scene's Sequence starts T frames before its cut so its entrance
+          plays over the outgoing shot, and ends on the next scene's cut.
+          SceneClock hands the scene its place on the film timeline so its
+          ambient motion (background, drift) runs on film time. */}
       {SCENE_IDS.map((id, i) => {
-        const Comp = COMPONENTS[id];
-        const start = SCENES[id].from;
+        const Scene = SCENE_COMPONENTS[id];
+        const from = seqFrom(id);
         const end = i === SCENE_IDS.length - 1 ? TOTAL : SCENES[SCENE_IDS[i + 1]].from;
-        const from = i === 0 ? 0 : start - T;
         return (
-          <Sequence key={id} from={from} durationInFrames={end - from}>
-            <SceneTransition type={TRANSITIONS[id]}>
-              <Comp />
-            </SceneTransition>
+          <Sequence key={id} from={from} durationInFrames={end - from} name={id}>
+            <SceneClock from={from}>
+              <SceneTransition type={TRANSITIONS[id]}>
+                <Scene />
+              </SceneTransition>
+            </SceneClock>
           </Sequence>
         );
       })}
+
+      {/* One caption track above every scene and outside every transition, so
+          a super can hold across a cut without fading or ghosting with it. */}
+      <CaptionTrack cues={CAPTIONS} />
 
       <Fades total={TOTAL} />
     </AbsoluteFill>

@@ -1,0 +1,2035 @@
+{
+  "version": 2,
+  "fps": 30,
+  "voice": "en-US-AndrewMultilingualNeural",
+  "format": "audio-24khz-96kbitrate-mono-mp3",
+  "codecDelaySec": 0.04604,
+  "voTargetLufs": -21,
+  "leadIn": 14,
+  "framePad": 2,
+  "endHold": 90,
+  "lines": [
+    {
+      "id": "hook",
+      "file": "audio/hook.mp3",
+      "wordsFile": "audio/hook.words.json",
+      "text": "Here's a boring Discord message. Let's turn it into something better.",
+      "textHash": "7bdf9520fa346aa155f72049e9d934756293cf267c091be78624a7071a85c5d4",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+4%",
+      "pitch": "+0Hz",
+      "sha256": "ca40c5e3bdb0b82b6bc7ff42f97c60972c76028a4c4cd453f93399910d73b944",
+      "bytes": 45792,
+      "durationSec": 3.816,
+      "frames": 117,
+      "gapAfter": 12,
+      "words": [
+        {
+          "text": "Here's",
+          "norm": "heres",
+          "start": 0.154,
+          "end": 0.286
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.286,
+          "end": 0.359
+        },
+        {
+          "text": "boring",
+          "norm": "boring",
+          "start": 0.371,
+          "end": 0.791
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.863,
+          "end": 1.296
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 1.296,
+          "end": 1.789
+        },
+        {
+          "text": "Let's",
+          "norm": "lets",
+          "start": 2.173,
+          "end": 2.294
+        },
+        {
+          "text": "turn",
+          "norm": "turn",
+          "start": 2.294,
+          "end": 2.486
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 2.486,
+          "end": 2.546
+        },
+        {
+          "text": "into",
+          "norm": "into",
+          "start": 2.546,
+          "end": 2.678
+        },
+        {
+          "text": "something",
+          "norm": "something",
+          "start": 2.69,
+          "end": 3.075
+        },
+        {
+          "text": "better",
+          "norm": "better",
+          "start": 3.087,
+          "end": 3.508
+        }
+      ],
+      "speech": {
+        "start": 0.154,
+        "end": 3.508
+      },
+      "loudness": {
+        "integratedLufs": -21.06,
+        "gainDb": 0.06
+      }
+    },
+    {
+      "id": "reveal",
+      "file": "audio/reveal.mp3",
+      "wordsFile": "audio/reveal.words.json",
+      "text": "Meet DWEEB: the visual Discord message builder for webhooks, embeds, and Components V2.",
+      "textHash": "f4e9a3b219140a5e84656a52696e0127e69c5d36683285a00e50eece823e0038",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "9790358d160910c7b4facd1dd7089853500dce69b9a50b3a8c948acb4a0ede8e",
+      "bytes": 72576,
+      "durationSec": 6.048,
+      "frames": 184,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Meet",
+          "norm": "meet",
+          "start": 0.139,
+          "end": 0.393
+        },
+        {
+          "text": "DWEEB",
+          "norm": "dweeb",
+          "start": 0.451,
+          "end": 0.833
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 1.342,
+          "end": 1.412
+        },
+        {
+          "text": "visual",
+          "norm": "visual",
+          "start": 1.423,
+          "end": 1.84
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 1.852,
+          "end": 2.361
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 2.361,
+          "end": 2.697
+        },
+        {
+          "text": "builder",
+          "norm": "builder",
+          "start": 2.708,
+          "end": 3.009
+        },
+        {
+          "text": "for",
+          "norm": "for",
+          "start": 3.009,
+          "end": 3.183
+        },
+        {
+          "text": "webhooks",
+          "norm": "webhooks",
+          "start": 3.183,
+          "end": 3.865
+        },
+        {
+          "text": "embeds",
+          "norm": "embeds",
+          "start": 4.016,
+          "end": 4.583
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 4.606,
+          "end": 4.722
+        },
+        {
+          "text": "Components",
+          "norm": "components",
+          "start": 4.722,
+          "end": 5.208
+        },
+        {
+          "text": "V2",
+          "norm": "v2",
+          "start": 5.22,
+          "end": 5.752
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 5.752
+      },
+      "loudness": {
+        "integratedLufs": -22.17,
+        "gainDb": 1.17
+      }
+    },
+    {
+      "id": "templates",
+      "file": "audio/templates.mp3",
+      "wordsFile": "audio/templates.words.json",
+      "text": "Start with a ready-made template, then make every detail yours.",
+      "textHash": "9dcde0a028c1f45ef03cdab3bbd37a40ef8cffee1aa2fd55abe8b05890c06ad1",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "265e20ffe8e40c73e6358f5bfbd8d8643a0d3dd901329c43f2793b93ec0ec6d9",
+      "bytes": 47232,
+      "durationSec": 3.936,
+      "frames": 121,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Start",
+          "norm": "start",
+          "start": 0.139,
+          "end": 0.428
+        },
+        {
+          "text": "with",
+          "norm": "with",
+          "start": 0.428,
+          "end": 0.555
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.555,
+          "end": 0.59
+        },
+        {
+          "text": "ready-made",
+          "norm": "readymade",
+          "start": 0.59,
+          "end": 1.192
+        },
+        {
+          "text": "template",
+          "norm": "template",
+          "start": 1.203,
+          "end": 1.62
+        },
+        {
+          "text": "then",
+          "norm": "then",
+          "start": 1.979,
+          "end": 2.095
+        },
+        {
+          "text": "make",
+          "norm": "make",
+          "start": 2.095,
+          "end": 2.291
+        },
+        {
+          "text": "every",
+          "norm": "every",
+          "start": 2.477,
+          "end": 2.731
+        },
+        {
+          "text": "detail",
+          "norm": "detail",
+          "start": 2.731,
+          "end": 3.148
+        },
+        {
+          "text": "yours",
+          "norm": "yours",
+          "start": 3.159,
+          "end": 3.622
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 3.622
+      },
+      "loudness": {
+        "integratedLufs": -21.09,
+        "gainDb": 0.09
+      }
+    },
+    {
+      "id": "build",
+      "file": "audio/build.mp3",
+      "wordsFile": "audio/build.words.json",
+      "text": "Shape it with real Discord components while a high-fidelity preview updates live, and every limit is checked for you.",
+      "textHash": "6fc4335d4d225a70727fd8951556eab1bef08f20cc5616d67cfecf49b59c54f8",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "2c8463cc1faf0a0ac193f0057b6eb7e71199866041587d63f111f19ab9e2eb0c",
+      "bytes": 79488,
+      "durationSec": 6.624,
+      "frames": 201,
+      "gapAfter": 12,
+      "words": [
+        {
+          "text": "Shape",
+          "norm": "shape",
+          "start": 0.139,
+          "end": 0.37
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 0.37,
+          "end": 0.451
+        },
+        {
+          "text": "with",
+          "norm": "with",
+          "start": 0.451,
+          "end": 0.636
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 0.636,
+          "end": 0.984
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.984,
+          "end": 1.365
+        },
+        {
+          "text": "components",
+          "norm": "components",
+          "start": 1.365,
+          "end": 1.898
+        },
+        {
+          "text": "while",
+          "norm": "while",
+          "start": 1.909,
+          "end": 2.048
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 2.048,
+          "end": 2.095
+        },
+        {
+          "text": "high-fidelity",
+          "norm": "highfidelity",
+          "start": 2.106,
+          "end": 2.766
+        },
+        {
+          "text": "preview",
+          "norm": "preview",
+          "start": 2.766,
+          "end": 3.206
+        },
+        {
+          "text": "updates",
+          "norm": "updates",
+          "start": 3.206,
+          "end": 3.611
+        },
+        {
+          "text": "live",
+          "norm": "live",
+          "start": 3.622,
+          "end": 4.016
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 4.421,
+          "end": 4.571
+        },
+        {
+          "text": "every",
+          "norm": "every",
+          "start": 4.664,
+          "end": 4.907
+        },
+        {
+          "text": "limit",
+          "norm": "limit",
+          "start": 4.907,
+          "end": 5.335
+        },
+        {
+          "text": "is",
+          "norm": "is",
+          "start": 5.509,
+          "end": 5.613
+        },
+        {
+          "text": "checked",
+          "norm": "checked",
+          "start": 5.625,
+          "end": 5.914
+        },
+        {
+          "text": "for",
+          "norm": "for",
+          "start": 5.914,
+          "end": 6.122
+        },
+        {
+          "text": "you",
+          "norm": "you",
+          "start": 6.122,
+          "end": 6.319
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 6.319
+      },
+      "loudness": {
+        "integratedLufs": -21.54,
+        "gainDb": 0.54
+      }
+    },
+    {
+      "id": "assistant",
+      "file": "audio/assistant.mp3",
+      "wordsFile": "audio/assistant.words.json",
+      "text": "Got another idea? Ask the AI assistant to add it directly to the message.",
+      "textHash": "3775660c3fc9411c82295a2c6ae868a3720c602cdf8e2c073f89d80a88d57214",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+4%",
+      "pitch": "+0Hz",
+      "sha256": "4f46eb1010c45160374dca8fda21e3233d3005479c09554a2f38043143e9356d",
+      "bytes": 64224,
+      "durationSec": 5.352,
+      "frames": 163,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Got",
+          "norm": "got",
+          "start": 0.142,
+          "end": 0.238
+        },
+        {
+          "text": "another",
+          "norm": "another",
+          "start": 0.238,
+          "end": 0.503
+        },
+        {
+          "text": "idea",
+          "norm": "idea",
+          "start": 0.503,
+          "end": 0.972
+        },
+        {
+          "text": "Ask",
+          "norm": "ask",
+          "start": 1.368,
+          "end": 1.621
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 1.621,
+          "end": 1.705
+        },
+        {
+          "text": "AI",
+          "norm": "ai",
+          "start": 1.717,
+          "end": 2.125
+        },
+        {
+          "text": "assistant",
+          "norm": "assistant",
+          "start": 2.125,
+          "end": 2.678
+        },
+        {
+          "text": "to",
+          "norm": "to",
+          "start": 2.895,
+          "end": 3.039
+        },
+        {
+          "text": "add",
+          "norm": "add",
+          "start": 3.051,
+          "end": 3.243
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 3.243,
+          "end": 3.351
+        },
+        {
+          "text": "directly",
+          "norm": "directly",
+          "start": 3.363,
+          "end": 4.06
+        },
+        {
+          "text": "to",
+          "norm": "to",
+          "start": 4.277,
+          "end": 4.385
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 4.385,
+          "end": 4.457
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 4.469,
+          "end": 5.046
+        }
+      ],
+      "speech": {
+        "start": 0.142,
+        "end": 5.046
+      },
+      "loudness": {
+        "integratedLufs": -22.38,
+        "gainDb": 1.38
+      }
+    },
+    {
+      "id": "plugins",
+      "file": "audio/plugins.mp3",
+      "wordsFile": "audio/plugins.words.json",
+      "text": "Then turn that button into a real giveaway. Visual plugins power tickets, roles, forms, and more.",
+      "textHash": "6f4f4d07ee5dffc7e0b8c092d1f712bf72e99421dca8ed3c7519b72b99c701ea",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "fa51471c3d40d5b21bbddeef2e4750853d9846bb2c1216d56536f1b39a1f538d",
+      "bytes": 84096,
+      "durationSec": 7.008,
+      "frames": 213,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Then",
+          "norm": "then",
+          "start": 0.139,
+          "end": 0.243
+        },
+        {
+          "text": "turn",
+          "norm": "turn",
+          "start": 0.243,
+          "end": 0.463
+        },
+        {
+          "text": "that",
+          "norm": "that",
+          "start": 0.463,
+          "end": 0.659
+        },
+        {
+          "text": "button",
+          "norm": "button",
+          "start": 0.659,
+          "end": 0.926
+        },
+        {
+          "text": "into",
+          "norm": "into",
+          "start": 1.076,
+          "end": 1.296
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 1.296,
+          "end": 1.377
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 1.377,
+          "end": 1.84
+        },
+        {
+          "text": "giveaway",
+          "norm": "giveaway",
+          "start": 1.852,
+          "end": 2.407
+        },
+        {
+          "text": "Visual",
+          "norm": "visual",
+          "start": 2.778,
+          "end": 3.09
+        },
+        {
+          "text": "plugins",
+          "norm": "plugins",
+          "start": 3.09,
+          "end": 3.426
+        },
+        {
+          "text": "power",
+          "norm": "power",
+          "start": 3.437,
+          "end": 3.75
+        },
+        {
+          "text": "tickets",
+          "norm": "tickets",
+          "start": 3.761,
+          "end": 4.282
+        },
+        {
+          "text": "roles",
+          "norm": "roles",
+          "start": 4.456,
+          "end": 5.058
+        },
+        {
+          "text": "forms",
+          "norm": "forms",
+          "start": 5.243,
+          "end": 6.007
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 6.18,
+          "end": 6.296
+        },
+        {
+          "text": "more",
+          "norm": "more",
+          "start": 6.296,
+          "end": 6.701
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 6.701
+      },
+      "loudness": {
+        "integratedLufs": -21.04,
+        "gainDb": 0.04
+      }
+    },
+    {
+      "id": "send",
+      "file": "audio/send.mp3",
+      "wordsFile": "audio/send.words.json",
+      "text": "Pick a channel and send. DWEEB handles the webhook. The moment it lands, your giveaway is live.",
+      "textHash": "62bdc8f7d0ef12a9fbaaeab769959d8fb4712ca5f28b02e4d1ea97febc66ff13",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "da383a1e67173ef00918b7688dc4de27a154ba9cce3323f5c37daa3fb3789aef",
+      "bytes": 72000,
+      "durationSec": 6,
+      "frames": 182,
+      "gapAfter": 34,
+      "words": [
+        {
+          "text": "Pick",
+          "norm": "pick",
+          "start": 0.139,
+          "end": 0.266
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.266,
+          "end": 0.312
+        },
+        {
+          "text": "channel",
+          "norm": "channel",
+          "start": 0.312,
+          "end": 0.74
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 0.868,
+          "end": 0.96
+        },
+        {
+          "text": "send",
+          "norm": "send",
+          "start": 0.96,
+          "end": 1.435
+        },
+        {
+          "text": "DWEEB",
+          "norm": "dweeb",
+          "start": 1.805,
+          "end": 2.071
+        },
+        {
+          "text": "handles",
+          "norm": "handles",
+          "start": 2.071,
+          "end": 2.43
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 2.43,
+          "end": 2.511
+        },
+        {
+          "text": "webhook",
+          "norm": "webhook",
+          "start": 2.511,
+          "end": 2.974
+        },
+        {
+          "text": "The",
+          "norm": "the",
+          "start": 3.368,
+          "end": 3.402
+        },
+        {
+          "text": "moment",
+          "norm": "moment",
+          "start": 3.414,
+          "end": 3.657
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 3.669,
+          "end": 3.738
+        },
+        {
+          "text": "lands",
+          "norm": "lands",
+          "start": 3.738,
+          "end": 4.259
+        },
+        {
+          "text": "your",
+          "norm": "your",
+          "start": 4.502,
+          "end": 4.606
+        },
+        {
+          "text": "giveaway",
+          "norm": "giveaway",
+          "start": 4.606,
+          "end": 5.092
+        },
+        {
+          "text": "is",
+          "norm": "is",
+          "start": 5.092,
+          "end": 5.185
+        },
+        {
+          "text": "live",
+          "norm": "live",
+          "start": 5.185,
+          "end": 5.706
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 5.706
+      },
+      "loudness": {
+        "integratedLufs": -20.31,
+        "gainDb": -0.69
+      }
+    },
+    {
+      "id": "activity",
+      "file": "audio/activity.mp3",
+      "wordsFile": "audio/activity.words.json",
+      "text": "Need another pair of hands? Invite your team, then build together inside Discord — in real time.",
+      "textHash": "f1df542b713fd91f5b65ee7ff89aa81693ab97fbf320b18996595f05d3708a61",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "ee1333ccd516b183afad17950076708a618311c82205178e1674a972ccb570f6",
+      "bytes": 80928,
+      "durationSec": 6.744,
+      "frames": 205,
+      "gapAfter": 14,
+      "words": [
+        {
+          "text": "Need",
+          "norm": "need",
+          "start": 0.127,
+          "end": 0.243
+        },
+        {
+          "text": "another",
+          "norm": "another",
+          "start": 0.254,
+          "end": 0.474
+        },
+        {
+          "text": "pair",
+          "norm": "pair",
+          "start": 0.474,
+          "end": 0.636
+        },
+        {
+          "text": "of",
+          "norm": "of",
+          "start": 0.636,
+          "end": 0.694
+        },
+        {
+          "text": "hands",
+          "norm": "hands",
+          "start": 0.694,
+          "end": 1.25
+        },
+        {
+          "text": "Invite",
+          "norm": "invite",
+          "start": 1.62,
+          "end": 1.886
+        },
+        {
+          "text": "your",
+          "norm": "your",
+          "start": 1.886,
+          "end": 1.99
+        },
+        {
+          "text": "team",
+          "norm": "team",
+          "start": 1.99,
+          "end": 2.361
+        },
+        {
+          "text": "then",
+          "norm": "then",
+          "start": 2.87,
+          "end": 3.09
+        },
+        {
+          "text": "build",
+          "norm": "build",
+          "start": 3.194,
+          "end": 3.634
+        },
+        {
+          "text": "together",
+          "norm": "together",
+          "start": 3.646,
+          "end": 4.143
+        },
+        {
+          "text": "inside",
+          "norm": "inside",
+          "start": 4.155,
+          "end": 4.826
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 4.838,
+          "end": 5.347
+        },
+        {
+          "text": "in",
+          "norm": "in",
+          "start": 5.683,
+          "end": 5.821
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 5.821,
+          "end": 6.041
+        },
+        {
+          "text": "time",
+          "norm": "time",
+          "start": 6.053,
+          "end": 6.446
+        }
+      ],
+      "speech": {
+        "start": 0.127,
+        "end": 6.446
+      },
+      "loudness": {
+        "integratedLufs": -20.97,
+        "gainDb": -0.03
+      }
+    },
+    {
+      "id": "cta",
+      "file": "audio/cta.mp3",
+      "wordsFile": "audio/cta.words.json",
+      "text": "Build better Discord messages. Start free today.",
+      "textHash": "8616ba7a33c2def917aa19e4dfa56e81035a63aa376a751f5e084817e95bec39",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "76245167fdc90bd60166e06546ad58a4a90ac338c469cb56d4087c04656cd0bd",
+      "bytes": 42048,
+      "durationSec": 3.504,
+      "frames": 108,
+      "gapAfter": 0,
+      "words": [
+        {
+          "text": "Build",
+          "norm": "build",
+          "start": 0.139,
+          "end": 0.393
+        },
+        {
+          "text": "better",
+          "norm": "better",
+          "start": 0.405,
+          "end": 0.694
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.798,
+          "end": 1.238
+        },
+        {
+          "text": "messages",
+          "norm": "messages",
+          "start": 1.238,
+          "end": 1.898
+        },
+        {
+          "text": "Start",
+          "norm": "start",
+          "start": 2.28,
+          "end": 2.511
+        },
+        {
+          "text": "free",
+          "norm": "free",
+          "start": 2.523,
+          "end": 2.847
+        },
+        {
+          "text": "today",
+          "norm": "today",
+          "start": 2.847,
+          "end": 3.217
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 3.217
+      },
+      "loudness": {
+        "integratedLufs": -20.86,
+        "gainDb": -0.14
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "id": "hook",
+      "file": "audio/hook.mp3",
+      "wordsFile": "audio/hook.words.json",
+      "text": "Here's a boring Discord message. Let's turn it into something better.",
+      "textHash": "7bdf9520fa346aa155f72049e9d934756293cf267c091be78624a7071a85c5d4",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+4%",
+      "pitch": "+0Hz",
+      "sha256": "ca40c5e3bdb0b82b6bc7ff42f97c60972c76028a4c4cd453f93399910d73b944",
+      "bytes": 45792,
+      "durationSec": 3.816,
+      "frames": 117,
+      "gapAfter": 12,
+      "words": [
+        {
+          "text": "Here's",
+          "norm": "heres",
+          "start": 0.154,
+          "end": 0.286
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.286,
+          "end": 0.359
+        },
+        {
+          "text": "boring",
+          "norm": "boring",
+          "start": 0.371,
+          "end": 0.791
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.863,
+          "end": 1.296
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 1.296,
+          "end": 1.789
+        },
+        {
+          "text": "Let's",
+          "norm": "lets",
+          "start": 2.173,
+          "end": 2.294
+        },
+        {
+          "text": "turn",
+          "norm": "turn",
+          "start": 2.294,
+          "end": 2.486
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 2.486,
+          "end": 2.546
+        },
+        {
+          "text": "into",
+          "norm": "into",
+          "start": 2.546,
+          "end": 2.678
+        },
+        {
+          "text": "something",
+          "norm": "something",
+          "start": 2.69,
+          "end": 3.075
+        },
+        {
+          "text": "better",
+          "norm": "better",
+          "start": 3.087,
+          "end": 3.508
+        }
+      ],
+      "speech": {
+        "start": 0.154,
+        "end": 3.508
+      },
+      "loudness": {
+        "integratedLufs": -21.06,
+        "gainDb": 0.06
+      },
+      "startFrame": 14
+    },
+    {
+      "id": "reveal",
+      "file": "audio/reveal.mp3",
+      "wordsFile": "audio/reveal.words.json",
+      "text": "Meet DWEEB: the visual Discord message builder for webhooks, embeds, and Components V2.",
+      "textHash": "f4e9a3b219140a5e84656a52696e0127e69c5d36683285a00e50eece823e0038",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "9790358d160910c7b4facd1dd7089853500dce69b9a50b3a8c948acb4a0ede8e",
+      "bytes": 72576,
+      "durationSec": 6.048,
+      "frames": 184,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Meet",
+          "norm": "meet",
+          "start": 0.139,
+          "end": 0.393
+        },
+        {
+          "text": "DWEEB",
+          "norm": "dweeb",
+          "start": 0.451,
+          "end": 0.833
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 1.342,
+          "end": 1.412
+        },
+        {
+          "text": "visual",
+          "norm": "visual",
+          "start": 1.423,
+          "end": 1.84
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 1.852,
+          "end": 2.361
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 2.361,
+          "end": 2.697
+        },
+        {
+          "text": "builder",
+          "norm": "builder",
+          "start": 2.708,
+          "end": 3.009
+        },
+        {
+          "text": "for",
+          "norm": "for",
+          "start": 3.009,
+          "end": 3.183
+        },
+        {
+          "text": "webhooks",
+          "norm": "webhooks",
+          "start": 3.183,
+          "end": 3.865
+        },
+        {
+          "text": "embeds",
+          "norm": "embeds",
+          "start": 4.016,
+          "end": 4.583
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 4.606,
+          "end": 4.722
+        },
+        {
+          "text": "Components",
+          "norm": "components",
+          "start": 4.722,
+          "end": 5.208
+        },
+        {
+          "text": "V2",
+          "norm": "v2",
+          "start": 5.22,
+          "end": 5.752
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 5.752
+      },
+      "loudness": {
+        "integratedLufs": -22.17,
+        "gainDb": 1.17
+      },
+      "startFrame": 143
+    },
+    {
+      "id": "templates",
+      "file": "audio/templates.mp3",
+      "wordsFile": "audio/templates.words.json",
+      "text": "Start with a ready-made template, then make every detail yours.",
+      "textHash": "9dcde0a028c1f45ef03cdab3bbd37a40ef8cffee1aa2fd55abe8b05890c06ad1",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "265e20ffe8e40c73e6358f5bfbd8d8643a0d3dd901329c43f2793b93ec0ec6d9",
+      "bytes": 47232,
+      "durationSec": 3.936,
+      "frames": 121,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Start",
+          "norm": "start",
+          "start": 0.139,
+          "end": 0.428
+        },
+        {
+          "text": "with",
+          "norm": "with",
+          "start": 0.428,
+          "end": 0.555
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.555,
+          "end": 0.59
+        },
+        {
+          "text": "ready-made",
+          "norm": "readymade",
+          "start": 0.59,
+          "end": 1.192
+        },
+        {
+          "text": "template",
+          "norm": "template",
+          "start": 1.203,
+          "end": 1.62
+        },
+        {
+          "text": "then",
+          "norm": "then",
+          "start": 1.979,
+          "end": 2.095
+        },
+        {
+          "text": "make",
+          "norm": "make",
+          "start": 2.095,
+          "end": 2.291
+        },
+        {
+          "text": "every",
+          "norm": "every",
+          "start": 2.477,
+          "end": 2.731
+        },
+        {
+          "text": "detail",
+          "norm": "detail",
+          "start": 2.731,
+          "end": 3.148
+        },
+        {
+          "text": "yours",
+          "norm": "yours",
+          "start": 3.159,
+          "end": 3.622
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 3.622
+      },
+      "loudness": {
+        "integratedLufs": -21.09,
+        "gainDb": 0.09
+      },
+      "startFrame": 337
+    },
+    {
+      "id": "build",
+      "file": "audio/build.mp3",
+      "wordsFile": "audio/build.words.json",
+      "text": "Shape it with real Discord components while a high-fidelity preview updates live, and every limit is checked for you.",
+      "textHash": "6fc4335d4d225a70727fd8951556eab1bef08f20cc5616d67cfecf49b59c54f8",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "2c8463cc1faf0a0ac193f0057b6eb7e71199866041587d63f111f19ab9e2eb0c",
+      "bytes": 79488,
+      "durationSec": 6.624,
+      "frames": 201,
+      "gapAfter": 12,
+      "words": [
+        {
+          "text": "Shape",
+          "norm": "shape",
+          "start": 0.139,
+          "end": 0.37
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 0.37,
+          "end": 0.451
+        },
+        {
+          "text": "with",
+          "norm": "with",
+          "start": 0.451,
+          "end": 0.636
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 0.636,
+          "end": 0.984
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.984,
+          "end": 1.365
+        },
+        {
+          "text": "components",
+          "norm": "components",
+          "start": 1.365,
+          "end": 1.898
+        },
+        {
+          "text": "while",
+          "norm": "while",
+          "start": 1.909,
+          "end": 2.048
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 2.048,
+          "end": 2.095
+        },
+        {
+          "text": "high-fidelity",
+          "norm": "highfidelity",
+          "start": 2.106,
+          "end": 2.766
+        },
+        {
+          "text": "preview",
+          "norm": "preview",
+          "start": 2.766,
+          "end": 3.206
+        },
+        {
+          "text": "updates",
+          "norm": "updates",
+          "start": 3.206,
+          "end": 3.611
+        },
+        {
+          "text": "live",
+          "norm": "live",
+          "start": 3.622,
+          "end": 4.016
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 4.421,
+          "end": 4.571
+        },
+        {
+          "text": "every",
+          "norm": "every",
+          "start": 4.664,
+          "end": 4.907
+        },
+        {
+          "text": "limit",
+          "norm": "limit",
+          "start": 4.907,
+          "end": 5.335
+        },
+        {
+          "text": "is",
+          "norm": "is",
+          "start": 5.509,
+          "end": 5.613
+        },
+        {
+          "text": "checked",
+          "norm": "checked",
+          "start": 5.625,
+          "end": 5.914
+        },
+        {
+          "text": "for",
+          "norm": "for",
+          "start": 5.914,
+          "end": 6.122
+        },
+        {
+          "text": "you",
+          "norm": "you",
+          "start": 6.122,
+          "end": 6.319
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 6.319
+      },
+      "loudness": {
+        "integratedLufs": -21.54,
+        "gainDb": 0.54
+      },
+      "startFrame": 468
+    },
+    {
+      "id": "assistant",
+      "file": "audio/assistant.mp3",
+      "wordsFile": "audio/assistant.words.json",
+      "text": "Got another idea? Ask the AI assistant to add it directly to the message.",
+      "textHash": "3775660c3fc9411c82295a2c6ae868a3720c602cdf8e2c073f89d80a88d57214",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+4%",
+      "pitch": "+0Hz",
+      "sha256": "4f46eb1010c45160374dca8fda21e3233d3005479c09554a2f38043143e9356d",
+      "bytes": 64224,
+      "durationSec": 5.352,
+      "frames": 163,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Got",
+          "norm": "got",
+          "start": 0.142,
+          "end": 0.238
+        },
+        {
+          "text": "another",
+          "norm": "another",
+          "start": 0.238,
+          "end": 0.503
+        },
+        {
+          "text": "idea",
+          "norm": "idea",
+          "start": 0.503,
+          "end": 0.972
+        },
+        {
+          "text": "Ask",
+          "norm": "ask",
+          "start": 1.368,
+          "end": 1.621
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 1.621,
+          "end": 1.705
+        },
+        {
+          "text": "AI",
+          "norm": "ai",
+          "start": 1.717,
+          "end": 2.125
+        },
+        {
+          "text": "assistant",
+          "norm": "assistant",
+          "start": 2.125,
+          "end": 2.678
+        },
+        {
+          "text": "to",
+          "norm": "to",
+          "start": 2.895,
+          "end": 3.039
+        },
+        {
+          "text": "add",
+          "norm": "add",
+          "start": 3.051,
+          "end": 3.243
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 3.243,
+          "end": 3.351
+        },
+        {
+          "text": "directly",
+          "norm": "directly",
+          "start": 3.363,
+          "end": 4.06
+        },
+        {
+          "text": "to",
+          "norm": "to",
+          "start": 4.277,
+          "end": 4.385
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 4.385,
+          "end": 4.457
+        },
+        {
+          "text": "message",
+          "norm": "message",
+          "start": 4.469,
+          "end": 5.046
+        }
+      ],
+      "speech": {
+        "start": 0.142,
+        "end": 5.046
+      },
+      "loudness": {
+        "integratedLufs": -22.38,
+        "gainDb": 1.38
+      },
+      "startFrame": 681
+    },
+    {
+      "id": "plugins",
+      "file": "audio/plugins.mp3",
+      "wordsFile": "audio/plugins.words.json",
+      "text": "Then turn that button into a real giveaway. Visual plugins power tickets, roles, forms, and more.",
+      "textHash": "6f4f4d07ee5dffc7e0b8c092d1f712bf72e99421dca8ed3c7519b72b99c701ea",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "fa51471c3d40d5b21bbddeef2e4750853d9846bb2c1216d56536f1b39a1f538d",
+      "bytes": 84096,
+      "durationSec": 7.008,
+      "frames": 213,
+      "gapAfter": 10,
+      "words": [
+        {
+          "text": "Then",
+          "norm": "then",
+          "start": 0.139,
+          "end": 0.243
+        },
+        {
+          "text": "turn",
+          "norm": "turn",
+          "start": 0.243,
+          "end": 0.463
+        },
+        {
+          "text": "that",
+          "norm": "that",
+          "start": 0.463,
+          "end": 0.659
+        },
+        {
+          "text": "button",
+          "norm": "button",
+          "start": 0.659,
+          "end": 0.926
+        },
+        {
+          "text": "into",
+          "norm": "into",
+          "start": 1.076,
+          "end": 1.296
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 1.296,
+          "end": 1.377
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 1.377,
+          "end": 1.84
+        },
+        {
+          "text": "giveaway",
+          "norm": "giveaway",
+          "start": 1.852,
+          "end": 2.407
+        },
+        {
+          "text": "Visual",
+          "norm": "visual",
+          "start": 2.778,
+          "end": 3.09
+        },
+        {
+          "text": "plugins",
+          "norm": "plugins",
+          "start": 3.09,
+          "end": 3.426
+        },
+        {
+          "text": "power",
+          "norm": "power",
+          "start": 3.437,
+          "end": 3.75
+        },
+        {
+          "text": "tickets",
+          "norm": "tickets",
+          "start": 3.761,
+          "end": 4.282
+        },
+        {
+          "text": "roles",
+          "norm": "roles",
+          "start": 4.456,
+          "end": 5.058
+        },
+        {
+          "text": "forms",
+          "norm": "forms",
+          "start": 5.243,
+          "end": 6.007
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 6.18,
+          "end": 6.296
+        },
+        {
+          "text": "more",
+          "norm": "more",
+          "start": 6.296,
+          "end": 6.701
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 6.701
+      },
+      "loudness": {
+        "integratedLufs": -21.04,
+        "gainDb": 0.04
+      },
+      "startFrame": 854
+    },
+    {
+      "id": "send",
+      "file": "audio/send.mp3",
+      "wordsFile": "audio/send.words.json",
+      "text": "Pick a channel and send. DWEEB handles the webhook. The moment it lands, your giveaway is live.",
+      "textHash": "62bdc8f7d0ef12a9fbaaeab769959d8fb4712ca5f28b02e4d1ea97febc66ff13",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "da383a1e67173ef00918b7688dc4de27a154ba9cce3323f5c37daa3fb3789aef",
+      "bytes": 72000,
+      "durationSec": 6,
+      "frames": 182,
+      "gapAfter": 34,
+      "words": [
+        {
+          "text": "Pick",
+          "norm": "pick",
+          "start": 0.139,
+          "end": 0.266
+        },
+        {
+          "text": "a",
+          "norm": "a",
+          "start": 0.266,
+          "end": 0.312
+        },
+        {
+          "text": "channel",
+          "norm": "channel",
+          "start": 0.312,
+          "end": 0.74
+        },
+        {
+          "text": "and",
+          "norm": "and",
+          "start": 0.868,
+          "end": 0.96
+        },
+        {
+          "text": "send",
+          "norm": "send",
+          "start": 0.96,
+          "end": 1.435
+        },
+        {
+          "text": "DWEEB",
+          "norm": "dweeb",
+          "start": 1.805,
+          "end": 2.071
+        },
+        {
+          "text": "handles",
+          "norm": "handles",
+          "start": 2.071,
+          "end": 2.43
+        },
+        {
+          "text": "the",
+          "norm": "the",
+          "start": 2.43,
+          "end": 2.511
+        },
+        {
+          "text": "webhook",
+          "norm": "webhook",
+          "start": 2.511,
+          "end": 2.974
+        },
+        {
+          "text": "The",
+          "norm": "the",
+          "start": 3.368,
+          "end": 3.402
+        },
+        {
+          "text": "moment",
+          "norm": "moment",
+          "start": 3.414,
+          "end": 3.657
+        },
+        {
+          "text": "it",
+          "norm": "it",
+          "start": 3.669,
+          "end": 3.738
+        },
+        {
+          "text": "lands",
+          "norm": "lands",
+          "start": 3.738,
+          "end": 4.259
+        },
+        {
+          "text": "your",
+          "norm": "your",
+          "start": 4.502,
+          "end": 4.606
+        },
+        {
+          "text": "giveaway",
+          "norm": "giveaway",
+          "start": 4.606,
+          "end": 5.092
+        },
+        {
+          "text": "is",
+          "norm": "is",
+          "start": 5.092,
+          "end": 5.185
+        },
+        {
+          "text": "live",
+          "norm": "live",
+          "start": 5.185,
+          "end": 5.706
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 5.706
+      },
+      "loudness": {
+        "integratedLufs": -20.31,
+        "gainDb": -0.69
+      },
+      "startFrame": 1077
+    },
+    {
+      "id": "activity",
+      "file": "audio/activity.mp3",
+      "wordsFile": "audio/activity.words.json",
+      "text": "Need another pair of hands? Invite your team, then build together inside Discord — in real time.",
+      "textHash": "f1df542b713fd91f5b65ee7ff89aa81693ab97fbf320b18996595f05d3708a61",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "ee1333ccd516b183afad17950076708a618311c82205178e1674a972ccb570f6",
+      "bytes": 80928,
+      "durationSec": 6.744,
+      "frames": 205,
+      "gapAfter": 14,
+      "words": [
+        {
+          "text": "Need",
+          "norm": "need",
+          "start": 0.127,
+          "end": 0.243
+        },
+        {
+          "text": "another",
+          "norm": "another",
+          "start": 0.254,
+          "end": 0.474
+        },
+        {
+          "text": "pair",
+          "norm": "pair",
+          "start": 0.474,
+          "end": 0.636
+        },
+        {
+          "text": "of",
+          "norm": "of",
+          "start": 0.636,
+          "end": 0.694
+        },
+        {
+          "text": "hands",
+          "norm": "hands",
+          "start": 0.694,
+          "end": 1.25
+        },
+        {
+          "text": "Invite",
+          "norm": "invite",
+          "start": 1.62,
+          "end": 1.886
+        },
+        {
+          "text": "your",
+          "norm": "your",
+          "start": 1.886,
+          "end": 1.99
+        },
+        {
+          "text": "team",
+          "norm": "team",
+          "start": 1.99,
+          "end": 2.361
+        },
+        {
+          "text": "then",
+          "norm": "then",
+          "start": 2.87,
+          "end": 3.09
+        },
+        {
+          "text": "build",
+          "norm": "build",
+          "start": 3.194,
+          "end": 3.634
+        },
+        {
+          "text": "together",
+          "norm": "together",
+          "start": 3.646,
+          "end": 4.143
+        },
+        {
+          "text": "inside",
+          "norm": "inside",
+          "start": 4.155,
+          "end": 4.826
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 4.838,
+          "end": 5.347
+        },
+        {
+          "text": "in",
+          "norm": "in",
+          "start": 5.683,
+          "end": 5.821
+        },
+        {
+          "text": "real",
+          "norm": "real",
+          "start": 5.821,
+          "end": 6.041
+        },
+        {
+          "text": "time",
+          "norm": "time",
+          "start": 6.053,
+          "end": 6.446
+        }
+      ],
+      "speech": {
+        "start": 0.127,
+        "end": 6.446
+      },
+      "loudness": {
+        "integratedLufs": -20.97,
+        "gainDb": -0.03
+      },
+      "startFrame": 1293
+    },
+    {
+      "id": "cta",
+      "file": "audio/cta.mp3",
+      "wordsFile": "audio/cta.words.json",
+      "text": "Build better Discord messages. Start free today.",
+      "textHash": "8616ba7a33c2def917aa19e4dfa56e81035a63aa376a751f5e084817e95bec39",
+      "voice": "en-US-AndrewMultilingualNeural",
+      "format": "audio-24khz-96kbitrate-mono-mp3",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "sha256": "76245167fdc90bd60166e06546ad58a4a90ac338c469cb56d4087c04656cd0bd",
+      "bytes": 42048,
+      "durationSec": 3.504,
+      "frames": 108,
+      "gapAfter": 0,
+      "words": [
+        {
+          "text": "Build",
+          "norm": "build",
+          "start": 0.139,
+          "end": 0.393
+        },
+        {
+          "text": "better",
+          "norm": "better",
+          "start": 0.405,
+          "end": 0.694
+        },
+        {
+          "text": "Discord",
+          "norm": "discord",
+          "start": 0.798,
+          "end": 1.238
+        },
+        {
+          "text": "messages",
+          "norm": "messages",
+          "start": 1.238,
+          "end": 1.898
+        },
+        {
+          "text": "Start",
+          "norm": "start",
+          "start": 2.28,
+          "end": 2.511
+        },
+        {
+          "text": "free",
+          "norm": "free",
+          "start": 2.523,
+          "end": 2.847
+        },
+        {
+          "text": "today",
+          "norm": "today",
+          "start": 2.847,
+          "end": 3.217
+        }
+      ],
+      "speech": {
+        "start": 0.139,
+        "end": 3.217
+      },
+      "loudness": {
+        "integratedLufs": -20.86,
+        "gainDb": -0.14
+      },
+      "startFrame": 1512
+    }
+  ],
+  "totalFrames": 1710,
+  "totalSec": 57,
+  "music": {
+    "source": "paulyudin-tech-corporate-182507.mp3",
+    "sourceSha256": "0e6d88f111de983d92fafef3ad0ae066f2eac56cc63ad6a327aa7123caf76552",
+    "sampleRate": 48000,
+    "fileGainDb": -3,
+    "peakDbfs": -3.18,
+    "breakdownLiftDb": 3,
+    "duck": {
+      "depthDb": -6,
+      "attack": 0.12,
+      "pre": 0.04,
+      "hold": 0.12,
+      "release": 0.4
+    },
+    "fadeInSec": 0.8,
+    "fadeOutSec": 1.5,
+    "grid": {
+      "bpm": 118,
+      "barSec": 2.033898,
+      "bar0Sec": 1.0508
+    },
+    "marks": {
+      "mainAFrame": 466.71,
+      "spliceFrame": 1320.95,
+      "dropFrame": 1504,
+      "endingFrame": 1626.03
+    },
+    "bars": {
+      "mainAToDrop": 17,
+      "mainA": 14,
+      "breakdown": 3,
+      "afterDrop": 2
+    },
+    "headTempo": 1,
+    "anchorErrorsMs": {
+      "mainAvsBuildFirstWord": -182,
+      "mainAvsBuildLineStart": -43,
+      "dropVsCtaHit": 0,
+      "spliceAfterActivityCut": 1198,
+      "endingAfterCtaLastWord": 584
+    },
+    "segments": [
+      {
+        "label": "intro → main A",
+        "filmStart": 0,
+        "filmEnd": 44.0316,
+        "srcStart": 1.7649,
+        "tempo": 1
+      },
+      {
+        "label": "breakdown bars 29-31 → main B",
+        "filmStart": 44.0316,
+        "filmEnd": 54.2011,
+        "srcStart": 60.0339,
+        "tempo": 1
+      },
+      {
+        "label": "outro (bar 48 crash) → fade",
+        "filmStart": 54.2011,
+        "filmEnd": 57,
+        "srcStart": 98.6779,
+        "tempo": 1
+      }
+    ]
+  }
+}

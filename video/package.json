@@ -7,23 +7,32 @@
     "audio": "node scripts/generate-audio.mjs",
     "music": "node scripts/rebuild-music.mjs",
     "sfx": "node scripts/generate-sfx.mjs",
+    "master": "node scripts/master.mjs",
+    "deliver:web": "node scripts/deliver-web.mjs",
     "studio": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts DweebPromo out/dweeb-promo.mp4 --concurrency 4",
-    "render:vertical": "remotion render src/index.ts DweebPromoVertical out/dweeb-promo-vertical.mp4 --concurrency 4",
-    "render:activity": "remotion render src/index.ts ActivityPreview out/dweeb-activity-preview.mp4 --concurrency 4 --crf 30 --muted",
-    "still": "remotion still src/index.ts DweebPromo out/cover.png --frame 1560",
+    "render": "remotion render src/index.ts DweebPromo out/dweeb-promo.mp4 --separate-audio-to=out/dweeb-promo.wav",
+    "render:vertical": "remotion render src/index.ts DweebPromoVertical out/dweeb-promo-vertical.mp4 --separate-audio-to=out/dweeb-promo-vertical.wav",
+    "render:activity": "remotion render src/index.ts ActivityPreview out/dweeb-activity-preview.mp4 --crf 30 --muted",
+    "still": "remotion still src/index.ts DweebPromo out/cover.png --frame 1650",
+    "still:vertical": "remotion still src/index.ts DweebPromoVertical out/cover-vertical.png --frame 1650",
+    "stills": "node scripts/stills.mjs",
+    "qa:cuts": "node scripts/qa-cuts.mjs",
+    "qa:captions": "node scripts/qa-captions.mjs",
+    "qa:loudness": "node scripts/qa-loudness.mjs",
+    "qa:bench": "node scripts/qa-bench.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@remotion/bundler": "4.0.290",
     "@remotion/cli": "4.0.290",
-    "@remotion/google-fonts": "4.0.290",
+    "@remotion/renderer": "4.0.290",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "remotion": "4.0.290"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
-    "msedge-tts": "^2.0.6",
+    "msedge-tts": "2.0.6",
     "typescript": "^5.6.3"
   }
 }
