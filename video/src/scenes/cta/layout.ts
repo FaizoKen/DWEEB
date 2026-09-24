@@ -1,7 +1,7 @@
 /**
  * End-card geometry, per aspect, in WORLD px (the 1920×1080 stage both masters
- * film). One table drives both the render and the pointer's aim at the Google
- * "G", so the press can never drift off its button when the layout is tuned.
+ * film). One table drives both the render and the pointer's aim at the search
+ * button, so the press can never drift off its button when the layout is tuned.
  *
  * Landscape films the whole world at rest (s = 1, canvas px = world px).
  * Vertical lays out on the portrait stage (world x 690–1230, y 60–1020) with
@@ -23,15 +23,15 @@ export type BarGeo = {
   y: number;
   w: number;
   h: number;
-  /** Width of the Google "G" button at the bar's far end. */
-  gW: number;
+  /** Width of the search button (the magnifier) at the bar's far end. */
+  btnW: number;
   /** Query font size. */
   font: number;
-  /** Magnifier size and the bar's left padding. */
-  icon: number;
+  /** The Google G's size at the bar's start, and the bar's left padding. */
+  logo: number;
   padL: number;
-  /** The G mark's size. */
-  gIcon: number;
+  /** The button's magnifier size. */
+  btnIcon: number;
 };
 
 export type ResultGeo = {
@@ -84,7 +84,7 @@ export const LAYOUT_L: CtaLayout = {
     ],
   },
   underline: { w: 400, h: 9, gap: 22 },
-  bar: { x: 1080, y: 540, w: 690, h: 106, gW: 108, font: 27, icon: 28, padL: 30, gIcon: 46 },
+  bar: { x: 1080, y: 540, w: 690, h: 106, btnW: 108, font: 27, logo: 32, padL: 30, btnIcon: 40 },
   mascot: { cx: 1566, top: 298, size: 296, tilt: -5 },
   result: { x: 1080, y: 676, w: 690, pad: 28, fav: 46, title: 28, url: 40, gap: 12, radius: 24 },
 };
@@ -106,13 +106,13 @@ export const LAYOUT_V: CtaLayout = {
     ],
   },
   underline: { w: 196, h: 5, gap: 14 },
-  bar: { x: 716, y: 712, w: 446, h: 66, gW: 66, font: 22, icon: 22, padL: 20, gIcon: 31 },
+  bar: { x: 716, y: 712, w: 446, h: 66, btnW: 66, font: 22, logo: 25, padL: 20, btnIcon: 27 },
   mascot: { cx: 1046, top: 590, size: 150, tilt: -5 },
   result: { x: 716, y: 798, w: 446, pad: 18, fav: 30, title: 17, url: 23.5, gap: 9, radius: 16 },
 };
 
-/** Centre of the Google "G" button (world px): where the press lands. */
-export const gCenter = (bar: BarGeo) => ({ x: bar.x + bar.w - bar.gW / 2, y: bar.y + bar.h / 2 });
+/** Centre of the search button (world px): where the press lands. */
+export const searchButtonCenter = (bar: BarGeo) => ({ x: bar.x + bar.w - bar.btnW / 2, y: bar.y + bar.h / 2 });
 
 /** Bottom of the headline block (world y), where the underline hangs. */
 export const headlineBottom = (l: CtaLayout) =>

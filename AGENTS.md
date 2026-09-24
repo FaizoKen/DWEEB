@@ -1597,8 +1597,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (DWEEB only, its real cover art) → Discord's launch splash → the Activity in the call, then the
   edits. Show ONE teammate joining the editing (Free rooms allow 2 co-editors — the other call
   members stay in the call). The outro promise is “Build better Discord
-  messages” and its action is a Google-style search bar for “DWEEB Discord builder,” with the
-  G at the far end. The editor act (reveal → send) is one continuous take joined by `hold`
+  messages” and its action is a Google-style search bar for “DWEEB Discord bot” — the Google G
+  at its start, the search button (a magnifier) at its far end, which is what gets pressed
+  (maintainer, 2026-09-24; was “DWEEB Discord builder” with the G as the button). The editor
+  act (reveal → send) is one continuous take joined by `hold`
   cuts whose boundary frames are pinned in `video/src/scenes/contracts.ts` and checked by
   `npm run qa:cuts`; the vertical cut is portrait-native (a 540×960 stage, locked camera),
   never a crop of the landscape. On-screen product strings follow the app source (tree labels

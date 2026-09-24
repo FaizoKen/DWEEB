@@ -127,12 +127,17 @@ export const ModalCard: React.FC<{
   height?: number | string;
   reveal?: number;
   sheet?: boolean;
+  /**
+   * The phone dialog: still a rounded card, with Modal.module.css's ≤ 640 px
+   * paddings (header 12/14, body 14) instead of the desktop 16/20 and 20.
+   */
+  compact?: boolean;
   headerExtra?: React.ReactNode;
   footer?: React.ReactNode;
   bodyGap?: number;
   children: React.ReactNode;
   style?: React.CSSProperties;
-}> = ({ title, titleIcon, width = "100%", height, reveal = 1, sheet = false, headerExtra, footer, bodyGap = 16, children, style }) => {
+}> = ({ title, titleIcon, width = "100%", height, reveal = 1, sheet = false, compact = false, headerExtra, footer, bodyGap = 16, children, style }) => {
   const { u } = useUi();
   if (reveal <= 0.001) return null;
   const r = Math.min(1, reveal);
@@ -168,7 +173,7 @@ export const ModalCard: React.FC<{
           alignItems: "center",
           justifyContent: "space-between",
           gap: u(10),
-          padding: sheet ? `${u(8)}px ${u(16)}px ${u(12)}px` : `${u(16)}px ${u(20)}px`,
+          padding: sheet ? `${u(8)}px ${u(16)}px ${u(12)}px` : compact ? `${u(12)}px ${u(14)}px` : `${u(16)}px ${u(20)}px`,
           borderBottom: `${u(1)}px solid ${COLORS.border}`,
           flexShrink: 0,
         }}
@@ -196,7 +201,7 @@ export const ModalCard: React.FC<{
       </div>
       <div
         style={{
-          padding: sheet ? `${u(14)}px ${u(16)}px` : u(20),
+          padding: sheet ? `${u(14)}px ${u(16)}px` : compact ? u(14) : u(20),
           display: "flex",
           flexDirection: "column",
           gap: u(bodyGap),

@@ -316,9 +316,14 @@ export type PortraitEditorProps = {
   treeScroll?: number;
   /** Stat pills shown in the sheet header. */
   pills?: { components: number; chars: number; ok?: number; tick?: { components?: number; chars?: number } } | null;
-  /** A second sheet over everything (AI / Add an action / Send message), bottom-anchored. */
+  /** A second sheet over everything (AI / Add an action), bottom-anchored. */
   sheet?: React.ReactNode;
-  /** Scrim behind that sheet, 0..1. */
+  /**
+   * A dialog over everything, centred on the surface ("Send message"): the
+   * product's phone Modal — a card inset by the backdrop's 16 px, not a sheet.
+   */
+  modal?: React.ReactNode;
+  /** Scrim behind that sheet / dialog, 0..1. */
   scrim?: number;
   /**
    * 0..1 per part, default settled — the vertical reveal builds the editor
@@ -349,6 +354,7 @@ export const PortraitEditor: React.FC<PortraitEditorProps> = ({
   treeScroll = 0,
   pills,
   sheet,
+  modal,
   scrim = 0,
   assembly,
   overlay,
@@ -414,6 +420,21 @@ export const PortraitEditor: React.FC<PortraitEditorProps> = ({
           </PortraitSheet>
           {scrim > 0.001 && <div style={{ position: "absolute", inset: 0, background: `rgba(0,0,0,${(0.55 * scrim).toFixed(3)})` }} />}
           {sheet && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>{sheet}</div>}
+          {modal && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                boxSizing: "border-box",
+                padding: 16 * k,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {modal}
+            </div>
+          )}
           {overlay}
         </div>
       </DiscordScale>

@@ -10,7 +10,7 @@ import { withAlpha } from "../../lib/color";
  * Why a local copy: the shared Mascot drifts its pupils on a sine and blinks
  * every 80 frames, whatever the scene is doing — on the end card that means a
  * blink landing inside the settled hold (and possibly on the cover still). Here
- * the mascot watches the action instead: the query being typed, the G being
+ * the mascot watches the action instead: the query being typed, the search button
  * pressed, then the result it found. (Handoff: a `gaze`/`blink` prop on the
  * shared Mascot would let this file go.)
  */

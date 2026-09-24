@@ -22,8 +22,8 @@ import { COLORS } from "../theme";
 import { FPS, MUSIC_MARKS, TOTAL, TRANSITION_FRAMES, at, seqFrom, speechEnd } from "../timeline";
 import { GazeMascot } from "./cta/GazeMascot";
 import { Headline, SLAM_LANDS_AFTER, SLAM_SETTLES_AFTER, headlineWordCount } from "./cta/Headline";
-import { LAYOUT_L, LAYOUT_V, gCenter, headlineBottom, zoomAbout, type CtaLayout } from "./cta/layout";
-import { G_RIPPLE_FRAMES, QUERY, ResultCard, SearchBar } from "./cta/Search";
+import { LAYOUT_L, LAYOUT_V, headlineBottom, searchButtonCenter, zoomAbout, type CtaLayout } from "./cta/layout";
+import { BUTTON_RIPPLE_FRAMES, QUERY, ResultCard, SearchBar } from "./cta/Search";
 
 /**
  * CTA — the end card, entered by a HARD CUT on the film's climax.
@@ -34,10 +34,11 @@ import { G_RIPPLE_FRAMES, QUERY, ResultCard, SearchBar } from "./cta/Search";
  * and BUILD slams onto its baseline. (The layer is not mounted before the cut,
  * so nothing here may start earlier.) The promise then lands word by word with
  * the narrator — BETTER · DISCORD · MESSAGES. — and the action follows the
- * story lock: the mascot pops up behind a Google-style search bar, "DWEEB
- * Discord builder" types itself under "Start free today", the G at the far end
- * is pressed as the line ends, and the result card lands on the score's outro
- * crash. Then nothing moves for more than two seconds before the fade.
+ * story lock: the mascot pops up behind a Google-style search bar (the Google
+ * G at its start), "DWEEB Discord bot" types itself under "Start free today",
+ * the search button at the far end is pressed as the line ends, and the result
+ * card lands on the score's outro crash. Then nothing moves for more than two
+ * seconds before the fade.
  *
  * No caption: the end card is the type.
  */
@@ -71,9 +72,9 @@ const BAR_IN = at("cta", "messages", { offset: 5 });
 const MASCOT_POP = at("cta", "messages", { edge: "end", offset: -4 });
 /** The query types itself under "Start free today", from the breath before "Start". */
 const TYPE_START = at("cta", "Start", { offset: -10 });
-/** The G is pressed once the line has ended (the bar's fourth beat here). */
+/** The search button is pressed once the line has ended (the bar's fourth beat here). */
 const PRESS = speechEnd("cta") + 2;
-/** The pointer has reached the G and hovers it this long before pressing. */
+/** The pointer has reached the search button and hovers it this long before pressing. */
 const ARRIVE = PRESS - 6;
 /**
  * The result card lands on the score's outro crash (MUSIC_MARKS.ending) — the
@@ -100,9 +101,7 @@ const SETTLED = RESULT_LAND;
  * word, a beat longer across the spaces — a person typing, not a ticker. One
  * key per frame at most, so every key gets its own tick.
  */
-const KEY_GAPS = [
-  0, 1.5, 1.5, 1.25, 1.5, 2, 2, 1.25, 1.25, 1.5, 1.25, 1.25, 1.5, 2, 2, 1.25, 1.25, 1.25, 1.25, 1.5, 1.25,
-];
+const KEY_GAPS = [0, 1.5, 1.5, 1.25, 1.5, 2, 2, 1.25, 1.25, 1.5, 1.25, 1.25, 1.5, 2, 2, 1.25, 1.5];
 const KEYS: number[] = [];
 KEY_GAPS.reduce((elapsed, gap) => {
   KEYS.push(TYPE_START + Math.round(elapsed + gap));
@@ -133,7 +132,7 @@ const FADE_START = TOTAL - 20 - CTA_SEQ;
   if (BAR_IN <= WORD_STARTS[3]) problems.push("the search bar rises before MESSAGES. has started");
   if (TYPE_START < BAR_IN + 12)
     problems.push(`typing (${TYPE_START}) starts before the bar has landed (${BAR_IN + 12})`);
-  if (TYPE_END > ARRIVE - 2) problems.push(`typing ends at ${TYPE_END}, after the pointer reaches the G (${ARRIVE})`);
+  if (TYPE_END > ARRIVE - 2) problems.push(`typing ends at ${TYPE_END}, after the pointer reaches the search button (${ARRIVE})`);
   if (RESULT_IN < PRESS + PRESS_FRAMES)
     problems.push(`the result (${RESULT_IN}) would appear before the press releases (${PRESS + PRESS_FRAMES})`);
   const lateMovers = {
@@ -141,7 +140,7 @@ const FADE_START = TOTAL - 20 - CTA_SEQ;
     "the underline": UNDERLINE_IN + UNDERLINE_FRAMES,
     "the pointer": POINTER_GONE,
     "the blink": PRESS + 5,
-    "the G's ink ripple": PRESS + G_RIPPLE_FRAMES,
+    "the search button's ripple": PRESS + BUTTON_RIPPLE_FRAMES,
   };
   for (const [what, done] of Object.entries(lateMovers)) {
     if (done > SETTLED) problems.push(`${what} still moves at ${done}, after the end card settles (${SETTLED})`);
@@ -170,27 +169,27 @@ const SHOTS_V = shotsFor(LAYOUT_V);
 
 /* ── Pointer (landscape arrow / vertical touch) ────────────────────────── */
 
-const G_L = gCenter(LAYOUT_L.bar);
-const G_V = gCenter(LAYOUT_V.bar);
-/** The arrow glides in from the lower right and rests with its tip on the G. */
+const BTN_L = searchButtonCenter(LAYOUT_L.bar);
+const BTN_V = searchButtonCenter(LAYOUT_V.bar);
+/** The arrow glides in from the lower right and rests with its tip on the search button. */
 const POINTER_L: Waypoint[] = [
-  { f: PRESS - 24, x: G_L.x + 210, y: G_L.y + 250 },
-  { f: ARRIVE, x: G_L.x + 4, y: G_L.y + 3 },
-  { f: PRESS, x: G_L.x + 4, y: G_L.y + 3, press: true },
+  { f: PRESS - 24, x: BTN_L.x + 210, y: BTN_L.y + 250 },
+  { f: ARRIVE, x: BTN_L.x + 4, y: BTN_L.y + 3 },
+  { f: PRESS, x: BTN_L.x + 4, y: BTN_L.y + 3, press: true },
 ];
 const POINTER_L_ON: [number, number][] = [[PRESS - 24, POINTER_GONE]];
-/** A fingertip settles onto the G and taps it. */
+/** A fingertip settles onto the search button and taps it. */
 const POINTER_V: Waypoint[] = [
-  { f: PRESS - 8, x: G_V.x + 14, y: G_V.y + 22 },
-  { f: PRESS - 1, x: G_V.x, y: G_V.y },
-  { f: PRESS, x: G_V.x, y: G_V.y, press: true },
+  { f: PRESS - 8, x: BTN_V.x + 14, y: BTN_V.y + 22 },
+  { f: PRESS - 1, x: BTN_V.x, y: BTN_V.y },
+  { f: PRESS, x: BTN_V.x, y: BTN_V.y, press: true },
 ];
 const POINTER_V_ON: [number, number][] = [[PRESS - 8, POINTER_GONE - 1]];
 
 /* ── Mascot gaze (pupil offsets in the drawing's 512-unit space) ───────── */
 
 type Gaze = { f: number; x: number; y: number };
-/** It pops up looking at you, watches the query type, the G being pressed, then the result it found. */
+/** It pops up looking at you, watches the query type, the search being sent, then the result it found. */
 const GAZE: Gaze[] = [
   { f: MASCOT_POP, x: 0, y: -4 },
   { f: TYPE_START, x: 0, y: -4 },
@@ -297,16 +296,16 @@ export const SceneCta: React.FC = () => {
   // Mascot pop, from behind the bar.
   const popP = frame < MASCOT_POP ? 0 : settle(spring({ frame: frame - MASCOT_POP, fps, config: POP_SPRING }));
 
-  // Pointer and the G's hover / press.
+  // Pointer and the search button's hover / press.
   const pose = cursorAt(frame, vert ? POINTER_V : POINTER_L);
   const pointerOpacity = vert
     ? cursorOpacity(frame, POINTER_V_ON, { fadeIn: 4, fadeOut: 5 })
     : cursorOpacity(frame, POINTER_L_ON, { fadeIn: 6, fadeOut: 6 });
-  const g = vert ? G_V : G_L;
-  const overG =
-    !vert && pointerOpacity > 0.5 && Math.abs(pose.x - g.x) < l.bar.gW / 2 && Math.abs(pose.y - g.y) < l.bar.h / 2;
+  const btn = vert ? BTN_V : BTN_L;
+  const overButton =
+    !vert && pointerOpacity > 0.5 && Math.abs(pose.x - btn.x) < l.bar.btnW / 2 && Math.abs(pose.y - btn.y) < l.bar.h / 2;
   const pressAge = frame - PRESS;
-  const gDown = pressAge < 0 ? 0 : pressAge < PRESS_FRAMES - 1 ? 1 : pressAge < PRESS_FRAMES ? 0.5 : 0;
+  const btnDown = pressAge < 0 ? 0 : pressAge < PRESS_FRAMES - 1 ? 1 : pressAge < PRESS_FRAMES ? 0.5 : 0;
 
   // Result card: unrolls from under the bar and lands on RESULT_LAND.
   const res = frame < RESULT_IN ? -1 : RESULT_EASE(Math.min(1, (frame - RESULT_IN) / RESULT_FRAMES));
@@ -400,9 +399,9 @@ export const SceneCta: React.FC = () => {
                 geo={l.bar}
                 typed={QUERY.slice(0, typedCount)}
                 caret={caret}
-                gHover={overG ? 1 : 0}
-                gDown={gDown}
-                gRipple={pressAge >= 0 && pressAge < G_RIPPLE_FRAMES ? pressAge : null}
+                btnHover={overButton ? 1 : 0}
+                btnDown={btnDown}
+                btnRipple={pressAge >= 0 && pressAge < BUTTON_RIPPLE_FRAMES ? pressAge : null}
               />
             </div>
           )}
@@ -456,7 +455,7 @@ export const SceneCta: React.FC = () => {
           <Audio src={staticFile(sfxVariant("tick", i))} volume={VOL.tick} />
         </Sequence>
       ))}
-      <Sequence from={PRESS} durationInFrames={SFX_FRAMES.click} name="click:G">
+      <Sequence from={PRESS} durationInFrames={SFX_FRAMES.click} name="click:search">
         <Audio src={staticFile(sfxVariant("click", 0))} volume={VOL.click} />
       </Sequence>
       {/* The result's chime, in the pause after "today". */}

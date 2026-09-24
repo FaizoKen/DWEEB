@@ -99,7 +99,11 @@ export type SendPanelProps = {
   tabs?: string[];
   lead?: boolean;
   note?: boolean;
-  layout?: "popover" | "sheet";
+  /**
+   * "popover": the desktop dialog card; "dialog": the phone dialog (a centred
+   * card with the product's ≤ 640 px paddings); "sheet": a bottom sheet.
+   */
+  layout?: "popover" | "dialog" | "sheet";
   width?: number | string;
   reveal?: number;
 };
@@ -124,12 +128,14 @@ export const SendPanel: React.FC<SendPanelProps> = ({
 }) => {
   const { u } = useUi();
   const sheet = layout === "sheet";
+  const phone = sheet || layout === "dialog";
   return (
     <ModalCard
       title={SEND.title}
       width={width}
       reveal={reveal}
       sheet={sheet}
+      compact={layout === "dialog"}
       bodyGap={12}
       footer={
         <div
@@ -138,7 +144,7 @@ export const SendPanel: React.FC<SendPanelProps> = ({
             alignItems: "center",
             justifyContent: "space-between",
             gap: u(10),
-            padding: sheet ? `${u(12)}px ${u(16)}px ${u(16)}px` : `${u(12)}px ${u(20)}px`,
+            padding: sheet ? `${u(12)}px ${u(16)}px ${u(16)}px` : phone ? `${u(12)}px ${u(14)}px` : `${u(12)}px ${u(20)}px`,
             borderTop: `${u(1)}px solid ${COLORS.border}`,
             background: COLORS.bgElevated,
           }}
@@ -173,7 +179,7 @@ export const SendPanel: React.FC<SendPanelProps> = ({
           <span
             key={t}
             style={{
-              padding: `${u(6)}px ${u(sheet ? 8 : 12)}px`,
+              padding: `${u(6)}px ${u(phone ? 8 : 12)}px`,
               borderRadius: u(6),
               whiteSpace: "nowrap",
               color: i === 0 ? COLORS.text : COLORS.textMuted,

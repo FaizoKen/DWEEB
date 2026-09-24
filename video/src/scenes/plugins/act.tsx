@@ -246,7 +246,7 @@ export type ActFrameProps = {
   /* landscape */
   /** The sparkle FAB's press (the assistant beat opens the dock from it). */
   sparklePressed?: boolean;
-  /** Whole-window overlay (the "Add an action" dialog, the Send popover). */
+  /** Whole-window overlay (the "Add an action" and "Send message" dialogs over their backdrop). */
   overlay?: React.ReactNode;
   /* portrait */
   /**
@@ -255,8 +255,10 @@ export type ActFrameProps = {
    * opens on cut A's higher detent, passes another (contracts.ts).
    */
   sheetTop?: number;
-  /** A bottom sheet over the editor ("Add an action", "Send message"). */
+  /** A bottom sheet over the editor ("Add an action"). */
   sheet?: React.ReactNode;
+  /** A dialog centred over the editor ("Send message"), the product's phone Modal. */
+  modal?: React.ReactNode;
   scrim?: number;
   /**
    * Drawn in the preview's own layer, positioned from the message's top-left
@@ -363,6 +365,7 @@ export const PortraitAct: React.FC<ActFrameProps> = ({
   opacity,
   sheetTop = EDITOR_V.sheetTop,
   sheet,
+  modal,
   scrim = 0,
   previewOverlay,
   assembly,
@@ -415,6 +418,7 @@ export const PortraitAct: React.FC<ActFrameProps> = ({
             sheet
           )
         }
+        modal={modal}
         scrim={scrim}
         assembly={assembly}
       />
@@ -471,19 +475,28 @@ export const FloatingCard: React.FC<{
   lift?: number;
   scale?: number;
   opacity?: number;
+  /**
+   * 0..1 darkening, for a take-over under a fading dialog backdrop: the copy
+   * must match the dimmed card it replaces, then brighten as the backdrop clears.
+   */
+  dim?: number;
   /** World-y band the card shows through (the portrait take-over: under the bar, above the sheet). */
   clip?: { top: number; bottom: number };
   preview: CampaignPreviewProps;
-}> = ({ x, y, width, dk, lift = 0, scale = 1, opacity, clip, preview }) => {
+}> = ({ x, y, width, dk, lift = 0, scale = 1, opacity, dim = 0, clip, preview }) => {
   const l = clamp01(lift);
   const s = scale * (1 + 0.025 * l);
   if (clip) {
     return (
       <div style={{ position: "absolute", left: 0, right: 0, top: clip.top, height: Math.max(0, clip.bottom - clip.top), overflow: "hidden", zIndex: 20 }}>
-        <FloatingCard x={x} y={y - clip.top} width={width} dk={dk} lift={lift} scale={scale} opacity={opacity} preview={preview} />
+        <FloatingCard x={x} y={y - clip.top} width={width} dk={dk} lift={lift} scale={scale} opacity={opacity} dim={dim} preview={preview} />
       </div>
     );
   }
+  const filters = [
+    dim > 0.001 ? `brightness(${(1 - clamp01(dim)).toFixed(3)})` : "",
+    l > 0.01 ? `drop-shadow(0 ${(26 * l).toFixed(1)}px ${(40 * l).toFixed(1)}px rgba(0,0,0,${(0.55 * l).toFixed(3)}))` : "",
+  ].filter(Boolean);
   return (
     <div
       style={{
@@ -494,7 +507,7 @@ export const FloatingCard: React.FC<{
         zIndex: 20,
         transformOrigin: "50% 30%",
         transform: s !== 1 ? `scale(${s.toFixed(4)})` : undefined,
-        filter: l > 0.01 ? `drop-shadow(0 ${(26 * l).toFixed(1)}px ${(40 * l).toFixed(1)}px rgba(0,0,0,${(0.55 * l).toFixed(3)}))` : undefined,
+        filter: filters.length ? filters.join(" ") : undefined,
         ...fade(opacity),
       }}
     >

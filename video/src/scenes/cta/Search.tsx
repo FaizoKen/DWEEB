@@ -7,13 +7,14 @@ import { GazeMascot } from "./GazeMascot";
 import type { BarGeo, ResultGeo } from "./layout";
 
 /**
- * The outro's action (story lock): a Google-style search bar that types
- * "DWEEB Discord builder" and is sent with the G at its far end, then the
- * result it finds. Both are film devices, drawn in world px from the layout
- * table so the pointer's aim (layout.gCenter) always matches the drawing.
+ * The outro's action (story lock): a Google-style search bar — the Google G at
+ * its start — that types "DWEEB Discord bot" and is sent with the search
+ * button (a magnifier) at its far end, then the result it finds. Both are film
+ * devices, drawn in world px from the layout table so the pointer's aim
+ * (layout.searchButtonCenter) always matches the drawing.
  */
 
-export const QUERY = "DWEEB Discord builder";
+export const QUERY = "DWEEB Discord bot";
 
 /** Inline Google G: self-contained and crisp at any zoom (no font or network). */
 const GoogleG: React.FC<{ size: number }> = ({ size }) => (
@@ -37,11 +38,13 @@ const GoogleG: React.FC<{ size: number }> = ({ size }) => (
   </svg>
 );
 
-const G_REST = "#f8f9fa";
-const G_HOVER = "#eef0f3";
-const G_DOWN = "#e1e4e8";
-/** Frames the G's ink ripple spreads and fades (it outlives the 4-frame press). */
-export const G_RIPPLE_FRAMES = 12;
+const BTN_REST = "#f8f9fa";
+const BTN_HOVER = "#eef0f3";
+const BTN_DOWN = "#e1e4e8";
+/** Google blue, for the search button's magnifier (it matches the G's blue). */
+const SEARCH_BLUE = "#4285f4";
+/** Frames the button's ink ripple spreads and fades (it outlives the 4-frame press). */
+export const BUTTON_RIPPLE_FRAMES = 12;
 
 export const SearchBar: React.FC<{
   geo: BarGeo;
@@ -49,18 +52,18 @@ export const SearchBar: React.FC<{
   typed: string;
   /** Caret drawn this frame (the scene decides solid / blink / gone). */
   caret: boolean;
-  /** Pointer over the G (0–1, eased by the scene). */
-  gHover: number;
-  /** 0 → 1 while the G is held down (the press window), else 0. */
-  gDown: number;
-  /** Frames since the G was pressed while its ripple runs, else null. */
-  gRipple?: number | null;
-}> = ({ geo, typed, caret, gHover, gDown, gRipple = null }) => {
-  const gBg = gDown > 0 ? mixColor(G_HOVER, G_DOWN, gDown) : mixColor(G_REST, G_HOVER, gHover);
+  /** Pointer over the search button (0–1, eased by the scene). */
+  btnHover: number;
+  /** 0 → 1 while the search button is held down (the press window), else 0. */
+  btnDown: number;
+  /** Frames since the search button was pressed while its ripple runs, else null. */
+  btnRipple?: number | null;
+}> = ({ geo, typed, caret, btnHover, btnDown, btnRipple = null }) => {
+  const btnBg = btnDown > 0 ? mixColor(BTN_HOVER, BTN_DOWN, btnDown) : mixColor(BTN_REST, BTN_HOVER, btnHover);
   // The button's own answer to the press (Material's ink ripple, as Google's
   // controls do): a grey disc that spreads across the button and fades. The
   // pointer's ripple alone is a thin ring that barely shows on a white button.
-  const ink = gRipple === null ? null : Math.min(1, gRipple / G_RIPPLE_FRAMES);
+  const ink = btnRipple === null ? null : Math.min(1, btnRipple / BUTTON_RIPPLE_FRAMES);
   return (
     <div
       style={{
@@ -78,7 +81,7 @@ export const SearchBar: React.FC<{
         fontFamily: INTER,
       }}
     >
-      <Icon name="search" size={geo.icon} color="#5f6368" />
+      <GoogleG size={geo.logo} />
       <div
         style={{
           flex: 1,
@@ -105,17 +108,18 @@ export const SearchBar: React.FC<{
           }}
         />
       </div>
+      {/* The search button: the magnifier in its own segment at the far end. */}
       <div
         style={{
           position: "relative",
-          width: geo.gW,
+          width: geo.btnW,
           alignSelf: "stretch",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           borderLeft: "1px solid #e2e5e9",
-          background: gBg,
+          background: btnBg,
           overflow: "hidden",
         }}
       >
@@ -125,10 +129,10 @@ export const SearchBar: React.FC<{
               position: "absolute",
               left: "50%",
               top: "50%",
-              width: geo.gW * 1.5,
-              height: geo.gW * 1.5,
-              marginLeft: -geo.gW * 0.75,
-              marginTop: -geo.gW * 0.75,
+              width: geo.btnW * 1.5,
+              height: geo.btnW * 1.5,
+              marginLeft: -geo.btnW * 0.75,
+              marginTop: -geo.btnW * 0.75,
               borderRadius: "50%",
               background: "rgba(60,64,67,.2)",
               transform: `scale(${(0.18 + 0.82 * (1 - (1 - ink) ** 3)).toFixed(4)})`,
@@ -139,10 +143,10 @@ export const SearchBar: React.FC<{
         <div
           style={{
             position: "relative",
-            transform: gDown > 0 ? `scale(${(1 - 0.1 * gDown).toFixed(4)})` : undefined,
+            transform: btnDown > 0 ? `scale(${(1 - 0.1 * btnDown).toFixed(4)})` : undefined,
           }}
         >
-          <GoogleG size={geo.gIcon} />
+          <Icon name="search" size={geo.btnIcon} color={SEARCH_BLUE} />
         </div>
       </div>
     </div>
