@@ -570,6 +570,21 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   reporting an empty field. `repairStructure` now fills both with `""` — the validator already
   says "Text display can't be empty" and "Link button needs a valid https:// URL" — and both
   derefs tolerate an absent value as the second layer.
+- **The validator checks where each component sits, not just its fields** (2026-09-24).
+  The import boundary takes any tree, so a button or menu at the top level or directly in a
+  Container, a thumbnail anywhere but a Section accessory, a nested Container, or a text
+  display in a row used to validate clean and then 400 at Discord on send. `placementIssue`
+  (validation.ts) and `placement_issue` (mcp/components.rs) now report `BUTTON_OUTSIDE_ROW` /
+  `SELECT_OUTSIDE_ROW` / `COMPONENT_MISPLACED` for each slot (top level, container child,
+  section text, accessory, row child), and a misplaced component still gets its own field
+  checks. A row child that isn't a button used to be validated *as a button*, so it was
+  blamed for a missing custom ID and label instead of for being in the row. **A type the
+  schema doesn't know is deliberately not flagged**: Discord adds component types, and this
+  code can't know where a new one is accepted, so blocking it could stop a send Discord would
+  take — same stance as the MCP module keeping unknown fields. Pinned by 13 corpus cases (one
+  per slot, plus the unknown type) and `validateMessage — component placement` in
+  validation.test.ts. The discord.js/discord.py code exports still skip a misplaced component
+  (their builders can't express one); the Code tab's validation notice now warns about it.
 - **An empty mention policy is intentional, never an omitted default** (2026-09-11).
   Discord's webhook/interaction default is user mentions only; the all-types default belongs
   to regular bot messages. `webhookMentionParse` drives both the editor chips and pre-send

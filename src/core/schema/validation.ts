@@ -32,11 +32,14 @@ import {
   isUserSelect,
 } from "./guards";
 import { LIMITS } from "./limits";
+import { COMPONENT_META } from "./metadata";
 import { countCharacters, countComponents, walk } from "./traversal";
 import {
   ButtonStyle,
+  ComponentType,
   type AnyComponent,
   type ButtonComponent,
+  type ComponentTypeValue,
   type EditorId,
   type SelectComponent,
   type UnfurledMediaItem,
@@ -177,7 +180,7 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
 
   validateMessageLevel(message, issues);
 
-  for (const top of message.components) validateNode(top, issues);
+  for (const top of message.components) validateNode(top, issues, "top");
 
   validateUniqueIds(message, issues);
 
@@ -331,7 +334,110 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
   }
 }
 
-function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
+/**
+ * Where a component sits, for {@link placementIssue}. Action-row children are
+ * checked inline by the row itself (the `"row"` case), so they never reach
+ * `validateNode`.
+ */
+type Slot = "top" | "container" | "section-text" | "accessory";
+
+/**
+ * Every component type this schema knows. Placement is only judged for these:
+ * a type from outside the set may be one Discord added later, and this can't
+ * know where Discord accepts it, so flagging it would block a send Discord
+ * might well take. Unknown types are left to Discord, as before.
+ */
+const KNOWN_TYPES: ReadonlySet<number> = new Set(Object.values(ComponentType));
+
+/**
+ * What Discord accepts in each place (Components V2 — the only kind of message
+ * DWEEB sends): a button or menu only ever sits in an action row (a button may
+ * also be a section's accessory), a thumbnail only as an accessory, a container
+ * never inside another. The editor can't build anything else, but the import
+ * boundary takes any tree — JSON import, share links, an AI reply, a peer's
+ * collab op, the MCP server's payloads — and a misplaced component used to pass
+ * validation and then 400 at Discord on send.
+ */
+const ALLOWED_IN: Record<Slot, ReadonlySet<number>> = {
+  top: new Set([
+    ComponentType.ActionRow,
+    ComponentType.Section,
+    ComponentType.TextDisplay,
+    ComponentType.MediaGallery,
+    ComponentType.File,
+    ComponentType.Separator,
+    ComponentType.Container,
+  ]),
+  container: new Set([
+    ComponentType.ActionRow,
+    ComponentType.Section,
+    ComponentType.TextDisplay,
+    ComponentType.MediaGallery,
+    ComponentType.File,
+    ComponentType.Separator,
+  ]),
+  "section-text": new Set([ComponentType.TextDisplay]),
+  accessory: new Set([ComponentType.Button, ComponentType.Thumbnail]),
+};
+
+const SLOT_WHERE: Record<Slot | "row", string> = {
+  top: "at the top level of a message",
+  container: "directly inside a container",
+  "section-text": "in a section's text",
+  accessory: "as a section's accessory",
+  row: "in an action row",
+};
+
+/** What to do about a misplaced component that is neither a button nor a menu. */
+function misplacedHint(type: number, slot: Slot | "row"): string | null {
+  if (type === ComponentType.Thumbnail) return "it can only be a section's accessory.";
+  if (type === ComponentType.TextInput) return "text inputs only work in modals.";
+  if (type === ComponentType.Container && slot === "container") {
+    return "containers can't be nested.";
+  }
+  if (slot === "row") return "a row holds buttons, or one menu.";
+  if (slot === "section-text") return "a section's text holds Text components only.";
+  if (slot === "accessory") return "the accessory is a thumbnail or a button.";
+  return null;
+}
+
+/**
+ * Why a component can't sit where it is, or null when Discord accepts it there
+ * (or when it's a type this schema doesn't know — see {@link KNOWN_TYPES}).
+ * Named in the tree's own words (`COMPONENT_META`), like the rest of the
+ * validator's messages.
+ */
+function placementIssue(
+  node: AnyComponent,
+  slot: Slot | "row",
+): { code: string; message: string } | null {
+  // Widened on purpose: the types say only known components are here, but an
+  // imported tree isn't bound by them — that is the whole point of this check.
+  const type: number = node.type;
+  if (!KNOWN_TYPES.has(type)) return null;
+  if (slot === "row" ? isButton(node) || isSelect(node) : ALLOWED_IN[slot].has(type)) return null;
+  const name = COMPONENT_META[type as ComponentTypeValue].label;
+  const where = SLOT_WHERE[slot];
+  if (isButton(node)) {
+    return {
+      code: "BUTTON_OUTSIDE_ROW",
+      message: `${name} can't sit ${where} — put it in an action row, or make it a section's accessory.`,
+    };
+  }
+  if (isSelect(node)) {
+    return {
+      code: "SELECT_OUTSIDE_ROW",
+      message: `${name} can't sit ${where} — put it in an action row of its own.`,
+    };
+  }
+  const hint = misplacedHint(type, slot);
+  return {
+    code: "COMPONENT_MISPLACED",
+    message: `${name} can't sit ${where}${hint ? ` — ${hint}` : "."}`,
+  };
+}
+
+function validateNode(node: AnyComponent, issues: ValidationIssue[], slot: Slot): void {
   if (node.id !== undefined && !Number.isInteger(node.id)) {
     issues.push({
       nodeId: node._id,
@@ -341,12 +447,18 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
     });
   }
 
+  // Placement first, then the component's own fields as usual: a misplaced
+  // button with no label should be told both, not fixed twice.
+  const misplaced = placementIssue(node, slot);
+  if (misplaced) issues.push({ nodeId: node._id, severity: "error", ...misplaced });
+
   // Buttons and selects are usually validated inside their action row, but a
   // Button can also appear as a Section *accessory* — which only reaches this
   // function via `validateNode(section.accessory)`. Without this dispatch an
   // accessory button's missing URL / custom_id / label would go unchecked and
   // Discord would reject the message on send. (Row children never recurse
-  // through here, so this never double-validates them.)
+  // through here, so this never double-validates them.) A misplaced one lands
+  // here too, and gets the same checks.
   if (isButton(node)) {
     validateButton(node, issues);
     return;
@@ -387,7 +499,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         message: `Container accent color must be a whole number from 0 to ${LIMITS.COLOR_MAX} (0xFFFFFF).`,
       });
     }
-    for (const child of node.components) validateNode(child, issues);
+    for (const child of node.components) validateNode(child, issues, "container");
     return;
   }
 
@@ -401,14 +513,14 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         message: `Section must contain ${LIMITS.SECTION_TEXTS_MIN}–${LIMITS.SECTION_TEXTS_MAX} text components.`,
       });
     }
-    for (const t of node.components) validateNode(t, issues);
+    for (const t of node.components) validateNode(t, issues, "section-text");
     // Guarded because a malformed tree must be *reported*, not crashed on (the
     // deref used to throw an uncaught TypeError). The import boundary refuses a
     // payload whose section has no accessory, so this only fires if such a tree
     // reaches the editor another way — and then it blocks send, which is right:
     // Discord rejects an accessory-less section.
     if (node.accessory) {
-      validateNode(node.accessory, issues);
+      validateNode(node.accessory, issues, "accessory");
     } else {
       issues.push({
         nodeId: node._id,
@@ -499,7 +611,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
           message: `Action row can hold at most ${LIMITS.ACTION_ROW_BUTTONS} buttons.`,
         });
       }
-      for (const child of node.components) {
+      for (const child of node.components as AnyComponent[]) {
         if (isSelect(child)) {
           issues.push({
             nodeId: node._id,
@@ -507,8 +619,13 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
             code: "ROW_SELECT_MIXED",
             message: "Buttons and selects cannot share the same action row.",
           });
+        } else if (isButton(child)) {
+          validateButton(child, issues);
         } else {
-          validateButton(child as ButtonComponent, issues);
+          // Anything else in a row (a text display, a thumbnail, a text input…)
+          // used to be validated *as a button*; Discord rejects the row.
+          const misplaced = placementIssue(child, "row");
+          if (misplaced) issues.push({ nodeId: child._id, severity: "error", ...misplaced });
         }
       }
     }

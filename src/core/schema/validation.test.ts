@@ -307,6 +307,148 @@ describe("validateMessage — selects", () => {
   });
 });
 
+// Only the editor keeps components where Discord accepts them. An imported tree
+// (JSON import, a share link, an AI reply, a peer's collab op) can hold a button
+// at the top level or a thumbnail inside a container; that used to validate
+// clean and then 400 at Discord on send.
+describe("validateMessage — component placement", () => {
+  const button = (id: string, over: Record<string, unknown> = {}): AnyComponent =>
+    ({
+      _id: id,
+      type: ComponentType.Button,
+      style: ButtonStyle.Primary,
+      label: "Go",
+      custom_id: `go-${id}`,
+      ...over,
+    }) as unknown as AnyComponent;
+  const menu = (id: string): AnyComponent =>
+    ({
+      _id: id,
+      type: ComponentType.StringSelect,
+      custom_id: `pick-${id}`,
+      options: [{ label: "One", value: "1" }],
+    }) as unknown as AnyComponent;
+  const thumb = (id: string): AnyComponent =>
+    ({
+      _id: id,
+      type: ComponentType.Thumbnail,
+      media: { url: "https://example.test/i.png" },
+    }) as unknown as AnyComponent;
+  const node = (id: string, type: number, fields: Record<string, unknown>): AnyComponent =>
+    ({ _id: id, type, ...fields }) as unknown as AnyComponent;
+
+  /** Every error as `code@nodeId`, so a test pins the component blamed too. */
+  function blamed(message: WebhookMessage): string[] {
+    return validateMessage(message)
+      .issues.filter((i) => i.severity === "error")
+      .map((i) => `${i.code}@${i.nodeId ?? ""}`)
+      .sort();
+  }
+
+  it("rejects a button at the top level", () => {
+    const result = validateMessage(msg([td("hi"), button("b")]));
+    expect(result.ok).toBe(false);
+    expect(blamed(msg([td("hi"), button("b")]))).toEqual(["BUTTON_OUTSIDE_ROW@b"]);
+  });
+
+  it("rejects a button placed directly in a container, and still checks its own fields", () => {
+    const container = node("c", ComponentType.Container, {
+      components: [td("hi"), button("b", { label: undefined })],
+    });
+    expect(blamed(msg([container]))).toEqual(["BUTTON_NO_LABEL@b", "BUTTON_OUTSIDE_ROW@b"]);
+  });
+
+  it("rejects a menu anywhere but an action row", () => {
+    const section = node("s", ComponentType.Section, {
+      components: [td("hi")],
+      accessory: menu("m2"),
+    });
+    expect(blamed(msg([menu("m1"), section]))).toEqual([
+      "SELECT_OUTSIDE_ROW@m1",
+      "SELECT_OUTSIDE_ROW@m2",
+    ]);
+  });
+
+  it("accepts a button or a thumbnail as a section's accessory", () => {
+    const withButton = node("s1", ComponentType.Section, {
+      components: [td("hi", "t1")],
+      accessory: button("b"),
+    });
+    const withThumb = node("s2", ComponentType.Section, {
+      components: [td("hi", "t2")],
+      accessory: thumb("th"),
+    });
+    expect(blamed(msg([withButton, withThumb]))).toEqual([]);
+  });
+
+  it("rejects a thumbnail anywhere but a section's accessory", () => {
+    const container = node("c", ComponentType.Container, { components: [thumb("th2")] });
+    expect(blamed(msg([thumb("th1"), container]))).toEqual([
+      "COMPONENT_MISPLACED@th1",
+      "COMPONENT_MISPLACED@th2",
+    ]);
+  });
+
+  it("rejects a nested container, and still checks what's inside it", () => {
+    const inner = node("inner", ComponentType.Container, { components: [td("  ", "t-empty")] });
+    const outer = node("outer", ComponentType.Container, { components: [inner] });
+    expect(blamed(msg([outer]))).toEqual(["COMPONENT_MISPLACED@inner", "TEXT_EMPTY@t-empty"]);
+  });
+
+  // A row child that isn't a button used to be validated *as a button*, so a
+  // text display in a row read "Button needs a custom ID" — about a button
+  // that doesn't exist — and nothing said the row itself was wrong.
+  it("rejects anything in a row that isn't a button or a menu, without treating it as a button", () => {
+    const row = node("row", ComponentType.ActionRow, {
+      components: [button("b"), td("hi", "t-row")],
+    });
+    expect(blamed(msg([row]))).toEqual(["COMPONENT_MISPLACED@t-row"]);
+  });
+
+  it("rejects anything but text in a section's text", () => {
+    const section = node("s", ComponentType.Section, {
+      components: [td("hi"), button("b")],
+      accessory: thumb("th"),
+    });
+    expect(blamed(msg([section]))).toEqual(["BUTTON_OUTSIDE_ROW@b"]);
+  });
+
+  it("rejects anything but a button or a thumbnail as a section's accessory", () => {
+    const section = node("s", ComponentType.Section, {
+      components: [td("hi")],
+      accessory: td("not an accessory", "t-acc"),
+    });
+    expect(blamed(msg([section]))).toEqual(["COMPONENT_MISPLACED@t-acc"]);
+  });
+
+  it("rejects a text input, which only works in a modal", () => {
+    const input = node("in", ComponentType.TextInput, {
+      custom_id: "name",
+      style: 1,
+      label: "Name",
+    });
+    const [issue] = validateMessage(msg([input])).issues;
+    expect(issue?.code).toBe("COMPONENT_MISPLACED");
+    expect(issue?.message).toMatch(/modal/);
+  });
+
+  // Discord adds component types; a type this schema doesn't know may be valid
+  // where it sits, so it is left for Discord to judge rather than blocked here.
+  it("leaves a component type it doesn't know to Discord", () => {
+    expect(validateMessage(msg([td("hi"), node("new", 99, {})])).issues).toEqual([]);
+  });
+
+  it("names the component in the editor's words", () => {
+    const messages = validateMessage(msg([thumb("th"), menu("m")])).issues.map((i) => i.message);
+    expect(messages).toContain(
+      "Thumbnail can't sit at the top level of a message — it can only be a section's accessory.",
+    );
+    expect(messages).toContain(
+      "Options menu can't sit at the top level of a message — put it in an action row of its own.",
+    );
+  });
+});
+
 describe("validateMessage — media & files", () => {
   it("rejects media with neither URL nor attachment_id", () => {
     const section = {

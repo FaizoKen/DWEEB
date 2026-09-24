@@ -460,6 +460,84 @@ function buildCorpus(): CorpusCase[] {
     }),
   );
 
+  // Placement. The editor can't build any of these, but a pasted payload — or a
+  // model's — can, and each used to validate clean and then 400 at Discord. One
+  // case per slot a component can be misplaced into, so a port that checks only
+  // some of them fails by name; a misplaced component still gets its own checks.
+  cases.push(record("button-at-top-level", { components: [text("hi"), actionButton()] }));
+  cases.push(
+    record("button-directly-in-container", {
+      components: [
+        { type: ComponentType.Container, components: [text("hi"), linkButton({ url: "nope" })] },
+      ],
+    }),
+  );
+  cases.push(
+    record("button-in-section-text", {
+      components: [
+        {
+          type: ComponentType.Section,
+          components: [text("hi"), actionButton()],
+          accessory: thumbnail(),
+        },
+      ],
+    }),
+  );
+  cases.push(record("select-at-top-level", { components: [stringSelect()] }));
+  cases.push(
+    record("select-directly-in-container", {
+      components: [
+        {
+          type: ComponentType.Container,
+          components: [{ type: ComponentType.UserSelect, custom_id: "who" }],
+        },
+      ],
+    }),
+  );
+  cases.push(
+    record("select-as-section-accessory", {
+      components: [
+        { type: ComponentType.Section, components: [text("hi")], accessory: stringSelect() },
+      ],
+    }),
+  );
+  cases.push(record("thumbnail-at-top-level", { components: [thumbnail()] }));
+  cases.push(
+    record("container-nested", {
+      components: [
+        {
+          type: ComponentType.Container,
+          components: [{ type: ComponentType.Container, components: [text("   ")] }],
+        },
+      ],
+    }),
+  );
+  // A row child that isn't a button used to be validated *as a button*, blaming
+  // it for a missing custom_id and label instead of for being in the row.
+  cases.push(
+    record("row-holds-a-non-button", {
+      components: [row([actionButton(), text("hi"), thumbnail()])],
+    }),
+  );
+  cases.push(record("row-inside-a-row", { components: [row([row([actionButton()])])] }));
+  cases.push(
+    record("text-as-section-accessory", {
+      components: [{ type: ComponentType.Section, components: [text("hi")], accessory: text("x") }],
+    }),
+  );
+  cases.push(
+    record("text-input-in-a-message", {
+      components: [{ type: ComponentType.TextInput, custom_id: "name", style: 1, label: "Name" }],
+    }),
+  );
+  // A type the schema doesn't know may be one Discord added since, so both
+  // sides leave it for Discord to judge rather than block a send it may accept.
+  cases.push(
+    record("unknown-component-type-is-left-to-discord", {
+      components: [text("hi"), { type: 99 }],
+    }),
+  );
+
   // Buttons.
   cases.push(record("button-url-invalid", { components: [row([linkButton({ url: "nope" })])] }));
   cases.push(

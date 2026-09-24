@@ -51,6 +51,8 @@ pub mod component_type {
     pub const ACTION_ROW: u64 = 1;
     pub const BUTTON: u64 = 2;
     pub const STRING_SELECT: u64 = 3;
+    /// Modal-only: Discord rejects one anywhere in a message.
+    pub const TEXT_INPUT: u64 = 4;
     pub const USER_SELECT: u64 = 5;
     pub const ROLE_SELECT: u64 = 6;
     pub const MENTIONABLE_SELECT: u64 = 7;
@@ -620,7 +622,13 @@ pub fn validate(message: &Value, data: &SchemaData) -> Vec<Issue> {
     validate_message_level(message, limits, &mut issues);
 
     for (i, node) in components.iter().enumerate() {
-        validate_node(node, &format!("components[{i}]"), data, &mut issues);
+        validate_node(
+            node,
+            &format!("components[{i}]"),
+            Slot::Top,
+            data,
+            &mut issues,
+        );
     }
 
     validate_unique_ids(message, &mut issues);
@@ -731,7 +739,139 @@ fn validate_message_level(message: &Value, limits: &Limits, issues: &mut Vec<Iss
     }
 }
 
-fn validate_node(node: &Value, path: &str, data: &SchemaData, issues: &mut Vec<Issue>) {
+/// Where a component sits, for the placement rule. Action-row children are
+/// checked by the row itself (`Row`) and never reach [`validate_node`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Top,
+    Container,
+    SectionText,
+    Accessory,
+    Row,
+}
+
+impl Slot {
+    /// What Discord accepts here: a button or select only in an action row (a
+    /// button may also be a section's accessory), a thumbnail only as an
+    /// accessory, a container never inside another.
+    fn accepts(self, kind: u64) -> bool {
+        match self {
+            Slot::Top => matches!(
+                kind,
+                ct::ACTION_ROW
+                    | ct::SECTION
+                    | ct::TEXT_DISPLAY
+                    | ct::MEDIA_GALLERY
+                    | ct::FILE
+                    | ct::SEPARATOR
+                    | ct::CONTAINER
+            ),
+            Slot::Container => matches!(
+                kind,
+                ct::ACTION_ROW
+                    | ct::SECTION
+                    | ct::TEXT_DISPLAY
+                    | ct::MEDIA_GALLERY
+                    | ct::FILE
+                    | ct::SEPARATOR
+            ),
+            Slot::SectionText => kind == ct::TEXT_DISPLAY,
+            Slot::Accessory => matches!(kind, ct::BUTTON | ct::THUMBNAIL),
+            Slot::Row => kind == ct::BUTTON || is_select_type(kind),
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Slot::Top => "at the top level of a message",
+            Slot::Container => "directly inside a container",
+            Slot::SectionText => "in a section's `components` (its text)",
+            Slot::Accessory => "as a section's `accessory`",
+            Slot::Row => "in an action row",
+        }
+    }
+}
+
+/// Every type in [`component_type`]. Placement is only judged for these: a type
+/// outside the set may be one Discord added since, and this cannot know where
+/// Discord accepts it — so it is left for Discord to judge rather than blocked,
+/// the same stance as keeping fields this server does not know about.
+fn is_known_type(kind: u64) -> bool {
+    matches!(
+        kind,
+        ct::ACTION_ROW
+            | ct::BUTTON
+            | ct::STRING_SELECT
+            | ct::TEXT_INPUT
+            | ct::USER_SELECT
+            | ct::ROLE_SELECT
+            | ct::MENTIONABLE_SELECT
+            | ct::CHANNEL_SELECT
+            | ct::SECTION
+            | ct::TEXT_DISPLAY
+            | ct::THUMBNAIL
+            | ct::MEDIA_GALLERY
+            | ct::FILE
+            | ct::SEPARATOR
+            | ct::CONTAINER
+    )
+}
+
+/// The rule that fires when a component sits somewhere Discord rejects it, or
+/// `None` when it's accepted there (or its type is unknown). The editor cannot
+/// build a misplaced component, but a payload can hold one anywhere, and it used
+/// to validate clean and then 400 at Discord.
+fn placement_issue(kind: u64, slot: Slot, path: &str) -> Option<Issue> {
+    if !is_known_type(kind) || slot.accepts(kind) {
+        return None;
+    }
+    let place = slot.describe();
+    let path = Some(path.to_string());
+    if kind == ct::BUTTON {
+        return Some(Issue::error(
+            "BUTTON_OUTSIDE_ROW",
+            path,
+            format!("A button can't sit {place} — put it in an action row (type 1), or make it a section's `accessory`."),
+        ));
+    }
+    if is_select_type(kind) {
+        return Some(Issue::error(
+            "SELECT_OUTSIDE_ROW",
+            path,
+            format!("A select menu (type {kind}) can't sit {place} — put it in an action row (type 1) of its own."),
+        ));
+    }
+    let name = match kind {
+        ct::ACTION_ROW => "An action row",
+        ct::SECTION => "A section",
+        ct::TEXT_DISPLAY => "A text display",
+        ct::THUMBNAIL => "A thumbnail",
+        ct::MEDIA_GALLERY => "A media gallery",
+        ct::FILE => "A file",
+        ct::SEPARATOR => "A separator",
+        ct::CONTAINER => "A container",
+        ct::TEXT_INPUT => "A text input",
+        _ => "A component",
+    };
+    let hint = match (kind, slot) {
+        (ct::THUMBNAIL, _) => " — a thumbnail can only be a section's `accessory`.",
+        (ct::TEXT_INPUT, _) => " — text inputs only work in modals, never in a message.",
+        (ct::CONTAINER, Slot::Container) => " — containers can't be nested.",
+        (_, Slot::Row) => " — a row holds buttons, or exactly one select menu.",
+        (_, Slot::SectionText) => " — a section's `components` hold text displays (type 10) only.",
+        (_, Slot::Accessory) => {
+            " — the accessory must be a thumbnail (type 11) or a button (type 2)."
+        }
+        _ => ".",
+    };
+    Some(Issue::error(
+        "COMPONENT_MISPLACED",
+        path,
+        format!("{name} (type {kind}) can't sit {place}{hint}"),
+    ))
+}
+
+fn validate_node(node: &Value, path: &str, slot: Slot, data: &SchemaData, issues: &mut Vec<Issue>) {
     let limits = &data.limits;
 
     if let Some(id) = node.get("id") {
@@ -746,9 +886,16 @@ fn validate_node(node: &Value, path: &str, data: &SchemaData, issues: &mut Vec<I
 
     let kind = node_type(node);
 
-    // A button or select can appear as a Section accessory as well as inside a
-    // row, and only reaches this function by that route — without the dispatch
-    // an accessory button's missing URL would go unchecked.
+    // Placement first, then the component's own fields as usual: a misplaced
+    // button with no label should be told both, not fixed twice.
+    if let Some(issue) = placement_issue(kind, slot, path) {
+        issues.push(issue);
+    }
+
+    // A button can appear as a Section accessory as well as inside a row, and
+    // only reaches this function by that route — without the dispatch an
+    // accessory button's missing URL would go unchecked. A misplaced button or
+    // select lands here too, and gets the same checks.
     if kind == ct::BUTTON {
         validate_button(node, path, data, issues);
         return;
@@ -795,7 +942,13 @@ fn validate_node(node: &Value, path: &str, data: &SchemaData, issues: &mut Vec<I
                 }
             }
             for (i, child) in children.iter().enumerate() {
-                validate_node(child, &format!("{path}.components[{i}]"), data, issues);
+                validate_node(
+                    child,
+                    &format!("{path}.components[{i}]"),
+                    Slot::Container,
+                    data,
+                    issues,
+                );
             }
         }
         ct::SECTION => {
@@ -811,12 +964,22 @@ fn validate_node(node: &Value, path: &str, data: &SchemaData, issues: &mut Vec<I
                 ));
             }
             for (i, child) in texts.iter().enumerate() {
-                validate_node(child, &format!("{path}.components[{i}]"), data, issues);
+                validate_node(
+                    child,
+                    &format!("{path}.components[{i}]"),
+                    Slot::SectionText,
+                    data,
+                    issues,
+                );
             }
             match node.get("accessory").filter(|v| v.is_object()) {
-                Some(accessory) => {
-                    validate_node(accessory, &format!("{path}.accessory"), data, issues)
-                }
+                Some(accessory) => validate_node(
+                    accessory,
+                    &format!("{path}.accessory"),
+                    Slot::Accessory,
+                    data,
+                    issues,
+                ),
                 None => issues.push(Issue::error(
                     "SECTION_ACCESSORY_MISSING",
                     Some(path.to_string()),
@@ -935,14 +1098,21 @@ fn validate_node(node: &Value, path: &str, data: &SchemaData, issues: &mut Vec<I
                     ));
                 }
                 for (i, child) in children.iter().enumerate() {
-                    if is_select_type(node_type(child)) {
+                    let child_kind = node_type(child);
+                    let child_path = format!("{path}.components[{i}]");
+                    if is_select_type(child_kind) {
                         issues.push(Issue::error(
                             "ROW_SELECT_MIXED",
                             Some(path.to_string()),
                             "Buttons and selects cannot share the same action row.",
                         ));
-                    } else {
-                        validate_button(child, &format!("{path}.components[{i}]"), data, issues);
+                    } else if child_kind == ct::BUTTON {
+                        validate_button(child, &child_path, data, issues);
+                    } else if let Some(issue) = placement_issue(child_kind, Slot::Row, &child_path)
+                    {
+                        // Anything else used to be validated *as a button*, which
+                        // blamed it for a missing custom_id instead of its place.
+                        issues.push(issue);
                     }
                 }
             }

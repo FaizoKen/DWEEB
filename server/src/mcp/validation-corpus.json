@@ -3295,6 +3295,375 @@
       "warnings": []
     },
     {
+      "name": "button-at-top-level",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          },
+          {
+            "type": 2,
+            "style": 1,
+            "label": "Go",
+            "custom_id": "go"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_OUTSIDE_ROW",
+          "path": "components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-directly-in-container",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              },
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Open",
+                "url": "nope"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_OUTSIDE_ROW",
+          "path": "components[0].components[1]"
+        },
+        {
+          "code": "BUTTON_URL_INVALID",
+          "path": "components[0].components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-in-section-text",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "go"
+              }
+            ],
+            "accessory": {
+              "type": 11,
+              "media": {
+                "url": "https://example.test/i.png"
+              }
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_OUTSIDE_ROW",
+          "path": "components[0].components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-at-top-level",
+      "message": {
+        "components": [
+          {
+            "type": 3,
+            "custom_id": "pick",
+            "options": [
+              {
+                "label": "One",
+                "value": "1"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_OUTSIDE_ROW",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-directly-in-container",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": [
+              {
+                "type": 5,
+                "custom_id": "who"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_OUTSIDE_ROW",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-as-section-accessory",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              }
+            ],
+            "accessory": {
+              "type": 3,
+              "custom_id": "pick",
+              "options": [
+                {
+                  "label": "One",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_OUTSIDE_ROW",
+          "path": "components[0].accessory"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "thumbnail-at-top-level",
+      "message": {
+        "components": [
+          {
+            "type": 11,
+            "media": {
+              "url": "https://example.test/i.png"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "container-nested",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": [
+              {
+                "type": 17,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "   "
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "TEXT_EMPTY",
+          "path": "components[0].components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "row-holds-a-non-button",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "go"
+              },
+              {
+                "type": 10,
+                "content": "hi"
+              },
+              {
+                "type": 11,
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0].components[1]"
+        },
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0].components[2]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "row-inside-a-row",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Go",
+                    "custom_id": "go"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "text-as-section-accessory",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              }
+            ],
+            "accessory": {
+              "type": 10,
+              "content": "x"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0].accessory"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "text-input-in-a-message",
+      "message": {
+        "components": [
+          {
+            "type": 4,
+            "custom_id": "name",
+            "style": 1,
+            "label": "Name"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_MISPLACED",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "unknown-component-type-is-left-to-discord",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          },
+          {
+            "type": 99
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
       "name": "button-url-invalid",
       "message": {
         "components": [
