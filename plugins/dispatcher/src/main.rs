@@ -799,7 +799,11 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
+    let signed_by_primary = verified_key_hex.as_ref() == app.primary_key_hex;
+    let ttl_applies = !ttl_exempt(&interaction, custom_id, signed_by_primary);
+    if ttl_applies
+        && interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT)
+    {
         if let (Some(ttl_ms), Some(sent_ms)) = (app.component_ttl_ms, message_sent_ms(&interaction))
         {
             let message_id = interaction
@@ -817,8 +821,12 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
     // message's sliding TTL window — components and modal submits alike (a
     // submit carries the message it was opened from). Throttled in memory so
     // repeat clicks stay database-free, and best-effort: a lost bump only
-    // means slightly earlier expiry.
-    if let (Some(ttl_ms), Some(_)) = (app.component_ttl_ms, message_sent_ms(&interaction)) {
+    // means slightly earlier expiry. An exempt message has no window to keep.
+    if let (true, Some(ttl_ms), Some(_)) = (
+        ttl_applies,
+        app.component_ttl_ms,
+        message_sent_ms(&interaction),
+    ) {
         if let Some(message_id) = interaction.pointer("/message/id").and_then(Value::as_str) {
             if app
                 .activity_marks
@@ -988,6 +996,44 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         }
         _ => "The plugin behind this component didn't respond — try again shortly.",
     })
+}
+
+/// The controls plugins post *themselves*, with the shared bot token, and end
+/// the lives of themselves — Tickets' Close/Claim/Unclaim/Members row inside a
+/// ticket channel and Reopen/Delete on a locked one, which live exactly as
+/// long as the ticket does. Exact verbs, never a whole plugin: a Tickets
+/// *panel* (`tickets:open:`) is an ordinary DWEEB message and expires like one.
+const BOT_POSTED_CONTROL_PREFIXES: &[&str] = &[
+    "tickets:close:",
+    "tickets:claim:",
+    "tickets:unclaim:",
+    "tickets:members:",
+    "tickets:reopen:",
+    "tickets:delete:",
+];
+
+/// Whether a click is exempt from the component TTL. All three must hold:
+/// the message was posted by a bot itself (no `webhook_id` — every DWEEB
+/// user's message goes out through a webhook); the interaction was signed by
+/// the **primary** app, whose bot is the only one those controls are posted
+/// by (a guild's custom app holds its own bot token and could otherwise post
+/// never-expiring plain bot messages, sidestepping the paid never-expire
+/// slots); and the custom_id is one of the in-channel control verbs above.
+///
+/// The TTL bounds the lifetime traffic of the messages people post through
+/// DWEEB. It never had any business with a plugin's in-channel controls: a
+/// support ticket left idle for a week had its Close button disabled, so staff
+/// could only delete the channel by hand.
+fn ttl_exempt(interaction: &Value, custom_id: &str, signed_by_primary: bool) -> bool {
+    let Some(message) = interaction.get("message") else {
+        return false;
+    };
+    let bot_posted = message.get("webhook_id").is_none_or(Value::is_null);
+    signed_by_primary
+        && bot_posted
+        && BOT_POSTED_CONTROL_PREFIXES
+            .iter()
+            .any(|p| custom_id.starts_with(p))
 }
 
 /// When the message a component sits on was sent, from its snowflake id.
@@ -1870,6 +1916,120 @@ mod tests {
         // A permanent slot trumps the clock entirely.
         store.add("g", "c", "2", "u", 10).unwrap();
         assert!(!expired_by_ttl(&store, "2", sent, sent + 10 * ttl, ttl));
+    }
+
+    /// End to end through the real handler: a week-idle click on a ticket's
+    /// bot-posted Close button reaches the plugin, while the same custom_id on
+    /// a webhook message is disabled as expired, exactly as before.
+    #[tokio::test]
+    async fn an_idle_tickets_control_is_forwarded_not_disabled() {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        // The plugin: answers every forward so we can tell it was reached.
+        let upstream = axum::Router::new().route(
+            "/interactions",
+            post(|| async { Json(json!({ "type": 4, "data": { "content": "forwarded" } })) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+        let key = SigningKey::from_bytes(&[3u8; 32]);
+        let app = Arc::new(App {
+            primary_key: key.verifying_key(),
+            primary_key_hex: hex::encode(key.verifying_key().to_bytes()),
+            custom_keys: RwLock::new(HashMap::new()),
+            custom_verified: RwLock::new(HashSet::new()),
+            custom_apps_cap: 1,
+            forward_secret: None,
+            routes: vec![("tickets:".to_string(), base)],
+            component_ttl_ms: Some(7 * 86_400_000),
+            activity_marks: ActivityMarks::new(),
+            permanent_slots: 2,
+            store: store::Store::open(":memory:").unwrap(),
+            internal_token: None,
+            dashboard_url: String::new(),
+            shortlink_api: String::new(),
+            server_url: String::new(),
+            client: reqwest::Client::new(),
+        });
+
+        // A message sent on 2020-01-01: years past any TTL.
+        let old_id = ((1_577_836_800_000u64 - DISCORD_EPOCH_MS) << 22).to_string();
+        let click = |webhook: bool| {
+            let mut message = json!({
+                "id": old_id,
+                "author": { "id": "9", "bot": true },
+                "components": [{ "type": 1, "components": [
+                    { "type": 2, "style": 4, "label": "Close", "custom_id": "tickets:close:abc" }
+                ] }],
+            });
+            if webhook {
+                message["webhook_id"] = json!("55");
+            }
+            json!({
+                "type": TYPE_MESSAGE_COMPONENT,
+                "application_id": "app",
+                "token": "tok",
+                "data": { "custom_id": "tickets:close:abc", "component_type": 2 },
+                "message": message,
+            })
+            .to_string()
+        };
+        let send = |body: String| {
+            let app = app.clone();
+            let timestamp = "1700000000";
+            let signature = hex::encode(
+                key.sign(&[timestamp.as_bytes(), body.as_bytes()].concat())
+                    .to_bytes(),
+            );
+            let mut headers = HeaderMap::new();
+            headers.insert("x-signature-ed25519", signature.parse().unwrap());
+            headers.insert("x-signature-timestamp", timestamp.parse().unwrap());
+            async move {
+                let resp = interactions(State(app), headers, Bytes::from(body)).await;
+                let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<Value>(&bytes).unwrap()
+            }
+        };
+
+        let bot_posted = send(click(false)).await;
+        assert_eq!(bot_posted["data"]["content"], "forwarded", "{bot_posted}");
+
+        let via_webhook = send(click(true)).await;
+        assert_eq!(
+            via_webhook["type"], RESPONSE_UPDATE_MESSAGE,
+            "{via_webhook}"
+        );
+        assert_eq!(
+            via_webhook["data"]["components"][0]["components"][0]["disabled"],
+            true
+        );
+    }
+
+    #[test]
+    fn only_a_plugins_own_bot_posted_controls_skip_the_ttl() {
+        let bot_posted = json!({ "message": { "id": "1", "author": { "id": "9", "bot": true } } });
+        let via_webhook = json!({ "message": { "id": "1", "webhook_id": "55", "author": { "id": "55", "bot": true } } });
+        // A ticket's Close button, posted by the bot into the ticket channel.
+        assert!(ttl_exempt(&bot_posted, "tickets:close:abc", true));
+        assert!(ttl_exempt(&bot_posted, "tickets:reopen:abc", true));
+        // The same custom_id on a webhook message — a DWEEB user's panel, or
+        // someone crafting one — expires like everything else.
+        assert!(!ttl_exempt(&via_webhook, "tickets:close:abc", true));
+        // A panel is an ordinary message even when a bot posted it…
+        assert!(!ttl_exempt(&bot_posted, "tickets:open:abc", true));
+        // …and a guild's own custom app can't mint exempt controls with its
+        // own bot token: only the primary app posts them.
+        assert!(!ttl_exempt(&bot_posted, "tickets:close:abc", false));
+        // Another plugin's component on a bot message isn't covered.
+        assert!(!ttl_exempt(&bot_posted, "giveaway:abc", true));
+        // A null webhook_id is still no webhook; no message is no exemption.
+        let null_hook = json!({ "message": { "id": "1", "webhook_id": null } });
+        assert!(ttl_exempt(&null_hook, "tickets:claim:abc", true));
+        assert!(!ttl_exempt(&json!({}), "tickets:claim:abc", true));
     }
 
     #[test]

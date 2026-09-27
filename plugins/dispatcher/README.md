@@ -98,6 +98,19 @@ database-free.
 Modal submits are exempt: opening the modal already passed this gate, so a
 form a user is mid-way through filling in still lands.
 
+So are a plugin's **own control messages** — ones it posted with the shared
+bot token. The TTL bounds the traffic of what people post *through DWEEB*,
+which always goes out through a webhook; a ticket's Close/Claim/Members row
+lives exactly as long as its ticket, and used to be disabled after a week of
+quiet, leaving staff no way to close it but deleting the channel by hand. A
+click qualifies only when all three hold: the message has no `webhook_id`, the
+interaction was signed by the primary app (a guild's custom app holds its own
+bot token, and must not be able to post never-expiring messages), and the
+custom_id starts with one of the exact control verbs in
+`BOT_POSTED_CONTROL_PREFIXES` (`tickets:close:`, `…claim:`, `…unclaim:`,
+`…members:`, `…reopen:`, `…delete:`). A Tickets panel (`tickets:open:`) is an
+ordinary DWEEB message and expires like one.
+
 Granting a never-expire slot **revives** components disabled this way: the
 dispatcher can't edit the posted message itself (the grant click lands on an
 ephemeral reply, and it holds no webhook token), so it asks the proxy — which
