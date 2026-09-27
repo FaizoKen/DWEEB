@@ -18,6 +18,7 @@ import {
   isForeignCodeError,
   isNonCrashMessage,
   isStaleChunkMessage,
+  isUnhandledAbort,
   KIND_MAX_LENGTH,
   buildMetaFromHtml,
   moduleEntryFromHtml,
@@ -655,6 +656,54 @@ describe("isForeignCodeError", () => {
     ).toBe(false);
     expect(isForeignCodeError("boundary", "Script error.", "")).toBe(false);
     expect(isForeignCodeError("unhandledrejection", "Script error.", "")).toBe(false);
+  });
+});
+
+describe("isUnhandledAbort", () => {
+  const ABORT_REASON = "signal is aborted without reason";
+
+  it("recognises the 2026-09-25 rejection, which no frame rule can place", () => {
+    // What Chromium rejects with when a request is aborted without a reason —
+    // the stack stamped where `abort()` ran, not where the promise was dropped.
+    const reason = new DOMException(ABORT_REASON, "AbortError");
+    reason.stack = [
+      `AbortError: ${ABORT_REASON}`,
+      "    at https://dweeb.faizo.net/assets/ShareDialog-DkbBvq7V.js:1:7334",
+      "    at xe (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:14855)",
+      "    at Array.some (<anonymous>)",
+      "    at Ee (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:13650)",
+    ].join("\n");
+    const p = buildCrashPayload({
+      kind: "unhandledrejection",
+      error: reason,
+      path: "/",
+      surface: "web",
+      version: "1.2.0",
+      build: "e87dcd0497",
+    });
+    expect(p.message).toBe(ABORT_REASON);
+    expect(frameOrigin(p.stack)).toBe("page");
+    expect(isForeignCodeError("unhandledrejection", p.message, p.stack)).toBe(false);
+    expect(isUnhandledAbort("unhandledrejection", p.message)).toBe(true);
+  });
+
+  it("claims only a dropped rejection, so a report that took the app down still pages", () => {
+    for (const kind of CRASH_KINDS) {
+      expect(isUnhandledAbort(kind, ABORT_REASON), kind).toBe(kind === "unhandledrejection");
+    }
+  });
+
+  it("matches the exact wording, never another AbortError's", () => {
+    // Chromium's IndexedDB wording for a request whose transaction something
+    // else aborted is an AbortError too, and that something can be ours.
+    for (const message of [
+      "The transaction was aborted, so the request cannot be fulfilled.",
+      `AbortError: ${ABORT_REASON}`,
+      `${ABORT_REASON}.`,
+      "",
+    ]) {
+      expect(isUnhandledAbort("unhandledrejection", message), message).toBe(false);
+    }
   });
 });
 

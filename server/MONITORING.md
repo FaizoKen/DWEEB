@@ -152,6 +152,11 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
   | sed 's/\x1b\[[0-9;]*m//g' \
   | grep web_crash | grep 'foreign-code' | grep -o 'frames=[a-z]*' | sort | uniq -c
 
+# Work cancelled on purpose whose rejection somebody dropped (INFO, never paged)
+# — usually a page-world fetch hook; the stack only ever names our own abort()
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+  | grep web_crash | grep 'unhandled abort'
+
 # Dials to Discord that rode out a DNS stall on the last good address (INFO,
 # never paged — see server/src/dns.rs)
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep ' dns: '

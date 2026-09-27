@@ -36,6 +36,7 @@ import {
   domDesyncMessage,
   isForeignCodeError,
   isNonCrashMessage,
+  isUnhandledAbort,
   moduleEntryFromHtml,
   resolveCrashKind,
   shellProbeVerdict,
@@ -227,6 +228,10 @@ function report(kind: CrashKind, error: unknown): void {
     // (whose stack can be sparse) is never mistaken for foreign code.
     const fullStack = topFrames(describeError(error).stack, Infinity);
     if (isForeignCodeError(resolvedKind, payload.message, fullStack)) return;
+    // A cancellation nobody handled (2026-09-25) — maybe not even by us: a
+    // page-world fetch hook's dropped `.then` carries our abort's stack. The
+    // work was cancelled on purpose; not a crash, and not worth a slot either.
+    if (isUnhandledAbort(resolvedKind, payload.message)) return;
     payload.kind = resolvedKind;
     // Throttle on the resolved kind, before any verification: the slot must be
     // claimed synchronously so a crash loop can't fire a probe per frame.

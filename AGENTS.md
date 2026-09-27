@@ -237,6 +237,24 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   replaces control chars with spaces so a multi-line stack stays legible in the one-line log
   (`@ @ @ Pk@` instead of the fused `@@@Pk@` that made the first incident cryptic) without
   weakening the log-injection guarantee.
+- **A dropped abort is a cancellation, not a crash, and its stack cannot say whose promise it
+  was** (2026-09-25). A page read `kind=unhandledrejection frames=page … signal is aborted without
+  reason`. Every frame was ours: `WebhookRecents`' saved-webhook health check aborting its requests
+  as Preact re-ran the effect for a new `history` array. But our chain had handled the rejection.
+  In headless Chrome 154, `verifyWebhook` catches the abort whether it lands before the headers,
+  mid-body or after completion. A page-world `fetch` hook that chains `.then` onto our request and
+  drops it reproduces the beacon exactly. When `abort()` names no reason (none of ours does),
+  Chromium creates a `DOMException` *inside that call* and V8 stamps its stack there. So the stack
+  names the line that cancelled the work, never the promise nobody handled, and `frameOrigin` can
+  never attribute it. Whoever dropped it, the work was cancelled on purpose and nothing still
+  waiting on it failed. Policy: `isUnhandledAbort` (crashReport.ts; the client drops it before the
+  throttle) and `is_unhandled_abort` (telemetry.rs, the authority for older bundles; **info**,
+  `web app unhandled abort`). Deliberately narrow: `unhandledrejection` only (a `boundary`/`boot`
+  report with the same words still pages); the **exact** message only, because a request whose
+  IndexedDB transaction some *other* error aborted also rejects with an `AbortError` ("The
+  transaction was aborted, so the request cannot be fulfilled."), and that can be ours; and
+  Chromium's wording only (a literal in `chrome.dll`) until a beacon shows Gecko's or WebKit's.
+  Keep `abort()` calls reason-less, or add the reason's wording to both lists. No deploy ordering.
 - **Preact must survive a DOM something else rewrote — an in-page translator is the
   known rewriter** (2026-07-29). Preact places a node with
   `parentDom.insertBefore(newNode, oldDom)`, where `oldDom` is the sibling it remembers;

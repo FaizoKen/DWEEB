@@ -134,3 +134,31 @@ describe("the crash reporter's foreign-code gate", () => {
     expect(sent()[0]?.kind).toBe("chunk-unreachable");
   });
 });
+
+describe("the crash reporter's unhandled-abort gate", () => {
+  /** The reason Chromium rejects a request aborted without one with — its
+   *  stack stamped where `abort()` ran, so every frame is ours. */
+  function chromiumAbortReason(): DOMException {
+    const reason = new DOMException("signal is aborted without reason", "AbortError");
+    reason.stack = [
+      "AbortError: signal is aborted without reason",
+      "    at https://dweeb.faizo.net/assets/ShareDialog-DkbBvq7V.js:1:7334",
+      "    at xe (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:14855)",
+    ].join("\n");
+    return reason;
+  }
+
+  it("never sends the 2026-09-25 dropped abort, yet still sends a crash after it", () => {
+    fire("unhandledrejection", { reason: chromiumAbortReason() });
+    expect(proxyFetch).not.toHaveBeenCalled();
+    fire("unhandledrejection", { reason: errorWithStack("boom", ["Error: boom", OUR_FRAME]) });
+    expect(sent().map((beacon) => beacon.message)).toEqual(["boom"]);
+  });
+
+  it("still sends the same reason when it takes the app down", async () => {
+    const { reportBoundaryError } = await import("./reporter");
+    reportBoundaryError(chromiumAbortReason());
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]?.kind).toBe("boundary");
+  });
+});

@@ -717,6 +717,42 @@ export function isForeignCodeError(kind: CrashKind, message: string, stack: stri
   return stack.length === 0 && asProxyReads(message).trimStart().startsWith("Script error");
 }
 
+/**
+ * What Chromium calls the reason it gives an `AbortController` whose `abort()`
+ * names none — a `DOMException` named `AbortError`, worded for nothing else.
+ * Mirrored as `ABORT_REASON_MESSAGES` in `telemetry.rs`. See
+ * [`isUnhandledAbort`].
+ */
+export const ABORT_REASON_MESSAGES: readonly string[] = ["signal is aborted without reason"];
+
+/**
+ * Whether a report is a cancellation someone left unhandled: never a crash, and
+ * a report whose stack cannot say whose promise it was.
+ *
+ * No `abort()` of ours names a reason, so the browser makes one inside that
+ * call, and V8 stamps its stack there. A rejection carrying it points at the
+ * line that cancelled the work, never at the promise nobody handled, and that
+ * promise need not be ours. A page-world `fetch` hook that chains `.then` onto
+ * our request and drops the result rejects with our reason, our frames and
+ * nothing of its own. That paged on 2026-09-25, from the saved-webhook health
+ * check's cleanup (`WebhookRecents`), whose own chain had handled it. In
+ * headless Chrome 154 that verify pattern leaks nothing wherever the abort
+ * lands, and a hook that drops its `.then` leaks exactly that beacon.
+ * [`frameOrigin`] cannot attribute it by construction.
+ *
+ * Whoever dropped it, the work was cancelled on purpose and nothing waiting on
+ * it failed, so it is not reported. Deliberately narrow: `unhandledrejection`
+ * only (an app-down report is still one, whatever its message); exact messages
+ * only, because an IndexedDB request whose transaction some *other* error
+ * aborted also rejects with an `AbortError`, can be ours, and is worded
+ * differently; and Chromium's wording only, until a beacon shows another
+ * engine's. The proxy applies the same rule, as the authority for older
+ * bundles (`is_unhandled_abort`).
+ */
+export function isUnhandledAbort(kind: CrashKind, message: string): boolean {
+  return kind === "unhandledrejection" && ABORT_REASON_MESSAGES.includes(asProxyReads(message));
+}
+
 /** The longest line [`wireStack`] promotes whole; a longer one is kept from its
  *  URL on. Well under [`STACK_MAX`], so a head always fits beside it. */
 const PROMOTED_LINE_MAX = 240;

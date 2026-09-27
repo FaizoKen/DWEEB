@@ -465,6 +465,35 @@ fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
     }
 }
 
+/// What Chromium calls the reason it gives an `AbortController` whose `abort()`
+/// names none — a `DOMException` named `AbortError`, worded for nothing else.
+/// Mirrors `ABORT_REASON_MESSAGES` in `src/core/telemetry/crashReport.ts`.
+const ABORT_REASON_MESSAGES: [&str; 1] = ["signal is aborted without reason"];
+
+/// Whether a beacon is a cancellation someone left unhandled: never a crash,
+/// and a beacon whose stack cannot say whose promise it was.
+///
+/// No `abort()` in the app names a reason, so the browser makes one inside that
+/// call, and V8 stamps its stack there. A rejection carrying it points at the
+/// line that cancelled the work, never at the promise nobody handled, and that
+/// promise need not be ours. A page-world `fetch` hook that chains `.then` onto
+/// our request and drops the result rejects with our reason, our frames
+/// (`frames=page`) and nothing of its own. That paged on 2026-09-25 (build
+/// `e87dcd0497`, from the saved-webhook health check's cleanup), where our own
+/// chain had handled it, so [`frame_origin`] cannot attribute it by
+/// construction. Whoever dropped it, the work was cancelled on purpose and
+/// nothing waiting on it failed.
+///
+/// Logged at `info`, and narrow like its siblings: `unhandledrejection` only (an
+/// app-down report pages whatever its message); the exact message only, because
+/// an IndexedDB request whose transaction some *other* error aborted also
+/// rejects with an `AbortError`, can be ours, and is worded differently; and
+/// Chromium's wording only, until a beacon shows another engine's. A current
+/// client declines to send these at all; this is the authority for older ones.
+fn is_unhandled_abort(kind: &str, message: &str) -> bool {
+    kind == "unhandledrejection" && ABORT_REASON_MESSAGES.contains(&message)
+}
+
 /// Whether `message` is the browser's muted cross-origin error, read the way
 /// the client reads it: leading whitespace trimmed, and a byte-order mark with
 /// it (JavaScript's `trimStart` strips one). Control characters are already
@@ -560,10 +589,10 @@ pub async fn crash_report(
 
 /// Log a beacon that got past the live-build check, at the level its shape
 /// earns — and the level is the paging decision: the log alerter pages on a
-/// `web_crash` warn and never on an info. Routine skew, a repaired desync and
-/// foreign code are info; everything else is a warn. Every argument is already
-/// clamped. Split from the handler so the tests can hear the line a beacon
-/// actually produces, not just the predicates behind it.
+/// `web_crash` warn and never on an info. Routine skew, a repaired desync,
+/// foreign code and an unhandled abort are info; everything else is a warn.
+/// Every argument is already clamped. Split from the handler so the tests can
+/// hear the line a beacon actually produces, not just the predicates behind it.
 fn log_crash(
     kind: &str,
     surface: &str,
@@ -634,6 +663,22 @@ fn log_crash(
             %message,
             %stack,
             "web app foreign-code error",
+        );
+    } else if is_unhandled_abort(kind, message) {
+        // Work cancelled on purpose whose rejection somebody dropped — maybe a
+        // page-world fetch hook, since the stack only ever names the abort. Not
+        // a crash, so counted, never paged. See [`is_unhandled_abort`].
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %frames,
+            %surface,
+            %version,
+            %build,
+            %path,
+            %message,
+            %stack,
+            "web app unhandled abort (a deliberate cancellation, not a crash)",
         );
     } else {
         tracing::warn!(
@@ -1229,6 +1274,76 @@ mod tests {
         assert!(is_foreign_code_error(&kind, &message, &stack));
         // Thrown rather than dropped, the same code is just as foreign.
         assert!(is_foreign_code_error("error", &message, &stack));
+    }
+
+    /// The 2026-09-25 page, byte for byte as build `e87dcd0497` sent it. The
+    /// saved-webhook health check's cleanup aborted its requests; our own chain
+    /// handled the rejection, and a promise some page-world hook had chained
+    /// onto the request did not. Its stack names only our abort, so no frame
+    /// rule can place it — the message can.
+    #[test]
+    fn the_2026_09_25_unhandled_abort_is_demoted_not_paged() {
+        let body: CrashBody = serde_json::from_str(
+            r#"{"kind":"unhandledrejection","message":"signal is aborted without reason",
+                "stack":"AbortError: signal is aborted without reason\nat https://dweeb.faizo.net/assets/ShareDialog-DkbBvq7V.js:1:7334\nat xe (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:14855)\nat Array.some (<anonymous>)\nat Ee (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:13650)",
+                "version":"1.2.0","build":"e87dcd0497","surface":"web","path":"/"}"#,
+        )
+        .expect("payload shape");
+        let kind = clamp_field(&body.kind, KIND_MAX);
+        let message = clamp_field(&body.message, MESSAGE_MAX);
+        let stack = clamp_field(&body.stack, STACK_MAX);
+        // No earlier branch claims it — every frame is ours, so not even the
+        // foreign-code rule can…
+        assert!(!is_non_crash(&body.message));
+        assert!(!pages_as_broken_deploy(&kind, &message));
+        assert!(!is_routine_stale_chunk(&kind, &message));
+        assert!(!is_repaired_dom_desync(&kind));
+        assert_eq!(frame_origin(&stack), FrameOrigin::Page);
+        assert!(!is_foreign_code_error(&kind, &message, &stack));
+        // …so this one does, at info.
+        assert!(is_unhandled_abort(&kind, &message));
+        let line = logged_line(&kind, &message, &stack);
+        assert!(line.contains(" INFO "), "{line}");
+        assert!(line.contains("web app unhandled abort"), "{line}");
+        assert!(
+            line.contains("kind=unhandledrejection frames=page"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn only_a_dropped_rejection_worded_exactly_as_the_abort_is_demoted() {
+        const REASON: &str = "signal is aborted without reason";
+        // A report that took the app down pages whatever it says.
+        for kind in CLIENT_KINDS {
+            assert_eq!(
+                is_unhandled_abort(kind, REASON),
+                kind == "unhandledrejection",
+                "{kind}"
+            );
+        }
+        let app_down = logged_line(
+            "boundary",
+            REASON,
+            "AbortError: signal is aborted without reason \
+             at Xk (https://dweeb.faizo.net/assets/index-a.js:1:2)",
+        );
+        assert!(app_down.contains(" WARN "), "{app_down}");
+        assert!(app_down.contains("web app crash"), "{app_down}");
+        // Exact: another AbortError still pages — Chromium's IndexedDB wording
+        // for a request whose transaction something else aborted, which can be
+        // ours — and so does a message that merely carries the words.
+        for message in [
+            "The transaction was aborted, so the request cannot be fulfilled.",
+            "AbortError: signal is aborted without reason",
+            "signal is aborted without reason.",
+            "",
+        ] {
+            assert!(
+                !is_unhandled_abort("unhandledrejection", message),
+                "{message}"
+            );
+        }
     }
 
     #[test]
