@@ -383,6 +383,10 @@ export type VerifyResult = VerifyOk | VerifyErr;
  * URL returns the webhook object when the id+token are valid, and 401/404 when
  * the token is wrong or the webhook was deleted — so it doubles as a "is this
  * URL real?" check without posting anything to the channel.
+ *
+ * Only an answer that carries that object counts as verified. Callers save
+ * what it says — name, avatar, owner, destination — over what they had, so an
+ * empty stand-in would blank a stored webhook, not merely fail to refresh it.
  */
 export async function verifyWebhook(
   parsed: ParsedWebhookUrl,
@@ -396,19 +400,22 @@ export async function verifyWebhook(
       signal: options.signal,
     });
   } catch (e) {
-    if ((e as DOMException)?.name === "AbortError") {
-      return { ok: false, status: 0, error: "Check was cancelled." };
-    }
-    return {
-      ok: false,
-      status: 0,
-      error:
-        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
-    };
+    return checkFailed(e);
   }
 
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    // The headers came but the body didn't: the check was aborted mid-read (a
+    // closed dialog, the health check re-running) or the connection dropped.
+    // A 2xx here used to count as verified, with an empty webhook the saved-
+    // webhook health check wrote over the stored avatar and owner. An error
+    // status still says what it says, so only a 2xx has to fail with the read.
+    if (res.ok) return checkFailed(e);
+    text = "";
+  }
   let body: unknown = null;
-  const text = await res.text().catch(() => "");
   if (text) {
     try {
       body = JSON.parse(text);
@@ -417,14 +424,28 @@ export async function verifyWebhook(
     }
   }
 
-  if (res.ok) {
-    return {
-      ok: true,
-      status: res.status,
-      webhook: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
-    };
+  if (res.ok && body && typeof body === "object") {
+    return { ok: true, status: res.status, webhook: body as Record<string, unknown> };
   }
+  // Including a 2xx that isn't the webhook object — an empty body, or a page
+  // some proxy on the way substituted: that verified nothing either.
   return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
+
+/**
+ * A check that never got its answer. Callers recognise a cancelled one by this
+ * exact status and wording and stay quiet, so keep both verbatim.
+ */
+function checkFailed(e: unknown): VerifyErr {
+  if ((e as DOMException)?.name === "AbortError") {
+    return { ok: false, status: 0, error: "Check was cancelled." };
+  }
+  return {
+    ok: false,
+    status: 0,
+    error:
+      "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+  };
 }
 
 /* ─── Owner classification ───────────────────────────────────────────── */
