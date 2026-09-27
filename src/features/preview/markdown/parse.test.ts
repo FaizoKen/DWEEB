@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { parseInline, parseMarkdown, type InlineNode } from "./parse";
+import { formatTimestamp, TIMESTAMP_STYLES } from "./timestamp";
 
 const kinds = (nodes: InlineNode[]) => nodes.map((n) => n.kind);
 
@@ -123,5 +124,34 @@ describe("timestamps", () => {
 
   it("leaves an unknown style letter as literal text", () => {
     expect(kinds(parseInline("<t:1767225600:x>"))).not.toContain("timestamp");
+  });
+
+  // Not a live-Discord observation like the rest of this file — a crash guard.
+  // `Date` holds ±8.64e12 s, and past that the renderer's `toISOString()` (and
+  // the relative style's formatter) throw: `<t:…>` one digit too long took the
+  // whole editor down to the error screen on 2026-09-27.
+  it("leaves a moment Date cannot hold as literal text", () => {
+    for (const token of [
+      "<t:8640000000001:F>",
+      "<t:-8640000000001>",
+      "<t:99999999999999:F>",
+      `<t:${"9".repeat(400)}:R>`, // parseInt makes this one Infinity
+    ]) {
+      const out = parseInline(token);
+      expect(kinds(out)).toEqual(["text"]);
+      expect(text(out)).toBe(token);
+    }
+  });
+
+  it("keeps Date's own limits as timestamps the renderer can draw", () => {
+    for (const unix of ["8640000000000", "-8640000000000"]) {
+      for (const { code } of TIMESTAMP_STYLES) {
+        const [node] = parseInline(`<t:${unix}:${code}>`);
+        if (node?.kind !== "timestamp") throw new Error(`<t:${unix}:${code}> was not parsed`);
+        // The two calls Markdown.tsx makes for every timestamp node.
+        expect(() => new Date(node.unix * 1000).toISOString()).not.toThrow();
+        expect(formatTimestamp(node.unix, node.style)).not.toMatch(/invalid/i);
+      }
+    }
   });
 });

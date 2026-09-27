@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TIMESTAMP_STYLE,
   formatTimestamp,
+  isRepresentableUnix,
   isTimestampStyle,
   parseTimestampInput,
   TIMESTAMP_STYLES,
@@ -83,6 +84,20 @@ describe("formatTimestamp", () => {
     expect(formatTimestamp(now - 2 * 3600, "R")).toBe(
       new Intl.RelativeTimeFormat(undefined, { numeric: "always" }).format(-2, "hour"),
     );
+  });
+});
+
+describe("isRepresentableUnix", () => {
+  it("accepts exactly the range Date can hold, both ends inclusive", () => {
+    expect(isRepresentableUnix(8_640_000_000_000)).toBe(true);
+    expect(isRepresentableUnix(-8_640_000_000_000)).toBe(true);
+    expect(isRepresentableUnix(8_640_000_000_001)).toBe(false);
+    expect(isRepresentableUnix(-8_640_000_000_001)).toBe(false);
+  });
+
+  it("refuses what parseInt makes of an absurdly long number", () => {
+    expect(isRepresentableUnix(Number.parseInt("9".repeat(400), 10))).toBe(false);
+    expect(isRepresentableUnix(Number.NaN)).toBe(false);
   });
 });
 

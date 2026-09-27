@@ -52,6 +52,19 @@ export function isTimestampStyle(code: string): code is TimestampStyleCode {
  */
 const MAX_ABS_UNIX = 8_640_000_000_000;
 
+/**
+ * Whether `unix` (seconds) is a moment `Date` can hold — the check both parsers
+ * make before they call something a timestamp. Past it `toLocaleString` only
+ * says "Invalid Date", but `toISOString` and the relative style's
+ * `Intl.RelativeTimeFormat` throw, and the preview calls both while rendering:
+ * a `<t:…>` token one digit too long used to take the whole editor down to the
+ * error screen (2026-09-27). Infinity — what `parseInt` makes of a few hundred
+ * digits — fails too.
+ */
+export function isRepresentableUnix(unix: number): boolean {
+  return Number.isFinite(unix) && Math.abs(unix) <= MAX_ABS_UNIX;
+}
+
 /** The token Discord replaces with a localized date, e.g. `<t:1767225600:F>`. */
 export function timestampToken(unix: number, style: TimestampStyleCode): string {
   return `<t:${Math.trunc(unix)}:${style}>`;
@@ -128,7 +141,7 @@ export function parseTimestampInput(raw: string): ParsedTimestampInput | null {
     const unix = Number(token[1]);
     const style = token[2];
     if (style !== undefined && !isTimestampStyle(style)) return null;
-    if (!Number.isSafeInteger(unix) || Math.abs(unix) > MAX_ABS_UNIX) return null;
+    if (!Number.isSafeInteger(unix) || !isRepresentableUnix(unix)) return null;
     return style === undefined ? { unix } : { unix, style };
   }
   if (!/^-?\d{1,16}$/.test(text)) return null;
@@ -136,7 +149,7 @@ export function parseTimestampInput(raw: string): ParsedTimestampInput | null {
   if (!Number.isSafeInteger(value)) return null;
   const digits = text.replace("-", "").length;
   const unix = digits >= 13 ? Math.trunc(value / 1000) : value;
-  if (Math.abs(unix) > MAX_ABS_UNIX) return null;
+  if (!isRepresentableUnix(unix)) return null;
   return digits >= 13 ? { unix, fromMilliseconds: true } : { unix };
 }
 

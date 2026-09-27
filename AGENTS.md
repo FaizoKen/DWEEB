@@ -1254,7 +1254,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   time) and `S` (short date, medium time) joined the original seven; the preview parser used to
   accept only `[tTdDfFR]`, so `<t:…:s>` rendered as raw text in DWEEB while Discord showed a
   date. `t`/`T` are Intl's `timeStyle` short/medium — Discord's own names, and the same short time
-  `f` ends with (a forced 2-digit hour read "09:05 AM" beside `f`'s "9:05 AM"). (5) **A
+  `f` ends with (a forced 2-digit hour read "09:05 AM" beside `f`'s "9:05 AM"). A value `Date`
+  can't hold (past ±8,640,000,000,000 s) stays literal text in the preview, as it always did in
+  the guide's decoder: both parsers ask `isRepresentableUnix`. The renderer's `toISOString()`
+  throws on such a value, and before the preview asked, a `<t:…>` one digit too long took the
+  whole editor to the error screen (2026-09-27 page, `RangeError: Invalid time value`); a share
+  link or an Activity room carrying one would have done the same to everyone opening it. (5) **A
   `.table-scroll` is `position: relative`**: an absolutely positioned `sr-only` header at a wide
   table's far edge otherwise escapes the scroll container's clip and widens the whole page on a
   phone (found at 390px; mobile-first indexing reads that layout). (6) The welcome-message cluster

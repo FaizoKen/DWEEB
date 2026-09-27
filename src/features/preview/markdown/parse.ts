@@ -20,7 +20,7 @@
  * isolation later.
  */
 
-import { DEFAULT_TIMESTAMP_STYLE } from "./timestamp";
+import { DEFAULT_TIMESTAMP_STYLE, isRepresentableUnix } from "./timestamp";
 
 export type InlineNode =
   | { kind: "text"; value: string }
@@ -34,6 +34,7 @@ export type InlineNode =
   | { kind: "mention"; mention: MentionKind; id: string }
   | { kind: "guildNav"; nav: GuildNavType }
   | { kind: "emoji"; name: string; id: string; animated: boolean }
+  /** `unix` is always a moment `Date` can hold — the renderer relies on it. */
   | { kind: "timestamp"; unix: number; style: string }
   | { kind: "break" };
 
@@ -502,14 +503,13 @@ function parseAngleToken(token: string): InlineNode | null {
   }
 
   // Timestamp <t:unix> / <t:unix:style> — all nine of Discord's style letters,
-  // including the later `s`/`S` (see timestamp.ts).
+  // including the later `s`/`S` (see timestamp.ts). A moment `Date` can't hold
+  // stays literal text: rendering one throws (`isRepresentableUnix`).
   m = /^t:(-?\d+)(?::([tTdDfFsSR]))?$/.exec(token);
   if (m) {
-    return {
-      kind: "timestamp",
-      unix: Number.parseInt(m[1]!, 10),
-      style: m[2] ?? DEFAULT_TIMESTAMP_STYLE,
-    };
+    const unix = Number.parseInt(m[1]!, 10);
+    if (!isRepresentableUnix(unix)) return null;
+    return { kind: "timestamp", unix, style: m[2] ?? DEFAULT_TIMESTAMP_STYLE };
   }
 
   // Angle-bracketed link <https://example.com> — Discord renders the URL as a
