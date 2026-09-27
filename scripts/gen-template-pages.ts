@@ -45,7 +45,7 @@ import { bundleGuideTools } from "./seo/tools/bundle";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
 
-const PRIVACY_LASTMOD = "2026-07-15";
+const PRIVACY_LASTMOD = "2026-09-27";
 const TERMS_LASTMOD = "2026-07-13";
 const MAX_RELATED = 4;
 const MAX_RELATED_FEATURES = 3;

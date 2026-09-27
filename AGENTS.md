@@ -845,8 +845,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   checked 2026-09-27), and Discord withholds members' message text, attachments and embeds
   from REST reads too — so transcripts carry who took part and when plus the bot's own
   messages, and say so (`transcript::looks_withheld` + `/api/meta` `messageContent`). Real
-  transcripts need the maintainer to apply for the intent in the Developer Portal; don't
-  "fix" empty transcripts in code. Tests: `flow_tests.rs` drives the real router with signed
+  transcripts need the intent, and for this app that is an application, not a toggle: the
+  portal refuses the switch ("exposed to a high user count" — review applies from 10,000
+  users) and its **Apply** button opens a Request Intents form. The application filed
+  2026-09-27 certifies what the code does: the history is read once at close and only when
+  the panel has transcripts on, nothing is stored off Discord or logged, nothing trains a
+  model, and members can't opt out individually (the server's managers control transcripts).
+  The Tickets item in `public/privacy.html` §5 says the same — any change to what Tickets
+  reads or keeps must keep that item and those answers true. Don't "fix" empty transcripts in
+  code; once the intent is granted `looks_withheld` stops firing on its own, and the feature
+  FAQ (`scripts/seo/features.ts`) may promise the conversation's text again. Tests: `flow_tests.rs` drives the real router with signed
   interactions against an in-process fake Discord — extend it for any new flow; a debug build
   (`cargo run`) honours `DISCORD_API_BASE` for clicking through the config UI against a
   stand-in, and release builds ignore it.

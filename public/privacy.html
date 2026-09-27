@@ -65,7 +65,7 @@
         "@id": "https://dweeb.faizo.net/privacy#webpage",
         "name": "Privacy Policy — DWEEB",
         "url": "https://dweeb.faizo.net/privacy",
-        "dateModified": "2026-07-15",
+        "dateModified": "2026-09-27",
         "inLanguage": "en",
         "isPartOf": { "@id": "https://dweeb.faizo.net/#website" }
       }
@@ -188,7 +188,7 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 15 July 2026</p>
+      <p class="meta">Last updated: 27 September 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> The core editor is local by default and does not require
@@ -320,6 +320,25 @@
           in the server's posted-message history.
         </li>
         <li>
+          <strong>Support tickets (Tickets plugin).</strong> In a server that uses DWEEB's Tickets
+          plugin, the DWEEB bot creates a private channel for each ticket. The plugin stores the
+          panel's settings (staff roles, categories, log channel and form questions) and a record of
+          each ticket: the server and channel IDs, the ticket number and topic, the Discord user ID
+          and name of the member who opened it, who claimed and closed it, and when. Answers to a
+          ticket's intake form are posted into the ticket channel, not stored by the plugin.
+          Transcripts are a per-panel setting that the server's managers control; it is on by
+          default once they choose a log channel, and they can turn it off. While it is on, closing
+          a ticket makes the bot read that ticket channel's messages once — at most the 500 most
+          recent — through Discord's API, including their text, attachment links and embeds
+          (Discord's <em>message content</em>), and turn them into an HTML transcript. The
+          transcript is posted to the log channel the server's managers chose and, if they enabled
+          it, sent by direct message to the member who opened the ticket. It is built in memory and
+          kept only as that Discord attachment: DWEEB does not store the message content it reads,
+          log it, use it for analytics or advertising, share it with anyone else, or use it to train
+          machine-learning or AI models. Anyone who can read the log channel can read its
+          transcripts, so write in a ticket as you would in any channel the server's staff can see.
+        </li>
+        <li>
           <strong>Feedback.</strong> When you submit the feedback form, we receive the category,
           summary, details, and optional contact you enter. Normal proxy logs may also contain
           request metadata such as an IP address and browser user agent. The report is relayed to
@@ -444,9 +463,12 @@
         rolling plan-sized window. Stateful plugin configuration remains in that plugin service
         until its operator removes it; DWEEB currently has no automatic plugin-record deletion when
         you remove a component. Revoking the Discord webhook immediately makes a retained URL
-        unusable. Subscription records are retained as needed to administer plans, resolve disputes,
-        and meet legal obligations. Operational, security, feedback, and crash-report logs are
-        retained only as long as reasonably needed for those purposes.
+        unusable. Ticket records stay in the Tickets service, which uses them to number tickets and
+        apply a panel's limits, until its operator removes them; ticket transcripts exist only as
+        Discord attachments and are deleted the way any Discord message is. Subscription records are
+        retained as needed to administer plans, resolve disputes, and meet legal obligations.
+        Operational, security, feedback, and crash-report logs are retained only as long as
+        reasonably needed for those purposes.
       </p>
 
       <h2>13. Children</h2>

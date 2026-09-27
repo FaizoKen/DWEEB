@@ -117,10 +117,25 @@ transcript **says** that the conversation itself couldn't be read rather than
 showing empty bubbles. The config UI shows the same note when `/api/meta`
 reports `messageContent: false`.
 
-- A bot in fewer than 100 servers turns the intent on in the Developer Portal
-  (Bot → Privileged Gateway Intents → Message Content Intent).
-- A verified bot (100+ servers) has to apply for it in the portal, naming the
-  feature (ticket transcripts).
+| With the intent | Without it |
+| --- | --- |
+| ![A transcript with the conversation](../../docs/images/tickets-transcript.png) | ![The same transcript with members' text withheld](../../docs/images/tickets-transcript-without-message-content.png) |
+
+What the plugin does with message content, and nothing more: it reads a ticket
+channel's history **once, when the ticket closes**, and only if that panel has
+transcripts on; it renders the HTML in memory and uploads it to the log channel
+(and the opener's DMs if asked). The text is never written to the plugin's
+database or logs. DWEEB holds no gateway connection, so the REST read at close is
+the only place the intent applies.
+
+- Below Discord's review threshold (10,000 users, per the portal), turn it on in
+  the Developer Portal (Bot → Privileged Gateway Intents → Message Content Intent).
+- Above it the portal refuses that toggle ("exposed to a high user count") and
+  offers **Apply**, a Request Intents form: what the app does, a privacy policy,
+  whether users can opt out, whether content is stored off Discord or used to
+  train models, and why the feature needs it. DWEEB's answers must stay true to
+  the paragraph above and to the Tickets item in the
+  [privacy policy](https://dweeb.faizo.net/privacy).
 
 ## Architecture & safety
 
