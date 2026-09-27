@@ -744,7 +744,17 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   missing/unreadable activity row falls back to the fixed send-date rule — fail toward
   expiry, never toward unlimited validity. Never-expire slots exempt a message outright and
   remain the only protection for *idle* messages (that's the paid-slot pitch — active
-  messages keep themselves alive for free). Keep user-facing copy phrased "N days without
+  messages keep themselves alive for free). One structural exemption (2026-09-27): a
+  plugin's **own bot-posted control messages** skip the gate entirely (`ttl_exempt`),
+  because the TTL bounds what people post *through DWEEB* (always a webhook) and a ticket's
+  Close button must live as long as the ticket. All three conditions are load-bearing: no
+  `webhook_id` on the clicked message (else a crafted button on a webhook message is
+  exempt), signed by the **primary** app's key (else a guild's custom app — which holds
+  its own bot token — could post never-expiring plain bot messages, sidestepping the paid
+  never-expire slots), and a custom_id in `BOT_POSTED_CONTROL_PREFIXES`, which lists exact
+  in-channel verbs (`tickets:close:`, `…claim:`, `…unclaim:`, `…members:`, `…reopen:`,
+  `…delete:`) — never a whole plugin, so a `tickets:open:` panel expires like any message.
+  Keep user-facing copy phrased "N days without
   use", never "N days after sending", and treat client-side expiry estimates (gallery
   "Buttons may be expired" tag, scheduled-history badge, PermanentStatus date) as a no-use
   lower bound — the FE can't see server-side activity. The send/post confirm dialogs (web
@@ -782,6 +792,64 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   UPDATE_MESSAGE refresh must keep foreign action rows (`other_action_rows`) or the manage
   row vanishes on toggle. Guarded by `manage_control_*` tests in giveaway/poll routes.rs and
   the `plugins_*`/`manage_buttons`/`other_action_rows` tests in dispatcher commands.rs.
+  **Tickets answers `tickets:manage:<id>` since 0.3 but is not in the set yet**: its panel is
+  bound as `tickets:open:<id>` — verb-carrying, so `plugins_on_message` extracts no instance
+  and no button would be minted even with the prefix listed. The follow-up, once Tickets 0.3
+  is live: teach `plugins_on_message` that a `tickets:` binding's instance follows `open:`,
+  then add `("tickets:", "tickets")` to `MANAGEABLE_PLUGINS`.
+- **Tickets is a compare-and-swap state machine — never read a ticket's status and then act
+  on it** (0.3, 2026-09-27; `plugins/tickets`). `pending → open → closing → closed`, or
+  `open → closing → locked → deleting → closed`, `locked → reopening → open`; every arrow is
+  a guarded write (`Store::transition`, `WHERE status = ?`) and only the winner touches
+  Discord, which is what makes two staff closing at once one close and a stale Reopen/Delete
+  button on an old message a no-op. An open reserves its slot in one IMMEDIATE transaction
+  (`reserve_open`: the pure gate + a `pending:<hex>` placeholder row + the ticket number), so a
+  double-click is one ticket even with no cap or cooldown; a failed open *deletes* its
+  reservation (no cooldown penalty); `pending` rows older than 5 min are stale. Every
+  multi-call flow defers, rolls its transition back on failure, and edits `@original` with a
+  reason that separates "an admin must fix X" from "Discord was busy". **A flow posts its new
+  controls before it retires the old ones** — a lock whose Reopen/Delete banner can't be
+  posted undoes the mute and goes back to `open`, a reopen whose controls can't be posted
+  goes back to `locked` — so a ticket is never left without working buttons (an adversarial
+  review caught the first cut retiring first). Deploys restart the service and axum's
+  graceful shutdown doesn't wait for spawned tasks, so flows run through `tasks::Tasks` and
+  `main` drains them (8 s, inside Docker's 10 s stop); what still outlives that is put back by
+  `recover_interrupted` at startup — `pending` dropped, `closing`→`open`,
+  `reopening`/`deleting`→`locked`, i.e. to the state whose buttons are still on screen.
+  **Saving a panel checks its channels belong to its server** (`verify_placement`): the
+  config API takes any id, and a log channel in *another* server the shared bot can reach
+  turned every ticket into a post there as the DWEEB bot — a spam/phishing relay (pre-0.3,
+  found in review). Load-bearing details: (1) **locked tickets don't count toward the open cap** (they did until 0.3, so in
+  lock mode a member stayed blocked until staff deleted their closed ticket); (2) a ticket
+  channel **deleted by hand** is reconciled the next time its opener is refused at the cap —
+  their open tickets' channels are probed (`GET /channels/{id}`, only `10003 Unknown Channel`
+  counts as gone, probes cached 60 s) and gone ones marked closed; before 0.3 such a member
+  was held at the cap forever with nothing to close; (3) **a bot can only grant or deny a
+  permission it holds server-wide**, and the shared invite carries only Manage Channels/Roles
+  (+ two other plugins' bits) — View/Send/Attach/Embed/React come from `@everyone`, which
+  anti-spam servers strip. Creation therefore falls back from the full to the essential
+  grants on 50013, and to the top of the server when the category is full (Discord's 50;
+  a `50035` naming `parent_id`), gone, or closed to the bot — logged in the log channel. The
+  pre-flight (`rest::preflight`, `perms.rs`) reports server-wide gaps once and flags only a
+  channel's *own* denials (flagging every channel for a server-wide gap buried the real
+  problem); (4) **Members never touches a role overwrite**: `DELETE/PUT …/permissions/{id}`
+  is keyed by id alone, so a crafted pick naming `@everyone`'s id (= the guild id) would
+  unhide the ticket — picks must be in Discord's `resolved.users`, never the guild id, and
+  never an id holding a role overwrite (pinned by `a_crafted_pick_can_never_touch_a_role_overwrite`);
+  (5) an in-ticket control whose panel id isn't the ticket's own is refused (it would be
+  judged by the other panel's staff roles); (6) select `options[].emoji` must be an
+  **object** (`{ name }` / `{ id, name, animated? }`) — the host's `sanitizeEmoji` silently
+  drops a string, which is how every topic emoji (the presets' too) vanished from posted menus
+  until 0.3. **The production app has no Message Content intent** (neither
+  `GATEWAY_MESSAGE_CONTENT` nor `_LIMITED` in `/applications/@me` flags, 385 servers,
+  checked 2026-09-27), and Discord withholds members' message text, attachments and embeds
+  from REST reads too — so transcripts carry who took part and when plus the bot's own
+  messages, and say so (`transcript::looks_withheld` + `/api/meta` `messageContent`). Real
+  transcripts need the maintainer to apply for the intent in the Developer Portal; don't
+  "fix" empty transcripts in code. Tests: `flow_tests.rs` drives the real router with signed
+  interactions against an in-process fake Discord — extend it for any new flow; a debug build
+  (`cargo run`) honours `DISCORD_API_BASE` for clicking through the config UI against a
+  stand-in, and release builds ignore it.
 - **A plugin may only answer 5xx for its own faults — 5xx is the paging channel.**
   `TraceLayer::new_for_http()`'s default classifier reports every 5xx through `on_failure` at
   ERROR level, and `dweeb-alerts` forwards backend ERRORs to Discord. So a status code is an

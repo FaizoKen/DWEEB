@@ -1,6 +1,6 @@
 [package]
 name = "dweeb-tickets"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "DWEEB plugin: private support tickets from a button or topic menu. Opens a per-ticket private channel, optional intake form, staff claim, close with transcript, anti-spam limits."
 

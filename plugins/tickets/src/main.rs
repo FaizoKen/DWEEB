@@ -19,14 +19,21 @@
 
 mod config;
 mod discord;
+#[cfg(test)]
+mod flow_tests;
+mod perms;
 mod rest;
 mod routes;
 mod store;
+mod tasks;
+mod timefmt;
 mod trace;
+mod transcript;
 mod validate;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::{
@@ -39,6 +46,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::rest::Discord;
 use crate::routes::AppState;
 use crate::store::Store;
 
@@ -77,15 +85,25 @@ async fn run() {
     let primary_key = discord::parse_verifying_key(&config.discord_public_key)
         .expect("DISCORD_PUBLIC_KEY must encode a valid Ed25519 point");
     let store = Store::open(&config.database_path).expect("failed to open database");
+    // Whatever a restart cut short goes back to where it was: an open in
+    // flight is dropped, a close or delete in flight can simply be clicked
+    // again. See `Store::recover_interrupted`.
+    match store.recover_interrupted() {
+        Ok(r) if r != store::Recovery::default() => {
+            tracing::info!(?r, "recovered ticket work interrupted by the last shutdown")
+        }
+        Ok(_) => {}
+        Err(e) => tracing::error!(error = %e, "recover interrupted ticket work"),
+    }
     // One client for the config-time probes and the click-time channel work.
     // 2.2s keeps any single call inside Discord's ~3s window even after the
-    // dispatcher hop; the multi-call open/close flows defer off that path. It
-    // is deliberately SHORTER than the dispatcher's 2.5s forward budget: both
-    // were 2.5s, and since this clock starts later the outer one always expired
-    // first — a slow Discord then surfaced as the dispatcher's nonspecific "the
-    // plugin didn't respond" plus a paging alert, instead of this plugin's own
-    // accurate reply. Keep it under FORWARD_BUDGET
-    // (plugins/dispatcher/src/main.rs).
+    // dispatcher hop; the multi-call flows defer off that path and give each
+    // call longer (see `rest.rs`). It is deliberately SHORTER than the
+    // dispatcher's 2.5s forward budget: both were 2.5s, and since this clock
+    // starts later the outer one always expired first — a slow Discord then
+    // surfaced as the dispatcher's nonspecific "the plugin didn't respond" plus
+    // a paging alert, instead of this plugin's own accurate reply. Keep it
+    // under FORWARD_BUDGET (plugins/dispatcher/src/main.rs).
     let http = reqwest::Client::builder()
         .timeout(Duration::from_millis(2200))
         .pool_idle_timeout(Duration::from_secs(30))
@@ -99,15 +117,62 @@ async fn run() {
         .expect("failed to build HTTP client");
 
     let port = config.port;
+    let discord = Discord::new(
+        http,
+        &discord_api_base(),
+        config.default_bot_token.as_deref(),
+    );
     let state = AppState {
         store: Arc::new(store),
-        http,
+        discord,
         config: Arc::new(config),
         primary_key,
-        bot_id: Arc::new(OnceCell::new()),
+        bot: Arc::new(OnceCell::new()),
+        message_content: Arc::new(routes::IntentCache::default()),
+        seen_channels: Arc::new(Mutex::new(HashMap::new())),
+        delete_grace: Duration::from_secs(discord::DELETE_GRACE_SECS as u64),
+        tasks: tasks::Tasks::default(),
     };
+    // Learn up front whether transcripts can hold message text, so the first
+    // config UI to open can already say. Best-effort; `/api/meta` retries.
+    if state.discord.has_token() {
+        let st = state.clone();
+        tokio::spawn(async move { routes::refresh_message_content(&st).await });
+    }
 
-    let app = Router::new()
+    let tasks = state.tasks.clone();
+    let app = app(state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
+    tracing::info!(%addr, "tickets plugin listening");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+
+    // The requests are done; the flows they deferred may not be. Let them
+    // finish (a lock half-applied is worse than a deploy a few seconds slower).
+    let running = tasks.running();
+    if running > 0 {
+        tracing::info!(running, "waiting for ticket work to finish before exiting");
+        let left = tasks.drain(tasks::DRAIN_DEADLINE).await;
+        if left > 0 {
+            tracing::warn!(
+                left,
+                "exiting with ticket work unfinished; the next start recovers it"
+            );
+        }
+    }
+}
+
+/// The whole HTTP surface. Its own function so the end-to-end tests drive
+/// exactly what production serves.
+fn app(state: AppState) -> Router {
+    Router::new()
         .route("/health", get(routes::health))
         .route("/registry.json", get(routes::registry))
         .route("/config.html", get(routes::config_html))
@@ -127,18 +192,23 @@ async fn run() {
         // (credential-less) CORS policy is fine.
         .layer(CorsLayer::permissive())
         .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
-        .layer(TraceLayer::new_for_http().on_failure(trace::on_failure));
+        .layer(TraceLayer::new_for_http().on_failure(trace::on_failure))
+}
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind");
-    tracing::info!(%addr, "tickets plugin listening");
-
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("server error");
+/// The Discord API base. Always `discord.com` in a release build; a debug build
+/// (`cargo run`) may point `DISCORD_API_BASE` at a local fake Discord to drive
+/// the whole plugin by hand. Release builds ignore the variable entirely, so
+/// no deployment can be talked into sending the bot token anywhere else.
+fn discord_api_base() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(base) = std::env::var("DISCORD_API_BASE") {
+        let base = base.trim();
+        if !base.is_empty() {
+            tracing::warn!(%base, "debug build: talking to a Discord stand-in, not discord.com");
+            return base.to_string();
+        }
+    }
+    rest::API_BASE.to_string()
 }
 
 /// Fallback for a path this service doesn't route: 404 — but only *after* the

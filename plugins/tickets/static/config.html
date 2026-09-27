@@ -162,6 +162,24 @@
       .miniseg button { padding: 6px 8px; font-size: 12px; }
       .miniseg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
       .add { margin-top: 8px; }
+
+      /* A problem the bot has with the picked category / log channel. */
+      .warn-text { font-size: 12px; color: var(--yellow); margin-top: 6px; }
+      .warn-text:empty { display: none; }
+
+      /* Per-topic routing (category + extra staff). */
+      details.route { margin-top: 8px; }
+      details.route > summary { font-size: 12px; }
+      details.route .badge { color: var(--muted); }
+      .route-body { padding: 4px 0 0 2px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+      .chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 3px 4px 3px 8px; border: 1px solid var(--border); border-radius: 999px;
+        font-size: 12px; background: var(--panel);
+      }
+      .chip button { padding: 0 6px; border: 0; background: none; line-height: 1.4; }
+      .chips select { width: auto; flex: 1; min-width: 140px; padding: 4px 8px; font-size: 12px; }
     </style>
   </head>
   <body>
@@ -178,7 +196,9 @@
       <div id="topicsSection" class="locked">
         <div class="hint">
           Each topic is one entry in the dropdown. Picking it opens a ticket
-          tagged with that topic — DWEEB wires the option values for you.
+          tagged with that topic — DWEEB wires the option values for you. Open
+          a topic's <b>Routing</b> to send its tickets to their own category or
+          team.
         </div>
         <div id="topics" class="editor"></div>
         <button type="button" id="addTopic" class="add">+ Add topic</button>
@@ -194,16 +214,19 @@
       <div id="staffRoles" class="list"></div>
       <div class="hint" id="staffHint">
         No role is required — server admins always see tickets — but adding your
-        support role is the usual setup.
+        support role is the usual setup. Staff get <b>Claim</b> and <b>Members</b>
+        (add or remove people) buttons in every ticket.
       </div>
 
       <label class="lbl" for="category">Create ticket channels under…</label>
       <select id="category"></select>
-      <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root.</div>
+      <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root. If the category fills up (Discord allows 50 channels) or the bot can't use it, tickets open at the top level instead of failing.</div>
+      <div class="warn-text" id="categoryWarn"></div>
 
       <label class="lbl" for="logChannel">Log &amp; transcript channel</label>
       <select id="logChannel"></select>
-      <div class="hint">Where open/close notices and HTML transcripts are posted. Optional.</div>
+      <div class="hint">Where open, close and reopen notices and HTML transcripts are posted. Optional.</div>
+      <div class="warn-text" id="logWarn"></div>
     </div>
 
     <!-- Step 4 — welcome ---------------------------------------------------->
@@ -252,16 +275,25 @@
         <label class="check"><input type="checkbox" id="openerClose" checked />
           <span><span class="t">Let the opener close their own ticket</span><div class="d">Staff can always close; this also lets the person who opened it.</div></span></label>
         <label class="check"><input type="checkbox" id="claimEnabled" checked />
-          <span><span class="t">Show a Claim button</span><div class="d">Staff can take ownership of a ticket so two people don't double up.</div></span></label>
+          <span><span class="t">Show a Claim button</span><div class="d">Staff can take ownership of a ticket (and release it) so two people don't double up.</div></span></label>
         <label class="check"><input type="checkbox" id="transcripts" />
-          <span><span class="t">Save an HTML transcript on close</span><div class="d" id="transcriptsHint">Posted to the log channel above. Pick a log channel to enable.</div></span></label>
+          <span><span class="t">Save an HTML transcript on close</span><div class="d" id="transcriptsHint">Posted to the log channel above.</div></span></label>
+        <label class="check"><input type="checkbox" id="transcriptDm" />
+          <span><span class="t">Also DM the transcript to the person who opened the ticket</span><div class="d">Best-effort — members who don't accept DMs from server members won't get it.</div></span></label>
+        <div class="callout warn" id="contentNotice" style="display: none">
+          This bot can't read what members type — Discord only shares message
+          text with apps that have the <b>Message Content</b> intent, and it's
+          off for this one. Transcripts still record who took part and when,
+          plus the intake answers and the close reason, but not the
+          conversation itself.
+        </div>
 
         <h2 style="margin-top:20px"><span class="step-num">+</span> Anti-spam limits</h2>
         <div class="row2">
           <div>
             <label class="lbl" for="maxOpen">Max open tickets per member</label>
             <input id="maxOpen" type="number" min="0" max="50" value="1" />
-            <div class="hint">0 = unlimited.</div>
+            <div class="hint">0 = unlimited. Closed tickets kept by “Lock &amp; keep” don't count.</div>
           </div>
           <div>
             <label class="lbl" for="cooldown">Cooldown between opens (seconds)</label>
@@ -307,6 +339,8 @@
       // ── Capabilities (from /api/meta) ───────────────────────────────────
       let defaultBot = false;
       let inviteUrl = null;
+      // Whether the bot may read message content (null = not known yet).
+      let messageContent = null;
 
       // ── Host context (the server DWEEB is connected to) ─────────────────
       let autoGuild = false;
@@ -324,9 +358,12 @@
       let botName = "";
       let botCanManageChannels = true;
       let botCanManageRoles = true;
+      // Server-wide permissions the bot lacks (from the connect pre-flight).
+      let botMissingRequired = [];
+      let botMissingOptional = [];
       let roles = []; // [{ id, name, color, mentionable }]
-      let categories = []; // [{ id, name }]
-      let textChannels = []; // [{ id, name }]
+      let categories = []; // [{ id, name, bot_missing }]
+      let textChannels = []; // [{ id, name, parent_id, bot_missing }]
 
       let staffSelected = new Set();
       let categoryId = "";
@@ -337,12 +374,17 @@
       let pingOpener = true;
       let pingStaff = false;
       let intake = []; // [{ id, label, style, required, placeholder }]
-      let topics = []; // [{ id, label, emoji, description }]
+      // [{ id, label, emoji, description, category_id, staff_roles: [{ id, name, color }] }]
+      let topics = [];
       let closeMode = "delete";
       let closeConfirmation = true;
       let allowOpenerClose = true;
       let claimEnabled = true;
       let transcripts = false;
+      let transcriptDm = false;
+      // Once the admin toggles transcripts themselves, picking a log channel
+      // stops switching them on for them.
+      let transcriptsTouched = false;
       let maxOpen = 1;
       let cooldown = 30;
       let welcome = DEFAULT_WELCOME;
@@ -417,15 +459,52 @@
         sendResize();
       }
 
-      // The permission pre-flight banner, naming the exact fix.
+      const boldList = (names) => names.map((n) => `<b>${escapeHtml(n)}</b>`).join(", ");
+
+      // The permission pre-flight banner, naming the exact fix. The bot needs
+      // its role to hold every permission it hands ticket members — Discord
+      // won't let it grant one it doesn't have — and servers that strip
+      // defaults from @everyone are where that bites.
       function preflightHtml() {
-        if (botCanManageChannels && botCanManageRoles) return "";
-        const missing = [];
-        if (!botCanManageChannels) missing.push("<b>Manage Channels</b>");
-        if (!botCanManageRoles) missing.push("<b>Manage Roles</b>");
-        const invite = botInviteUrl();
-        const add = invite ? ` The quickest fix: <a href="${invite}" target="_blank" rel="noopener">re-add the bot</a> with the right permissions.` : "";
-        return `<div class="callout bad">⚠️ The bot is missing ${missing.join(" and ")}, so it can't ${!botCanManageChannels ? "create ticket channels" : "set who can see a ticket"}. Give its role those permissions in <b>Server Settings → Roles</b>, then click <a href="#" id="retryLink2">re-check</a>.${add}</div>`;
+        const recheck = ` <a href="#" id="retryLink2">Re-check</a>`;
+        if (botMissingRequired.length) {
+          const invite = botInviteUrl();
+          const add = invite && (!botCanManageChannels || !botCanManageRoles)
+            ? ` The quickest fix for Manage Channels / Manage Roles: <a href="${invite}" target="_blank" rel="noopener">re-add the bot</a>.`
+            : "";
+          return `<div class="callout bad">⚠️ Tickets can't open yet: the bot's role is missing ${boldList(botMissingRequired)}. Give the DWEEB bot's role those in <b>Server Settings → Roles</b>.${add}${recheck}</div>`;
+        }
+        if (botMissingOptional.length) {
+          const effects = botMissingOptional.map((n) => OPTIONAL_EFFECT[n]).filter(Boolean);
+          const them = botMissingOptional.length === 1 ? "it" : "them";
+          return `<div class="callout warn">Tickets will open, but the DWEEB bot's role is missing ${boldList(botMissingOptional)}, and the bot can only hand out permissions its own role has — so ${escapeHtml(effects.join("; "))}. Add ${them} to the bot's role in <b>Server Settings → Roles</b> to fix it.${recheck}</div>`;
+        }
+        return "";
+      }
+
+      // What each optional permission the bot lacks costs a ticket.
+      const OPTIONAL_EFFECT = {
+        "Attach Files": "members can't attach files in their tickets, and transcripts can't be uploaded",
+        "Embed Links": "links won't show previews in tickets",
+        "Add Reactions": "members can't react in tickets",
+      };
+
+      // The bot's trouble with the picked category / log channel, if any.
+      function renderChannelWarnings() {
+        const cat = categories.find((c) => c.id === categoryId);
+        const catLacks = (cat && cat.bot_missing) || [];
+        $("categoryWarn").textContent = catLacks.length
+          ? `⚠ The bot can't create tickets in “${cat.name}”: it lacks ${catLacks.join(", ")} there. Allow ${catLacks.length === 1 ? "it" : "them"} for the DWEEB bot's role in the category's permissions — until then tickets open at the top level.`
+          : "";
+        const log = textChannels.find((c) => c.id === logChannelId);
+        const lacks = (log && log.bot_missing) || [];
+        const filesOnly = lacks.length === 1 && lacks[0] === "Attach Files";
+        $("logWarn").textContent = !lacks.length
+          ? ""
+          : filesOnly
+            ? `⚠ The bot can post notices in #${log.name} but can't attach files there, so transcripts won't be uploaded. Allow Attach Files for the DWEEB bot's role in the channel's permissions.`
+            : `⚠ The bot can't post in #${log.name}: it lacks ${lacks.join(", ")} there. Allow ${lacks.length === 1 ? "it" : "them"} for the DWEEB bot's role in the channel's permissions.`;
+        sendResize();
       }
 
       // ── Connect (auto, with the shared bot) ──────────────────────────────
@@ -457,6 +536,8 @@
           botName = data.bot_name || "DWEEB bot";
           botCanManageChannels = data.bot_can_manage_channels !== false;
           botCanManageRoles = data.bot_can_manage_roles !== false;
+          botMissingRequired = Array.isArray(data.bot_missing_required) ? data.bot_missing_required : [];
+          botMissingOptional = Array.isArray(data.bot_missing_optional) ? data.bot_missing_optional : [];
           roles = Array.isArray(data.roles) ? data.roles : [];
           categories = Array.isArray(data.categories) ? data.categories : [];
           textChannels = Array.isArray(data.text_channels) ? data.text_channels : [];
@@ -467,6 +548,10 @@
           if (categoryId && !catIds.has(categoryId)) { categoryId = ""; categoryName = ""; }
           const chIds = new Set(textChannels.map((c) => c.id));
           if (logChannelId && !chIds.has(logChannelId)) { logChannelId = ""; logChannelName = ""; }
+          for (const t of topics) {
+            t.staff_roles = t.staff_roles.filter((r) => roleIds.has(r.id));
+            if (t.category_id && !catIds.has(t.category_id)) t.category_id = "";
+          }
           connected = true;
           rolesLive = true;
           if (auto) { autoState = "ok"; autoError = ""; }
@@ -476,6 +561,7 @@
           renderCategorySelect();
           renderLogSelect();
           renderTranscriptsState();
+          renderTopics();
         } catch (e) {
           if (auto) return autoFail("Couldn't reach the Tickets service.");
         }
@@ -528,55 +614,99 @@
         $("staffCount").textContent = staffSelected.size ? `(${staffSelected.size} selected)` : "(optional)";
       }
 
+      // A category option, marked when the bot can't create tickets in it.
+      const categoryLabel = (c) => (c.bot_missing && c.bot_missing.length ? `${c.name}  ⚠` : c.name);
+
       function renderCategorySelect() {
         const sel = $("category");
         sel.innerHTML = "";
         sel.appendChild(new Option("Top level (no category)", ""));
         for (const c of categories) {
-          const o = new Option(c.name, c.id);
+          const o = new Option(categoryLabel(c), c.id);
           o.selected = c.id === categoryId;
           sel.appendChild(o);
         }
         sel.value = categoryId;
+        renderChannelWarnings();
       }
       $("category").addEventListener("change", (e) => {
         categoryId = e.target.value;
         categoryName = categories.find((c) => c.id === categoryId)?.name || "";
+        renderChannelWarnings();
       });
 
+      // Text channels arrive in server order; group them under their category
+      // the way Discord's own channel list does.
       function renderLogSelect() {
         const sel = $("logChannel");
         sel.innerHTML = "";
-        sel.appendChild(new Option("None — no logs or transcripts", ""));
+        sel.appendChild(new Option("None — no logs", ""));
+        const catName = new Map(categories.map((c) => [c.id, c.name]));
+        let group = null;
+        let groupKey;
         for (const c of textChannels) {
-          const o = new Option("#" + c.name, c.id);
-          o.selected = c.id === logChannelId;
-          sel.appendChild(o);
+          const key = c.parent_id || "";
+          if (group === null || key !== groupKey) {
+            groupKey = key;
+            group = document.createElement("optgroup");
+            group.label = key ? catName.get(key) || "Other" : "No category";
+            sel.appendChild(group);
+          }
+          const flagged = c.bot_missing && c.bot_missing.length;
+          group.appendChild(new Option(`#${c.name}${flagged ? "  ⚠" : ""}`, c.id));
         }
         sel.value = logChannelId;
+        renderChannelWarnings();
       }
       $("logChannel").addEventListener("change", (e) => {
         logChannelId = e.target.value;
         logChannelName = textChannels.find((c) => c.id === logChannelId)?.name || "";
+        // A log channel is where transcripts go: offer them the first time
+        // one is picked, unless the admin already decided.
+        if (logChannelId && !transcriptsTouched) transcripts = true;
         renderTranscriptsState();
+        renderChannelWarnings();
       });
 
       function renderTranscriptsState() {
-        const box = $("transcripts");
         const hasLog = !!logChannelId;
-        box.disabled = !hasLog;
-        if (!hasLog) { transcripts = false; box.checked = false; }
-        $("transcriptsHint").textContent = hasLog
-          ? "Posted to the log channel above."
-          : "Pick a log channel above to enable transcripts.";
+        $("transcripts").checked = transcripts;
+        $("transcriptDm").checked = transcriptDm;
+        $("transcriptDm").disabled = !transcripts;
+        $("transcriptsHint").textContent = !transcripts
+          ? hasLog
+            ? "Off — only open and close notices go to the log channel."
+            : "Off."
+          : hasLog
+            ? "Posted to the log channel above."
+            : transcriptDm
+              ? "No log channel is picked, so transcripts only go to the opener by DM."
+              : "Pick a log channel above, or DM transcripts to the opener below.";
+        $("contentNotice").style.display = transcripts && messageContent === false ? "" : "none";
+        sendResize();
       }
 
       // ── Topics editor (string select) ─────────────────────────────────────
+      const newTopic = (t = {}) => ({
+        id: t.id || genId(),
+        label: t.label || "",
+        emoji: t.emoji || "",
+        description: t.description || "",
+        category_id: t.category_id || "",
+        staff_roles: Array.isArray(t.staff_roles)
+          ? t.staff_roles.map((r) => ({ id: r.id, name: r.name || r.id, color: r.color || 0 }))
+          : [],
+      });
+
       $("addTopic").addEventListener("click", () => {
         if (topics.length >= 25) return;
-        topics.push({ id: genId(), label: "", emoji: "", description: "" });
+        topics.push(newTopic());
         renderTopics();
       });
+
+      // Which topics' Routing sections are open, so a re-render keeps them so.
+      const openRoutes = new Set();
+
       function renderTopics() {
         const wrap = $("topics");
         wrap.innerHTML = "";
@@ -602,7 +732,8 @@
           sub.className = "sub";
           const emoji = document.createElement("input");
           emoji.type = "text";
-          emoji.maxLength = 8;
+          // Room for a pasted custom emoji like <:name:123456789012345678>.
+          emoji.maxLength = 64;
           emoji.placeholder = "Emoji (optional)";
           emoji.value = t.emoji || "";
           emoji.addEventListener("input", () => { t.emoji = emoji.value; });
@@ -613,11 +744,94 @@
           desc.value = t.description || "";
           desc.addEventListener("input", () => { t.description = desc.value; });
           sub.append(emoji, desc);
-          item.append(head, sub);
+          item.append(head, sub, renderRouting(t));
           wrap.appendChild(item);
         });
         $("topicCount").textContent = topics.length ? `(${topics.length})` : "";
         sendResize();
+      }
+
+      // A topic's routing: its own category, and staff that see its tickets
+      // on top of the panel's.
+      function renderRouting(t) {
+        const details = document.createElement("details");
+        details.className = "route";
+        details.open = openRoutes.has(t.id);
+        details.addEventListener("toggle", () => {
+          if (details.open) openRoutes.add(t.id);
+          else openRoutes.delete(t.id);
+          sendResize();
+        });
+        const summary = document.createElement("summary");
+        const bits = [];
+        if (t.category_id) bits.push("own category");
+        if (t.staff_roles.length) bits.push(`${t.staff_roles.length} extra staff role${t.staff_roles.length === 1 ? "" : "s"}`);
+        summary.textContent = "Routing";
+        if (bits.length) {
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = ` · ${bits.join(", ")}`;
+          summary.appendChild(badge);
+        }
+        const body = document.createElement("div");
+        body.className = "route-body";
+
+        const catLbl = document.createElement("label");
+        catLbl.className = "lbl";
+        catLbl.textContent = "Create these tickets under…";
+        const cat = document.createElement("select");
+        cat.setAttribute("aria-label", `Category for “${t.label || "this topic"}” tickets`);
+        cat.appendChild(new Option("Same as the panel", ""));
+        for (const c of categories) cat.appendChild(new Option(categoryLabel(c), c.id));
+        cat.value = t.category_id || "";
+        cat.addEventListener("change", () => { t.category_id = cat.value; renderTopics(); });
+
+        const staffLbl = document.createElement("label");
+        staffLbl.className = "lbl";
+        staffLbl.textContent = "Extra staff for this topic (they see only these tickets)";
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        for (const r of t.staff_roles) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.textContent = r.name;
+          const x = document.createElement("button");
+          x.type = "button";
+          x.textContent = "✕";
+          x.title = `Remove ${r.name}`;
+          x.addEventListener("click", () => {
+            t.staff_roles = t.staff_roles.filter((s) => s.id !== r.id);
+            renderTopics();
+          });
+          chip.append(dot, name, x);
+          chips.appendChild(chip);
+        }
+        const available = roles.filter((r) => !t.staff_roles.some((s) => s.id === r.id));
+        if (t.staff_roles.length < 10 && available.length) {
+          const pick = document.createElement("select");
+          pick.setAttribute("aria-label", `Add a staff role for “${t.label || "this topic"}”`);
+          pick.appendChild(new Option("+ Add a role…", ""));
+          for (const r of available) pick.appendChild(new Option(r.name, r.id));
+          pick.addEventListener("change", () => {
+            const r = roles.find((x) => x.id === pick.value);
+            if (r) t.staff_roles.push({ id: r.id, name: r.name, color: r.color || 0 });
+            renderTopics();
+          });
+          chips.appendChild(pick);
+        } else if (!t.staff_roles.length) {
+          const none = document.createElement("span");
+          none.className = "hint";
+          none.textContent = connected ? "No roles to add." : "Connect your server to pick roles.";
+          chips.appendChild(none);
+        }
+
+        body.append(catLbl, cat, staffLbl, chips);
+        details.append(summary, body);
+        return details;
       }
 
       // ── Intake editor ──────────────────────────────────────────────────────
@@ -771,12 +985,9 @@
           placeholder: f.placeholder || "",
         }));
         if (isSelect())
-          topics = (p.topics || []).map((t) => ({
-            id: genId(),
-            label: t.label || "",
-            emoji: t.emoji || "",
-            description: t.description || "",
-          }));
+          topics = (p.topics || []).map((t) =>
+            newTopic({ label: t.label, emoji: t.emoji, description: t.description }),
+          );
         activePreset = p.id;
         editedSincePreset = false;
         renderTopics();
@@ -814,7 +1025,15 @@
       $("closeConfirm").addEventListener("change", (e) => { closeConfirmation = e.target.checked; });
       $("openerClose").addEventListener("change", (e) => { allowOpenerClose = e.target.checked; });
       $("claimEnabled").addEventListener("change", (e) => { claimEnabled = e.target.checked; });
-      $("transcripts").addEventListener("change", (e) => { transcripts = e.target.checked && !!logChannelId; });
+      $("transcripts").addEventListener("change", (e) => {
+        transcripts = e.target.checked;
+        transcriptsTouched = true;
+        renderTranscriptsState();
+      });
+      $("transcriptDm").addEventListener("change", (e) => {
+        transcriptDm = e.target.checked;
+        renderTranscriptsState();
+      });
       $("welcome").addEventListener("input", (e) => { welcome = e.target.value; });
       $("maxOpen").addEventListener("input", (e) => { maxOpen = clampInt(e.target.value, 0, 50, 1); });
       $("cooldown").addEventListener("input", (e) => { cooldown = clampInt(e.target.value, 0, 86400, 30); });
@@ -925,8 +1144,11 @@
         staffSelected = new Set();
         categoryId = ""; logChannelId = "";
         roles = []; categories = []; textChannels = [];
+        // Routing named the old server's roles and categories.
+        for (const t of topics) { t.staff_roles = []; t.category_id = ""; }
         autoState = "connecting";
         renderStaff();
+        renderTopics();
         connect();
       }
 
@@ -947,6 +1169,7 @@
             const m = await res.json();
             defaultBot = !!m.defaultBot;
             inviteUrl = m.inviteUrl || null;
+            messageContent = typeof m.messageContent === "boolean" ? m.messageContent : null;
           }
         } catch { /* leave defaults */ }
       }
@@ -976,12 +1199,20 @@
           pingOpener = d.ping_opener !== false;
           pingStaff = !!d.ping_staff;
           intake = Array.isArray(d.intake) ? d.intake.map((f) => ({ id: f.id || genId(), label: f.label || "", style: f.style === "paragraph" ? "paragraph" : "short", required: !!f.required, placeholder: f.placeholder || "" })) : [];
-          topics = Array.isArray(d.topics) ? d.topics.map((t) => ({ id: t.id || genId(), label: t.label || "", emoji: t.emoji || "", description: t.description || "" })) : [];
+          topics = Array.isArray(d.topics) ? d.topics.map((t) => newTopic(t)) : [];
+          // A topic's routed staff join the role list too, so their chips name
+          // them even before a live connect refreshes it.
+          for (const t of topics)
+            for (const r of t.staff_roles)
+              if (!roles.some((x) => x.id === r.id)) roles.push({ ...r, mentionable: true });
           closeMode = d.close_mode === "lock" ? "lock" : "delete";
           closeConfirmation = d.close_confirmation !== false;
           allowOpenerClose = d.allow_opener_close !== false;
           claimEnabled = d.claim_enabled !== false;
           transcripts = !!d.transcripts;
+          transcriptDm = !!d.transcript_dm;
+          // A saved panel's transcript choice is deliberate.
+          transcriptsTouched = true;
           maxOpen = Number.isInteger(d.max_open_per_user) ? d.max_open_per_user : 1;
           cooldown = Number.isInteger(d.cooldown_secs) ? d.cooldown_secs : 30;
           if (d.response?.mode === "custom") {
@@ -1014,7 +1245,6 @@
         $("closeConfirm").checked = closeConfirmation;
         $("openerClose").checked = allowOpenerClose;
         $("claimEnabled").checked = claimEnabled;
-        $("transcripts").checked = transcripts;
         $("maxOpen").value = maxOpen;
         $("cooldown").value = cooldown;
         renderCategorySelect();
@@ -1050,14 +1280,21 @@
         }
         const replyText = $("replyText").value.trim();
         if (replyMode === "custom" && !replyText) return fail("Type your custom reply, or switch to the automatic summary.");
+        if (transcripts && !logChannelId && !transcriptDm)
+          return fail("Transcripts need somewhere to go — pick a log channel, tick “Also DM the transcript”, or turn transcripts off.");
 
         const staffRoles = roles.filter((r) => staffSelected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
-        const cleanTopics = topics.filter((t) => t.label.trim()).map((t) => ({
-          id: t.id,
-          label: t.label.trim().slice(0, 100),
-          ...(t.emoji && t.emoji.trim() ? { emoji: t.emoji.trim() } : {}),
-          ...(t.description && t.description.trim() ? { description: t.description.trim().slice(0, 100) } : {}),
-        }));
+        const cleanTopics = topics.filter((t) => t.label.trim()).map((t) => {
+          const cat = t.category_id ? categories.find((c) => c.id === t.category_id) : null;
+          return {
+            id: t.id,
+            label: t.label.trim().slice(0, 100),
+            ...(t.emoji && t.emoji.trim() ? { emoji: t.emoji.trim().slice(0, 64) } : {}),
+            ...(t.description && t.description.trim() ? { description: t.description.trim().slice(0, 100) } : {}),
+            ...(t.category_id ? { category_id: t.category_id, category_name: cat ? cat.name : "" } : {}),
+            ...(t.staff_roles.length ? { staff_roles: t.staff_roles.slice(0, 10) } : {}),
+          };
+        });
         const cleanIntake = intake.filter((f) => f.label.trim()).map((f) => ({
           id: f.id,
           label: f.label.trim().slice(0, 45),
@@ -1085,7 +1322,8 @@
           close_confirmation: closeConfirmation,
           allow_opener_close: allowOpenerClose,
           claim_enabled: claimEnabled,
-          transcripts: transcripts && !!logChannelId,
+          transcripts,
+          transcript_dm: transcripts && transcriptDm,
           max_open_per_user: maxOpen,
           cooldown_secs: cooldown,
           response: replyMode === "custom" ? { mode: "custom", text: replyText } : { mode: "summary" },
@@ -1142,12 +1380,15 @@
                 // time, so lock min/max to 1 (the user can't widen it and break it).
                 ...(isSelect()
                   ? {
-                      options: cleanTopics.map((t) => ({
-                        label: t.label,
-                        value: t.id,
-                        ...(t.description ? { description: t.description } : {}),
-                        ...(t.emoji ? { emoji: t.emoji } : {}),
-                      })),
+                      options: cleanTopics.map((t) => {
+                        const emoji = emojiObject(t.emoji);
+                        return {
+                          label: t.label,
+                          value: t.id,
+                          ...(t.description ? { description: t.description } : {}),
+                          ...(emoji ? { emoji } : {}),
+                        };
+                      }),
                       fields: { min_values: 1, max_values: 1 },
                     }
                   : {}),
@@ -1159,6 +1400,18 @@
             );
           })
           .catch(() => { setBusy(false); fail("Couldn't reach the plugin service."); });
+      }
+
+      // A select option's emoji as the host (and Discord) take it: `{ name }`
+      // for a unicode emoji, `{ id, name, animated? }` for a pasted custom one.
+      // A bare string is silently dropped by the host — which is how every
+      // topic emoji, the presets' included, used to vanish from the menu.
+      function emojiObject(raw) {
+        const s = (raw || "").trim();
+        if (!s) return null;
+        const custom = s.match(/^<(a?):([A-Za-z0-9_~]{1,32}):(\d{15,25})>$/);
+        if (custom) return { id: custom[3], name: custom[2], ...(custom[1] ? { animated: true } : {}) };
+        return { name: s };
       }
 
       function fail(m) { $("error").textContent = m; sendResize(); }

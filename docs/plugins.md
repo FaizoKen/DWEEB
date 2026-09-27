@@ -389,6 +389,10 @@ Rules:
   **locks** the options editor so the user can't break the `value` contract your
   service matches on. It's the select analogue of owning the `custom_id`: stop
   making users hand-map each option's value (e.g. a role id) by copy-paste.
+  `emoji` is Discord's partial-emoji **object** — `{ name: "🎫" }` for a unicode
+  emoji, `{ id, name, animated? }` for a custom one — never a bare string: a
+  string is silently dropped, and the option posts without its emoji (Tickets
+  shipped exactly that bug until 0.3).
 - `fields` is optional: values for the component fields your manifest declared in
   `managesFields` (e.g. `{ min_values: 1, max_values: 1 }`). DWEEB accepts only
   declared fields, clamps each to Discord's limits, writes them onto the
@@ -511,6 +515,14 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > itself and is never forwarded to your plugin, and a disabled component fires
 > no further interactions. This caps the lifetime traffic any one message can
 > generate. Operators can change the window or set `0` for no expiry.
+>
+> The TTL governs the messages people post **through DWEEB** (always via a
+> webhook). A plugin that posts its *own* control messages with the shared bot
+> token and ends their lives itself can be exempted in the dispatcher: its exact
+> control verbs go in `BOT_POSTED_CONTROL_PREFIXES`, and a click qualifies only
+> on a message with no `webhook_id`, signed by the primary app. Tickets'
+> in-channel Close/Claim/Members and Reopen/Delete buttons live exactly as long
+> as their ticket, however long it sits idle.
 >
 > **Each guild can exempt 2 messages** (`PERMANENT_SLOTS_PER_GUILD`),
 > managed from the dashboard: the pre-send confirmation offers

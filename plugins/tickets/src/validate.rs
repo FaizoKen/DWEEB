@@ -5,20 +5,29 @@
 //! there is no per-instance secret or URL to sanitise. The checks here keep a
 //! stored panel *coherent and within Discord's limits*: a real target with a
 //! real guild, snowflake ids, sane bounds on every count and string, and a
-//! config whose pieces fit together (e.g. transcripts need a log channel) — so a
-//! click never produces an action Discord rejects with an opaque error.
+//! config whose pieces fit together (e.g. transcripts need somewhere to go) — so
+//! a click never produces an action Discord rejects with an opaque error.
 
 use std::collections::HashSet;
 
-use crate::store::InstanceConfig;
+use crate::store::{InstanceConfig, StaffRole};
 
 const MAX_STAFF_ROLES: usize = 20;
+/// Extra staff one topic may add. With the panel's 20 that keeps a ticket's
+/// channel at ≤ 33 permission overwrites.
+const MAX_TOPIC_STAFF_ROLES: usize = 10;
 const MAX_INTAKE: usize = 5;
 const MAX_TOPICS: usize = 25; // Discord's string-select option ceiling.
+/// A topic id rides inside the intake modal's `custom_id`
+/// (`tickets:intake:<32-hex id>:<topic>`), which Discord caps at 100
+/// characters — so it must stay short.
+const MAX_TOPIC_ID: usize = 40;
 const MAX_WELCOME: usize = 1500; // leaves headroom under the 2000-char content cap.
 const MAX_CUSTOM_REPLY: usize = 500;
 const MAX_OPEN_CAP: u32 = 50;
 const MAX_COOLDOWN_SECS: u32 = 86_400; // a day.
+/// A unicode emoji, or a `<a:name:id>` custom-emoji token.
+const MAX_EMOJI: usize = 64;
 
 pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     let is_select = match cfg.target.as_str() {
@@ -35,18 +44,7 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     if cfg.staff_roles.len() > MAX_STAFF_ROLES {
         return Err(format!("At most {MAX_STAFF_ROLES} staff roles."));
     }
-    let mut seen = HashSet::new();
-    for role in &cfg.staff_roles {
-        if !is_snowflake(&role.id) {
-            return Err("One of the staff roles has an invalid id.".into());
-        }
-        if !seen.insert(role.id.as_str()) {
-            return Err("The same staff role is listed twice.".into());
-        }
-        if role.name.chars().count() > 100 {
-            return Err("A staff role name is too long.".into());
-        }
-    }
+    check_roles(&cfg.staff_roles, &cfg.guild_id)?;
 
     if let Some(cat) = &cfg.category_id {
         if !is_snowflake(cat) {
@@ -59,8 +57,11 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         }
     }
     // Transcripts need somewhere to go.
-    if cfg.transcripts && cfg.log_channel_id.is_none() {
-        return Err("Pick a log channel to post transcripts to, or turn transcripts off.".into());
+    if cfg.transcripts && cfg.log_channel_id.is_none() && !cfg.transcript_dm {
+        return Err(
+            "Pick a log channel for transcripts (or DM them to the opener), or turn transcripts off."
+                .into(),
+        );
     }
 
     if cfg.naming != "number" && cfg.naming != "username" {
@@ -116,9 +117,14 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         }
         let mut topic_ids = HashSet::new();
         for t in &cfg.topics {
-            let id_len = t.id.chars().count();
-            if id_len == 0 || id_len > 100 {
-                return Err("Each topic id must be 1–100 characters.".into());
+            let id_ok = (1..=MAX_TOPIC_ID).contains(&t.id.len())
+                && t.id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+            if !id_ok {
+                return Err(format!(
+                    "Each topic id must be 1–{MAX_TOPIC_ID} letters, digits, dashes or underscores."
+                ));
             }
             if !topic_ids.insert(t.id.as_str()) {
                 return Err("Topic ids must be unique.".into());
@@ -130,6 +136,25 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
             if let Some(d) = &t.description {
                 if d.chars().count() > 100 {
                     return Err("A topic description must be \u{2264} 100 characters.".into());
+                }
+            }
+            if let Some(e) = &t.emoji {
+                if e.chars().count() > MAX_EMOJI {
+                    return Err("A topic emoji doesn't look right.".into());
+                }
+            }
+            if t.staff_roles.len() > MAX_TOPIC_STAFF_ROLES {
+                return Err(format!(
+                    "A topic can add at most {MAX_TOPIC_STAFF_ROLES} staff roles."
+                ));
+            }
+            check_roles(&t.staff_roles, &cfg.guild_id)?;
+            if let Some(cat) = &t.category_id {
+                if !is_snowflake(cat) {
+                    return Err(format!(
+                        "The category for “{}” doesn't look right.",
+                        t.label.trim()
+                    ));
                 }
             }
         }
@@ -169,6 +194,30 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// A role list is clean: snowflake ids, no repeats, sane names — and never
+/// `@everyone` (its id is the guild's), which as "staff" would make every
+/// ticket visible to the whole server.
+fn check_roles(roles: &[StaffRole], guild_id: &str) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    for role in roles {
+        if !is_snowflake(&role.id) {
+            return Err("One of the staff roles has an invalid id.".into());
+        }
+        if role.id == guild_id {
+            return Err(
+                "@everyone can't be a staff role — that would make every ticket public.".into(),
+            );
+        }
+        if !seen.insert(role.id.as_str()) {
+            return Err("The same staff role is listed twice.".into());
+        }
+        if role.name.chars().count() > 100 {
+            return Err("A staff role name is too long.".into());
+        }
+    }
+    Ok(())
+}
+
 /// Discord snowflakes are 17–20 digits today; accept a little slack.
 pub fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
@@ -177,10 +226,11 @@ pub fn is_snowflake(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{IntakeField, ResponseDef, StaffRole, Topic};
+    use crate::store::{IntakeField, ResponseDef, Topic};
 
     const GUILD: &str = "123456789012345678";
     const ROLE: &str = "223456789012345678";
+    const CATEGORY: &str = "423456789012345678";
 
     fn button_cfg() -> InstanceConfig {
         InstanceConfig {
@@ -207,9 +257,22 @@ mod tests {
             allow_opener_close: true,
             claim_enabled: true,
             transcripts: false,
+            transcript_dm: false,
             max_open_per_user: 1,
             cooldown_secs: 30,
             response: ResponseDef::default(),
+        }
+    }
+
+    fn topic(id: &str) -> Topic {
+        Topic {
+            id: id.into(),
+            label: "Billing".into(),
+            emoji: None,
+            description: None,
+            staff_roles: vec![],
+            category_id: None,
+            category_name: String::new(),
         }
     }
 
@@ -238,10 +301,13 @@ mod tests {
     }
 
     #[test]
-    fn transcripts_require_a_log_channel() {
+    fn transcripts_need_a_log_channel_or_a_dm() {
         let mut c = button_cfg();
         c.transcripts = true;
         assert!(validate_config(&c).is_err());
+        c.transcript_dm = true;
+        assert!(validate_config(&c).is_ok()); // DM-only transcripts are fine
+        c.transcript_dm = false;
         c.log_channel_id = Some("323456789012345678".into());
         assert!(validate_config(&c).is_ok());
     }
@@ -284,22 +350,80 @@ mod tests {
         c.target = "string_select".into();
         // select with no topics → error
         assert!(validate_config(&c).is_err());
-        c.topics = vec![Topic {
-            id: "t1".into(),
-            label: "Billing".into(),
-            emoji: None,
-            description: None,
-        }];
+        c.topics = vec![topic("t1")];
         assert!(validate_config(&c).is_ok());
         // a button with topics → error
         let mut b = button_cfg();
-        b.topics = vec![Topic {
-            id: "t1".into(),
-            label: "Billing".into(),
-            emoji: None,
-            description: None,
-        }];
+        b.topics = vec![topic("t1")];
         assert!(validate_config(&b).is_err());
+    }
+
+    #[test]
+    fn topic_ids_fit_inside_the_intake_custom_id() {
+        let mut c = button_cfg();
+        c.target = "string_select".into();
+        c.topics = vec![topic(&"x".repeat(MAX_TOPIC_ID))];
+        assert!(validate_config(&c).is_ok());
+        // The longest legal id still fits Discord's 100-character custom_id.
+        let longest = format!(
+            "tickets:intake:{}:{}",
+            "a".repeat(32),
+            "x".repeat(MAX_TOPIC_ID)
+        );
+        assert!(longest.len() <= 100);
+        c.topics = vec![topic(&"x".repeat(MAX_TOPIC_ID + 1))];
+        assert!(validate_config(&c).is_err());
+        c.topics = vec![topic("has space")];
+        assert!(validate_config(&c).is_err());
+        c.topics = vec![topic("")];
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn topic_routing_is_validated() {
+        let mut c = button_cfg();
+        c.target = "string_select".into();
+        let mut t = topic("t1");
+        t.category_id = Some(CATEGORY.into());
+        t.staff_roles = vec![StaffRole {
+            id: "523456789012345678".into(),
+            name: "Billing".into(),
+            color: 0,
+        }];
+        c.topics = vec![t.clone()];
+        assert!(validate_config(&c).is_ok());
+
+        let mut bad = t.clone();
+        bad.category_id = Some("nope".into());
+        c.topics = vec![bad];
+        assert!(validate_config(&c).is_err());
+
+        let mut crowded = t.clone();
+        crowded.staff_roles = (0..=MAX_TOPIC_STAFF_ROLES)
+            .map(|i| StaffRole {
+                id: format!("5234567890123456{i:02}"),
+                name: String::new(),
+                color: 0,
+            })
+            .collect();
+        c.topics = vec![crowded];
+        assert!(validate_config(&c).is_err());
+
+        let mut emoji = t;
+        emoji.emoji = Some("x".repeat(MAX_EMOJI + 1));
+        c.topics = vec![emoji];
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn everyone_can_never_be_staff() {
+        let mut c = button_cfg();
+        c.staff_roles = vec![StaffRole {
+            id: GUILD.into(),
+            name: "@everyone".into(),
+            color: 0,
+        }];
+        assert!(validate_config(&c).is_err());
     }
 
     #[test]
