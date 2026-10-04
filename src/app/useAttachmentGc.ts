@@ -35,12 +35,7 @@ export function useAttachmentGc(): void {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const reconcile = () =>
-      garbageCollect(
-        collectReferencedMediaUrls(
-          useMessageStore.getState(),
-          useSavedMessagesStore.getState().entries,
-        ),
-      );
+      garbageCollect(collectReferencedMediaUrls(useMessageStore.getState(), savedMessageRoots()));
     const runReconcile = () => {
       if (timer) clearTimeout(timer);
       timer = null;
@@ -53,10 +48,7 @@ export function useAttachmentGc(): void {
     // Only materialize persisted blobs that one of the initial roots can use.
     // The database prunes every other key without reading its bytes.
     const initialReferences = Array.from(
-      collectReferencedMediaUrls(
-        useMessageStore.getState(),
-        useSavedMessagesStore.getState().entries,
-      ),
+      collectReferencedMediaUrls(useMessageStore.getState(), savedMessageRoots()),
     );
     void hydrateAttachments(initialReferences).then(() => {
       if (cancelled) return;
@@ -82,6 +74,16 @@ export function useAttachmentGc(): void {
       unsubscribeSaved();
     };
   }, []);
+}
+
+/**
+ * Browser saves whose uploads must stay: the listed ones, plus any another tab
+ * deleted while this one was open — that tab may have loaded the save into its
+ * editor first (see `deletedElsewhere`).
+ */
+export function savedMessageRoots(): readonly Pick<SavedMessageRecord, "payload">[] {
+  const { entries, deletedElsewhere } = useSavedMessagesStore.getState();
+  return deletedElsewhere.length > 0 ? [...entries, ...deletedElsewhere] : entries;
 }
 
 /**

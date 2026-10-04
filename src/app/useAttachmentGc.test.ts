@@ -11,7 +11,8 @@ import {
   subscribeAttachments,
 } from "@/core/state/attachmentStore";
 import { useMessageStore } from "@/core/state/messageStore";
-import { collectReferencedMediaUrls } from "./useAttachmentGc";
+import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
+import { collectReferencedMediaUrls, savedMessageRoots } from "./useAttachmentGc";
 
 const registeredIds: string[] = [];
 
@@ -41,6 +42,7 @@ function registerTestFile(): { id: string; url: string } {
 afterEach(() => {
   for (const id of registeredIds.splice(0)) forgetAttachment(id);
   useMessageStore.setState({ message: emptyMessage(), past: [], future: [], selectedId: null });
+  useSavedMessagesStore.setState({ entries: [], deletedElsewhere: [] });
 });
 
 describe("attachment history garbage collection", () => {
@@ -110,6 +112,35 @@ describe("attachment history garbage collection", () => {
     );
 
     expect(getAttachmentFile(savedUpload.id)?.name).toBe("hello.txt");
+    expect(getAttachmentFile(orphan.id)).toBeNull();
+  });
+
+  // The tab that deleted a browser save may have loaded it into its editor
+  // first; its uploads live in the IndexedDB every tab shares.
+  it("keeps uploads of a browser save another tab deleted while this one was open", () => {
+    const listed = registerTestFile();
+    const deletedElsewhere = registerTestFile();
+    const orphan = registerTestFile();
+    const record = (id: string, url: string) => ({
+      id,
+      name: id,
+      savedAt: 1,
+      payload: messageWithFile(url),
+    });
+    useSavedMessagesStore.setState({
+      entries: [record("listed", listed.url)],
+      deletedElsewhere: [record("elsewhere", deletedElsewhere.url)],
+    });
+
+    garbageCollect(
+      collectReferencedMediaUrls(
+        { message: emptyMessage(), past: [], future: [] },
+        savedMessageRoots(),
+      ),
+    );
+
+    expect(getAttachmentFile(listed.id)).not.toBeNull();
+    expect(getAttachmentFile(deletedElsewhere.id)).not.toBeNull();
     expect(getAttachmentFile(orphan.id)).toBeNull();
   });
 });

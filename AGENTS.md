@@ -1957,6 +1957,21 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   The plugins' token-URL calls (followups, `@original` edits) discard their errors and were
   checked clean. Guarded by `an_unreachable_post_never_records_the_webhook_token` and
   `opening_scrubs_webhook_urls_from_stored_errors`.
+- **A localStorage list is mutated read-modify-write, never written from a store's memory**
+  (2026-10-05). Every open tab shares one record, so a store's in-memory copy is only *that
+  tab's view*. `savedMessagesStore` (browser drafts) wrote `[record, ...get().entries]`, and a
+  user lost four hours of work: a tab opened earlier still held the two old drafts, and its next
+  save wrote them back over the four another tab had just saved ("only kept the 2 old ones + the
+  one i currently saved" — reproduced exactly in headless Chrome before the fix). Every mutation
+  now re-reads the record, applies its one change and writes that back; an unreadable record
+  (`getItem` throwing) refuses the write rather than saving over a list it couldn't see. The view
+  follows other tabs via the `storage` event (plus a bfcache `pageshow`), keeping unchanged
+  record objects by identity. Entries another tab deleted move to `deletedElsewhere` and stay
+  attachment-GC roots (`savedMessageRoots` in useAttachmentGc) for the page's life: that tab may
+  have loaded the save into its editor, and its uploads live in the IndexedDB every tab shares.
+  Webhook recents, local schedules and plugin edit tokens were already read-modify-write — keep
+  any new list on that shape. Guarded by "saved messages shared between tabs" in
+  `savedMessagesStore.test.ts` (the incident case fails on the old code).
 - **Browser upload hydration follows reachability.** Startup collects `session://` ids from the
   live message, undo/redo, and named browser saves, reads only those IndexedDB blobs, and deletes
   orphan keys with a key-only cursor (never materializing stale file bytes). Those orphan deletes
