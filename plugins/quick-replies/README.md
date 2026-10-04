@@ -46,7 +46,12 @@ A reply is more than a line of text:
   substituted per click, and mentions are pinned to the clicker exactly like a
   typed reply — a saved message can never `@everyone`. Saved messages are
   client-side content, so **no bot token** is involved and the click path still
-  does zero outbound I/O.
+  does zero outbound I/O. **Pictures must be links** (`https://…`): a picture
+  uploaded from your computer lives only in your browser (DWEEB's own Send
+  uploads it with the message), and Discord refuses a whole reply that names one
+  it can't fetch. The config UI flags such a message the moment it's picked and
+  saving refuses it; a reply stored before that check goes out with the picture
+  left out (`src/media.rs`).
 - **Always private** — every reply is ephemeral: only the person who clicks sees
   it. That's the right default for FAQ/support/link-hub macros and keeps a busy
   channel quiet no matter how often a button is used.

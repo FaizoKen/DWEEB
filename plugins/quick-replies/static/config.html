@@ -280,6 +280,73 @@
       const hasComponents = (p) =>
         !!p && typeof p === "object" && Array.isArray(p.components) && p.components.length > 0;
 
+      // Every picture or file in a saved message that a reply couldn't send.
+      // Mirrors src/media.rs — keep the two in step. A picture uploaded from the
+      // user's computer is a session:// handle to a file that only exists in
+      // their browser: DWEEB's own Send uploads it, but a reply goes out from
+      // this service, and Discord refuses the whole reply over one picture it
+      // can't fetch ("… didn't respond in time"). Only an http(s) link travels.
+      const SENDABLE_URL = /^https?:\/\/[\s\S]/i;
+      const MAX_MEDIA_NAME = 80;
+      function unsendableMedia(components) {
+        const out = [];
+        const note = (media, isFile) => {
+          const url = media && typeof media.url === "string" ? media.url : "";
+          if (!SENDABLE_URL.test(url)) out.push({ name: mediaName(url), isFile });
+        };
+        const walk = (list) => {
+          for (const node of Array.isArray(list) ? list : []) {
+            if (!node || typeof node !== "object") continue;
+            if (node.type === 9) {
+              if (node.accessory && node.accessory.type === 11) note(node.accessory.media, false);
+            } else if (node.type === 11) {
+              note(node.media, false);
+            } else if (node.type === 12) {
+              for (const item of Array.isArray(node.items) ? node.items : []) note(item && item.media, false);
+            } else if (node.type === 13) {
+              note(node.file, true);
+            } else if (node.type === 17) {
+              walk(node.components);
+            }
+          }
+        };
+        walk(components);
+        return out;
+      }
+      // The uploaded file's name (session://<id>/<name>, attachment://<name>),
+      // else the reference as written.
+      function mediaName(raw) {
+        const url = raw.trim();
+        if (!url) return "a picture with no link";
+        let name = url;
+        if (url.startsWith("session://")) {
+          const rest = url.slice("session://".length);
+          const slash = rest.indexOf("/");
+          if (slash >= 0 && slash < rest.length - 1) name = rest.slice(slash + 1);
+        } else if (url.startsWith("attachment://") && url.length > "attachment://".length) {
+          name = url.slice("attachment://".length);
+        }
+        const chars = Array.from(name);
+        return chars.length > MAX_MEDIA_NAME ? chars.slice(0, MAX_MEDIA_NAME).join("") + "…" : name;
+      }
+      // "a.png", "a.png, b.png" or "a.png, b.png, c.png and 2 more".
+      function quoteNames(found) {
+        const shown = found.slice(0, 3).map((u) => u.name).join(", ");
+        return found.length > 3 ? `${shown} and ${found.length - 3} more` : shown;
+      }
+      // What to tell the user about a saved message a reply can't send as it
+      // is, or "" when it can. `live`: this is the version members get today.
+      function unsendableNote(payload, live) {
+        const found = hasComponents(payload) ? unsendableMedia(payload.components) : [];
+        if (!found.length) return "";
+        const files = found.filter((u) => u.isFile);
+        const until = live ? " Until then, members get this reply without it." : "";
+        if (files.length) {
+          return `Quick Replies can't send the file this message attaches (${quoteNames(files)}) — a reply can't carry file attachments. In DWEEB, load this saved message, remove the file, save it again, then pick the new save here.${until}`;
+        }
+        return `Quick Replies can't send this message's picture (${quoteNames(found)}). Anything uploaded from your computer stays in your browser, so a reply can only show a picture by its link: in DWEEB, load this saved message, paste an image link (https://…) into the picture's Image URL field, save it again, then pick the new save here.${until}`;
+      }
+
       const newKey = () => "k_" + Math.random().toString(36).slice(2, 10);
       function newCard(seed = {}) {
         const payload = hasComponents(seed.payload) ? seed.payload : null;
@@ -419,7 +486,10 @@
             card.source = b.dataset.src;
             // Adopt the picked saved message when first switching to "saved" and
             // one is already chosen; otherwise the picker prompts for one.
-            if (card.source === "saved" && card.savedId) applySaved(card, card.savedId);
+            if (card.source === "saved" && card.savedId) {
+              applySaved(card, card.savedId);
+              renderSavedPicker(card, savedBox);
+            }
             paintSource();
             sendResize();
           }),
@@ -489,10 +559,23 @@
         } else {
           sel.value = card.savedId || "";
         }
+        box.appendChild(sel);
+
+        // Says so the moment a message with an uploaded picture is picked —
+        // otherwise its topic only fails later, on a member's click.
+        const problem = document.createElement("div");
+        const paintProblem = () => {
+          problem.replaceChildren();
+          const text = unsendableNote(card.payload, card.payload === card.storedPayload);
+          if (text) problem.appendChild(callout("bad", text));
+        };
+        paintProblem();
         sel.addEventListener("change", () => {
           if (sel.value && sel.value !== "__snapshot__") applySaved(card, sel.value);
+          paintProblem();
+          sendResize();
         });
-        box.appendChild(sel);
+        box.appendChild(problem);
 
         const note = document.createElement("div");
         note.className = "hint";
@@ -1054,7 +1137,12 @@
           target = d.target === "string_select" ? "string_select" : "button";
           if (d.guild_id && isSnowflake(d.guild_id)) guildId = d.guild_id;
           if (d.guild_name) guildName = d.guild_name;
-          cards = (d.replies || []).map(newCard);
+          cards = (d.replies || []).map((r) => {
+            const card = newCard(r);
+            // What members get today, so a problem with it can say so.
+            card.storedPayload = card.payload;
+            return card;
+          });
           // Seed the role list with any saved gate roles so they show by name
           // even before a live connect; maybeConnect() then refreshes the list.
           const seen = new Set(roles.map((r) => r.id));
@@ -1102,6 +1190,11 @@
           if (!usesSaved(c) && !c.body.trim())
             return fail("Every reply needs a message — type one or pick a saved message.");
           if (c.body.length > MAX_BODY) return fail(`A reply is too long (max ${MAX_BODY} characters).`);
+          // The server refuses these too; catching them here points at the card.
+          if (usesSaved(c) && unsendableMedia(c.payload.components).length) {
+            const which = isSelect() && c.label.trim() ? `“${c.label.trim()}”` : "This reply";
+            return fail(`${which} can't be sent as it is — see the note on that reply.`);
+          }
         }
 
         // Any reply gated by role makes this menu server-specific (the role ids

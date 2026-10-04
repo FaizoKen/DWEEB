@@ -13,6 +13,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::media;
 use crate::store::{QuickReply, RoleRef};
 
 // Interaction request types.
@@ -277,15 +278,21 @@ pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
 
     // A saved message takes priority over the typed title/body: send its own
     // Components V2 layout, with every text node's `{...}` variables substituted.
-    if let Some(components) = saved_components(reply, ctx) {
-        return json!({
-            "type": RESPONSE_CHANNEL_MESSAGE,
-            "data": {
-                "flags": flags,
-                "allowed_mentions": { "parse": [], "users": [ctx.user_id] },
-                "components": components,
-            }
-        });
+    match saved_components(reply, ctx) {
+        // Nothing but pictures this service can't send. An empty reply would be
+        // refused outright, so say why instead.
+        Some(components) if components.is_empty() => return ephemeral_text(PICTURES_ONLY),
+        Some(components) => {
+            return json!({
+                "type": RESPONSE_CHANNEL_MESSAGE,
+                "data": {
+                    "flags": flags,
+                    "allowed_mentions": { "parse": [], "users": [ctx.user_id] },
+                    "components": components,
+                }
+            })
+        }
+        None => {}
     }
 
     let mut text = String::new();
@@ -323,15 +330,27 @@ pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
 /// carries a **non-empty** `components` array (matching the Components V2 shape
 /// DWEEB hands over); a `content`/`embeds`-only payload is ignored, since a V2
 /// interaction response can't carry those fields.
-fn saved_components(reply: &QuickReply, ctx: &ReplyContext) -> Option<Value> {
-    let components = reply.payload.as_ref()?.get("components")?;
-    if components.as_array().is_none_or(|a| a.is_empty()) {
+///
+/// Any picture Discord couldn't fetch from here (an upload from the author's
+/// browser) is left out: one such URL makes Discord refuse the whole reply.
+/// Saving now refuses those, but replies stored before it still carry them. The
+/// result is empty when nothing else was left.
+fn saved_components(reply: &QuickReply, ctx: &ReplyContext) -> Option<Vec<Value>> {
+    let components = reply.payload.as_ref()?.get("components")?.as_array()?;
+    if components.is_empty() {
         return None;
     }
     let mut components = components.clone();
-    substitute_in_content(&mut components, ctx);
+    media::strip_unsendable(&mut components);
+    for component in &mut components {
+        substitute_in_content(component, ctx);
+    }
     Some(components)
 }
+
+/// What a member sees when a saved reply held nothing but pictures this service
+/// can't send.
+const PICTURES_ONLY: &str = "This reply is only pictures that can't be shown here. Let a moderator know so they can update it.";
 
 /// Recursively substitute `{user}`/`{username}`/`{server}` into every Components
 /// V2 **`content`** string (Text Displays, container/section text). Only
@@ -567,6 +586,56 @@ mod tests {
         let mut r2 = reply("typed wins again");
         r2.payload = Some(json!({ "content": "plain", "embeds": [] }));
         assert_eq!(body_text(&build_reply(&r2, &ctx())), "typed wins again");
+    }
+
+    /// The 2026-10-01 report: a saved reply whose thumbnail was uploaded from
+    /// the author's computer. Discord refuses a reply naming that `session://`
+    /// handle, so the member got "didn't respond in time". The reply must
+    /// still send, with its text, minus the picture.
+    #[test]
+    fn build_reply_leaves_out_a_picture_uploaded_from_the_browser() {
+        let mut r = reply("");
+        r.payload = Some(json!({
+            "flags": 32768,
+            "components": [{
+                "type": 17,
+                "components": [{
+                    "type": 9,
+                    "components": [{ "type": 10, "content": "## Access Roles, {username}" }],
+                    "accessory": {
+                        "type": 11,
+                        "media": { "url": "session://365f8d9a61bd419e/icon67.png" },
+                    },
+                }],
+            }],
+        }));
+        let out = build_reply(&r, &ctx());
+        assert_eq!(out["type"], 4);
+        assert!(!out.to_string().contains("session://"), "{out}");
+        assert_eq!(
+            out["data"]["components"],
+            json!([{
+                "type": 17,
+                "components": [{ "type": 10, "content": "## Access Roles, Ada" }],
+            }])
+        );
+    }
+
+    #[test]
+    fn build_reply_explains_a_reply_that_was_only_unsendable_pictures() {
+        let mut r = reply("");
+        r.payload = Some(json!({
+            "components": [{
+                "type": 12,
+                "items": [{ "media": { "url": "session://a/x.png" } }],
+            }],
+        }));
+        let out = build_reply(&r, &ctx());
+        assert_eq!(out["data"]["flags"], FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
+        assert_eq!(
+            out["data"]["components"][0]["content"].as_str(),
+            Some(PICTURES_ONLY)
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@
 
 mod config;
 mod discord;
+mod media;
 mod rest;
 mod routes;
 mod store;

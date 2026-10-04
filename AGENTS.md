@@ -1184,6 +1184,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the stats route resolves the bot from the **token** and ignores the id in the path — a
   request naming a completely unrelated bot returns *our* stats — so a wrong `TOPGG_BOT_ID`
   will appear to work and a 200 is no proof the id is right.
+- **A browser upload can't travel into a plugin's reply** (2026-10-05). The editor keeps an
+  uploaded picture as `session://<id>/<name>`, a handle to a blob in *that browser's*
+  IndexedDB; only DWEEB's own Send turns it into a real upload. Anything a plugin stores and
+  later sends itself — a Quick Replies saved message, a captured `message` template — still
+  carries the handle, and Discord refuses the **whole** interaction response over one media URL
+  it can't fetch, which the member sees as "<app> didn't respond in time" with nothing in our
+  logs. Reported 2026-10-01: two of four topics on one menu dead, exactly the two whose
+  thumbnail was an upload, while each saved message posted fine on its own; prod then held 9
+  such Quick Replies instances across 3 servers. Quick Replies now refuses one at save (config
+  UI note on the card + `validate.rs`) and, for replies stored before that, leaves the picture
+  out at click time (`src/media.rs`, mirrored in `config.html`'s `unsendableMedia`) instead of
+  sending a reply Discord rejects. Only an `http(s)://` link is sendable. **Known residue:** 3
+  giveaway instances (2026-09-16) hold a `session://` thumbnail in `message_template`, which
+  their UPDATE_MESSAGE re-render sends as-is; the fix there is unverified (whether Discord
+  resolves an `attachment://` name against an edited message's kept attachments needs a live
+  test) and was left for a separate change. Hosting uploads so a reply *can* carry them is a
+  product decision (storage, abuse — instance creation is anonymous), not a bug fix.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,

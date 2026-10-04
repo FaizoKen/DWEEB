@@ -4,11 +4,13 @@
 //! there's no SSRF guard to write. The checks here keep a stored instance
 //! *coherent and within Discord's limits*: a real target, a reply set that fits
 //! the component (exactly one for a button, 1..=25 for a select), stable option
-//! keys, bounded text, and real snowflake role ids on any gate — everything the
-//! interaction path later trusts.
+//! keys, bounded text, saved messages whose pictures Discord can fetch, and real
+//! snowflake role ids on any gate — everything the interaction path later
+//! trusts.
 
 use std::collections::HashSet;
 
+use crate::media::{self, Unsendable};
 use crate::store::{InstanceConfig, QuickReply, RoleRef};
 
 /// A string select tops out at 25 options, so a menu manages at most 25 replies.
@@ -150,9 +152,66 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
             return Err("That saved message is too large to send.".into());
         }
     }
+    // A picture uploaded from the author's computer exists only in their
+    // browser, and Discord refuses a whole reply over one it can't fetch — so
+    // the topic would be dead on every click. Say so now, while someone is here
+    // to fix it (see `media`).
+    if let Some(components) = reply
+        .payload
+        .as_ref()
+        .and_then(|p| p.get("components"))
+        .and_then(|c| c.as_array())
+    {
+        let unsendable = media::unsendable_media(components);
+        if !unsendable.is_empty() {
+            return Err(unsendable_message(reply, is_button, &unsendable));
+        }
+    }
 
     validate_roles(&reply.allowed_roles)?;
     Ok(())
+}
+
+/// Why a saved message can't be sent as this reply, and what to change in it.
+/// A picture can be swapped for a link; a File component only ever shows an
+/// uploaded attachment, so it has to come out.
+fn unsendable_message(reply: &QuickReply, is_button: bool, found: &[Unsendable]) -> String {
+    let which = match reply.label.trim() {
+        label if !is_button && !label.is_empty() => format!("“{label}”"),
+        _ => "This reply".to_string(),
+    };
+    let files: Vec<&Unsendable> = found.iter().filter(|u| u.is_file).collect();
+    if !files.is_empty() {
+        return format!(
+            "{which} attaches a file Quick Replies can't send ({}). A reply can't carry file \
+             attachments — in DWEEB, load that saved message, remove the file, save it again, \
+             then pick the new save here.",
+            quote_names(&files)
+        );
+    }
+    let pictures: Vec<&Unsendable> = found.iter().collect();
+    format!(
+        "{which} uses a picture Quick Replies can't send ({}). Anything uploaded from your \
+         computer stays in your browser, so a reply can only show a picture by its link: in \
+         DWEEB, load that saved message, paste an image link (https://…) into the picture's \
+         Image URL field, save it again, then pick the new save here.",
+        quote_names(&pictures)
+    )
+}
+
+/// "a.png", "a.png, b.png" or "a.png, b.png, c.png and 2 more".
+fn quote_names(found: &[&Unsendable]) -> String {
+    const SHOWN: usize = 3;
+    let mut names = found
+        .iter()
+        .take(SHOWN)
+        .map(|u| u.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if found.len() > SHOWN {
+        names.push_str(&format!(" and {} more", found.len() - SHOWN));
+    }
+    names
 }
 
 /// Validate a reply's gate roles: real snowflakes, no duplicates, bounded count
@@ -289,6 +348,70 @@ mod tests {
             "components": [{ "type": 10, "content": huge }]
         }));
         assert!(validate_config(&cfg("button", vec![r])).is_err());
+    }
+
+    fn with_thumbnail(label: &str, url: &str) -> QuickReply {
+        let mut r = reply("k1", "");
+        r.label = label.into();
+        r.payload = Some(serde_json::json!({
+            "components": [{
+                "type": 9,
+                "components": [{ "type": 10, "content": "Access Roles" }],
+                "accessory": { "type": 11, "media": { "url": url } },
+            }]
+        }));
+        r
+    }
+
+    #[test]
+    fn refuses_a_saved_message_with_a_picture_uploaded_from_the_browser() {
+        let r = with_thumbnail("Access Roles", "session://365f8d9a61bd419e/icon67.png");
+        let err = validate_config(&cfg("string_select", vec![r])).unwrap_err();
+        assert!(err.starts_with("“Access Roles” uses a picture"), "{err}");
+        assert!(err.contains("(icon67.png)"), "{err}");
+        assert!(err.contains("Image URL"), "{err}");
+
+        // A button has no topic label to name.
+        let r = with_thumbnail("", "session://365f8d9a61bd419e/icon67.png");
+        let err = validate_config(&cfg("button", vec![r])).unwrap_err();
+        assert!(err.starts_with("This reply uses a picture"), "{err}");
+
+        // The same message with the picture linked instead is fine.
+        let r = with_thumbnail(
+            "Access Roles",
+            "https://cdn.discordapp.com/attachments/1/2/a.png",
+        );
+        assert!(validate_config(&cfg("string_select", vec![r])).is_ok());
+    }
+
+    #[test]
+    fn refuses_a_saved_message_that_attaches_a_file() {
+        let mut r = reply("k1", "");
+        r.payload = Some(serde_json::json!({
+            "components": [
+                { "type": 10, "content": "Rules attached." },
+                { "type": 13, "file": { "url": "session://abc/rules.pdf" } },
+                { "type": 12, "items": [{ "media": { "url": "session://def/a.png" } }] },
+            ]
+        }));
+        let err = validate_config(&cfg("button", vec![r])).unwrap_err();
+        // The file is named first: linking the picture alone wouldn't help.
+        assert!(err.starts_with("This reply attaches a file"), "{err}");
+        assert!(err.contains("(rules.pdf)"), "{err}");
+    }
+
+    #[test]
+    fn names_at_most_three_unsendable_pictures() {
+        let items: Vec<_> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|n| serde_json::json!({ "media": { "url": format!("session://x/{n}.png") } }))
+            .collect();
+        let mut r = reply("k1", "");
+        r.payload = Some(serde_json::json!({
+            "components": [{ "type": 12, "items": items }]
+        }));
+        let err = validate_config(&cfg("button", vec![r])).unwrap_err();
+        assert!(err.contains("(a.png, b.png, c.png and 2 more)"), "{err}");
     }
 
     #[test]

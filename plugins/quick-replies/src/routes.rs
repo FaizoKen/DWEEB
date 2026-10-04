@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::discord::{self, ReplyContext};
+use crate::media;
 use crate::rest;
 use crate::store::{EditLookup, InstanceConfig, MaskedInstance, Store};
 use crate::validate;
@@ -276,6 +277,24 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
         user_name: interaction.actor_name(),
         server_name,
     };
+
+    // A reply saved before uploads were refused still names one; it goes out
+    // without those pictures (see `media`). Info, never a page: the member got
+    // their reply, and only the admin can fix the saved message.
+    let left_out = reply
+        .payload
+        .as_ref()
+        .and_then(|p| p.get("components"))
+        .and_then(Value::as_array)
+        .map_or(0, |c| media::unsendable_media(c).len());
+    if left_out > 0 {
+        tracing::info!(
+            instance = id,
+            reply = %reply.key,
+            left_out,
+            "sent a saved reply without the pictures it can't send"
+        );
+    }
 
     Json(discord::build_reply(reply, &ctx)).into_response()
 }
