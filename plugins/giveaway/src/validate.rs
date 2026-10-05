@@ -101,9 +101,32 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
                 "This message is too large to keep a live placeholder template for.".into(),
             );
         }
+        // Live placeholders re-send the whole message from this service on every
+        // click, and Discord refuses the entire edit over one picture it can't
+        // fetch — so a template naming a browser-only upload would make every
+        // click on the giveaway fail.
+        let unsendable = crate::discord::unsendable_media(template);
+        if !unsendable.is_empty() {
+            return Err(unsendable_media_message(&unsendable));
+        }
     }
 
     Ok(())
+}
+
+/// The refusal for a template that names pictures or files this service can't
+/// send, naming them so the author can find and fix them.
+fn unsendable_media_message(names: &[String]) -> String {
+    let quoted = names
+        .iter()
+        .take(3)
+        .map(|n| format!("“{n}”"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if names.len() > 3 { ", …" } else { "" };
+    format!(
+        "Your message uses live placeholders, so this service re-sends it on every click — and it can't send {quoted}{more}. A picture uploaded from your computer stays in your browser: paste an image link (https://…) into its URL field instead, and take out any File component (a re-sent message can't carry one). Or remove the giveaway placeholders from the message."
+    )
 }
 
 /// Validate a list of role references: real snowflakes, no duplicates, bounded
@@ -127,7 +150,70 @@ fn validate_roles(roles: &[RoleRef], kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Discord snowflakes are 17–20 digits today; accept a little slack.
+/// A Discord snowflake: 17–20 digits that fit the u64 Discord stores them in.
+/// The old 15–25-digit slack let through ids past u64 that Discord answers
+/// with a 400 — reachable by anyone through the open config API, and mapped to
+/// a paging 502 before `ConnectError::InvalidId` existed.
 pub fn is_snowflake(s: &str) -> bool {
-    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    (17..=20).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Requirements;
+    use serde_json::json;
+
+    fn cfg(template: Option<serde_json::Value>) -> InstanceConfig {
+        InstanceConfig {
+            target: "button".into(),
+            guild_id: "123456789012345678".into(),
+            guild_name: String::new(),
+            prize: "Nitro".into(),
+            winner_count: 1,
+            description: None,
+            host_user_id: None,
+            ends_at: None,
+            requirements: Requirements::default(),
+            host_roles: vec![],
+            dm_winners: false,
+            announcement: None,
+            message_template: template,
+        }
+    }
+
+    #[test]
+    fn a_snowflake_is_17_to_20_digits_that_fit_a_u64() {
+        assert!(is_snowflake("80351110224678912")); // 17 digits
+        assert!(is_snowflake("123456789012345678"));
+        assert!(is_snowflake("18446744073709551615")); // u64::MAX
+        assert!(!is_snowflake("1234567890123456")); // 16 digits
+        assert!(!is_snowflake("99999999999999999999")); // 20 digits, past u64
+        assert!(!is_snowflake("123456789012345678901")); // 21 digits
+        assert!(!is_snowflake("12345678901234567a"));
+        assert!(!is_snowflake(""));
+    }
+
+    #[test]
+    fn a_template_naming_a_browser_upload_is_refused_by_name() {
+        let template = json!([
+            { "type": 10, "content": "Win {prize}!" },
+            { "type": 9, "components": [{ "type": 10, "content": "x" }],
+              "accessory": { "type": 11, "media": { "url": "session://k1/banner.png" } } }
+        ]);
+        let err = validate_config(&cfg(Some(template))).unwrap_err();
+        assert!(err.contains("banner.png"), "{err}");
+
+        let file = json!([{ "type": 13, "file": { "url": "attachment://rules.pdf" } }]);
+        assert!(validate_config(&cfg(Some(file))).is_err());
+
+        let linked = json!([
+            { "type": 10, "content": "Win {prize}!" },
+            { "type": 12, "items": [{ "media": { "url": "https://cdn.example/p.png" } }] }
+        ]);
+        assert!(validate_config(&cfg(Some(linked))).is_ok());
+        assert!(validate_config(&cfg(None)).is_ok());
+    }
 }

@@ -475,8 +475,11 @@ fn over_response(
         ),
     };
     let enter = discord::enter_id(id);
-    if let Some(msg) = interaction.message.as_ref() {
-        if let Some(template) = g.config.message_template.as_ref() {
+    // Only a click on the PUBLIC message may flip it in the reply — a private
+    // copy's message is that copy (see `MessageRef::is_ephemeral`), which gets
+    // the ephemeral note instead.
+    if let Some(msg) = interaction.message.as_ref().filter(|m| !m.is_ephemeral()) {
+        if let Some(template) = usable_template(&g.config) {
             // Re-render the whole message: winners, status and the final count all
             // settle into the host's own text.
             let count = state.store.count_entries(id).unwrap_or(0);
@@ -498,6 +501,17 @@ fn over_response(
         }
     }
     Json(discord::ephemeral_text(&note)).into_response()
+}
+
+/// The stored message template, unless it names a picture or file this service
+/// can't send (see [`discord::unsendable_media`]). Saving refuses such a
+/// template now, but one stored before that check would make every click fail
+/// — Discord refuses the whole edit — so those giveaways fall back to restyling
+/// the live message's button instead, which keeps them working.
+fn usable_template(cfg: &InstanceConfig) -> Option<&Value> {
+    cfg.message_template
+        .as_ref()
+        .filter(|t| discord::unsendable_media(t).is_empty())
 }
 
 /// Host panel "enter / leave as participant" (and the member-facing Leave button
@@ -571,6 +585,13 @@ fn handle_toggle(
         }
     } else {
         let _ = state.store.leave(id, uid);
+    }
+    // The entrant count just moved, but this click sits on an ephemeral panel
+    // and can't reach the public message — bring its count current out of band
+    // (as a draw does), instead of leaving it stale until the next Enter click.
+    if g.status == Status::Open {
+        let count = state.store.count_entries(id).unwrap_or(0);
+        spawn_public_refresh(state, &g, id, count);
     }
     if is_host {
         // Re-render the host panel in place (entered flag flipped).
@@ -651,11 +672,10 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
         Err(resp) => return resp,
     };
     if g.status != Status::Open {
-        return Json(discord::ephemeral_text(match g.status {
-            Status::Ended => "This giveaway has already been drawn. Use **Reroll** to pick again.",
-            _ => "This giveaway was cancelled, so there's nothing to draw.",
-        }))
-        .into_response();
+        // A stale Open panel (another host drew or cancelled first): replace it
+        // in place with the panel for the giveaway's real state, so a host told
+        // the giveaway was drawn is actually handed the Reroll button.
+        return Json(as_update(current_host_panel(state, interaction, &g, id))).into_response();
     }
 
     let mut rng = draw_rng();
@@ -684,10 +704,15 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     match state.store.commit_draw(id, &winners) {
         Ok(true) => {}
         Ok(false) => {
-            return Json(discord::ephemeral_text(
-                "This giveaway was already drawn by another host.",
-            ))
-            .into_response()
+            // Another host won the race: show this host the real state.
+            let current = state.store.get(id).ok().flatten().unwrap_or(g);
+            return Json(as_update(current_host_panel(
+                state,
+                interaction,
+                &current,
+                id,
+            )))
+            .into_response();
         }
         Err(e) => {
             tracing::error!(error = %e, "set winners");
@@ -706,6 +731,20 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     let count = entrant_count as i64;
     let ended = ended_giveaway(&g, winners.clone());
     spawn_public_refresh(state, &ended, id, count);
+    // The public message's Enter button is disabled from here on, and a
+    // host-role host (no Manage Server) has no Message Info door — so hand the
+    // drawing host the Ended panel, with its Reroll, as a private followup.
+    spawn_panel_followup(
+        state,
+        interaction,
+        &discord::host_panel(
+            id,
+            Status::Ended,
+            false,
+            count,
+            g.config.winner_count as usize,
+        ),
+    );
 
     let vars = render_vars(&g.config, count, winners, Status::Ended);
     Json(discord::announcement_message(
@@ -728,13 +767,21 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
         .into_response();
     }
 
-    // Reroll excludes everyone already drawn, so a reroll is genuinely fresh.
-    // Reservoir sampling retains only the requested winners in memory.
+    // Reroll excludes everyone ANY draw has picked — the current winners and
+    // everyone an earlier reroll replaced — so a reroll is genuinely fresh and a
+    // second one can't hand the win back. Reservoir sampling retains only the
+    // requested winners in memory.
+    let mut excluded = g.drawn.clone();
+    for w in &g.winners {
+        if !excluded.contains(w) {
+            excluded.push(w.clone());
+        }
+    }
     let mut rng = draw_rng();
     let (winners, eligible_count) =
         match state
             .store
-            .sample_entrants(id, &g.winners, g.config.winner_count as usize, |bound| {
+            .sample_entrants(id, &excluded, g.config.winner_count as usize, |bound| {
                 rand_below(&mut rng, bound)
             }) {
             Ok(sample) => sample,
@@ -753,7 +800,9 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
         .into_response();
     }
 
-    match state.store.commit_reroll(id, &g.winners, &winners) {
+    let mut drawn = excluded.clone();
+    drawn.extend(winners.iter().cloned());
+    match state.store.commit_reroll(id, &g.winners, &winners, &drawn) {
         Ok(true) => {}
         Ok(false) => {
             return Json(discord::ephemeral_text(
@@ -774,7 +823,7 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
     let entries = state
         .store
         .count_entries(id)
-        .unwrap_or(eligible_count as i64 + g.winners.len() as i64);
+        .unwrap_or(eligible_count as i64 + excluded.len() as i64);
     // Refresh the public message to the rerolled winners out of band (see the
     // note in `handle_draw`).
     let ended = ended_giveaway(&g, winners.clone());
@@ -794,18 +843,32 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
         Ok(g) => g,
         Err(resp) => return resp,
     };
-    if g.status == Status::Cancelled {
-        return Json(discord::ephemeral_text(
-            "This giveaway is already cancelled.",
-        ))
-        .into_response();
+    if g.status != Status::Open {
+        // Already drawn (the Ended panel offers no Cancel — this is a stale Open
+        // panel) or already cancelled: show the real state in place, and never
+        // touch winners a draw has already announced.
+        return Json(as_update(current_host_panel(state, interaction, &g, id))).into_response();
     }
-    if let Err(e) = state.store.set_cancelled(id) {
-        tracing::error!(error = %e, "cancel");
-        return Json(discord::ephemeral_text(
-            "Something went wrong cancelling — try again.",
-        ))
-        .into_response();
+    match state.store.set_cancelled(id) {
+        Ok(true) => {}
+        Ok(false) => {
+            // Another host drew or cancelled between our read and this write.
+            let current = state.store.get(id).ok().flatten().unwrap_or(g);
+            return Json(as_update(current_host_panel(
+                state,
+                interaction,
+                &current,
+                id,
+            )))
+            .into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "cancel");
+            return Json(discord::ephemeral_text(
+                "Something went wrong cancelling — try again.",
+            ))
+            .into_response();
+        }
     }
     // Refresh the public message to its cancelled state out of band (see the note
     // in `handle_draw`) — button disabled, status "cancelled".
@@ -814,6 +877,7 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
         config: g.config.clone(),
         status: Status::Cancelled,
         winners: vec![],
+        drawn: g.drawn.clone(),
     };
     spawn_public_refresh(state, &cancelled, id, count);
     // Tell everyone, publicly — entrants deserve to know it's off.
@@ -848,16 +912,14 @@ fn live_message_data(
 ) -> Option<Value> {
     let enter = discord::enter_id(id);
     let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
+    let template = usable_template(&g.config);
     let (label, disabled) = match g.status {
         Status::Open => {
             // The host's own Enter wording (from the template, else the live
             // button), substituted then stamped with the count — exactly as a
             // fresh entry would restamp it.
-            let base = g
-                .config
-                .message_template
-                .as_ref()
-                .and_then(discord::enter_button_label)
+            let base = template
+                .and_then(|t| discord::enter_button_label(t, msg.components.as_ref(), &enter))
                 .or_else(|| {
                     msg.components
                         .as_ref()
@@ -872,7 +934,7 @@ fn live_message_data(
         Status::Cancelled => (LABEL_CANCELLED.to_string(), true),
         Status::Ended => (LABEL_ENDED.to_string(), true),
     };
-    let resp = match g.config.message_template.as_ref() {
+    let resp = match template {
         Some(template) => discord::update_message_from_template(
             msg,
             template,
@@ -905,7 +967,7 @@ fn host_enter_response(
         .application_id
         .as_deref()
         .zip(interaction.token.as_deref())
-        .zip(interaction.message.as_ref())
+        .zip(interaction.message.as_ref().filter(|m| !m.is_ephemeral()))
         .and_then(|((app_id, token), msg)| {
             let data = live_message_data(g, msg, id, count)?;
             let panel_data = panel.get("data")?.clone();
@@ -930,6 +992,11 @@ fn remember_refresher(state: &AppState, interaction: &discord::Interaction, id: 
     ) else {
         return;
     };
+    // Never capture a click on a private copy: its `@original` is that copy, so
+    // a handle to it would aim a later draw's refresh at the wrong message.
+    if message.is_ephemeral() {
+        return;
+    }
     let now = unix_millis();
     let entry = Refresher {
         application_id: app_id.to_string(),
@@ -1005,7 +1072,7 @@ fn entry_count_update(
     id: &str,
     count: i64,
 ) -> Option<Value> {
-    let msg = interaction.message.as_ref()?;
+    let msg = interaction.message.as_ref().filter(|m| !m.is_ephemeral())?;
     let data = live_message_data(g, msg, id, count)?;
     Some(json!({ "type": 7, "data": data }))
 }
@@ -1033,10 +1100,47 @@ fn render_vars(
 /// renders the new state. Keeps `handle_draw` / `handle_reroll` from juggling a
 /// second store read.
 fn ended_giveaway(g: &Giveaway, winners: Vec<String>) -> Giveaway {
+    let mut drawn = g.drawn.clone();
+    for w in &winners {
+        if !drawn.contains(w) {
+            drawn.push(w.clone());
+        }
+    }
     Giveaway {
         config: g.config.clone(),
         status: Status::Ended,
         winners,
+        drawn,
+    }
+}
+
+/// The host panel for the giveaway's current state — what a stale panel's
+/// Draw / Cancel is replaced with in place, so the host sees the controls that
+/// actually apply (an Ended giveaway's Reroll) rather than a dead end.
+fn current_host_panel(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    g: &Giveaway,
+    id: &str,
+) -> Value {
+    let entered = interaction
+        .actor_id()
+        .map(|uid| state.store.is_entered(id, uid).unwrap_or(false))
+        .unwrap_or(false);
+    let count = state.store.count_entries(id).unwrap_or(0);
+    discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize)
+}
+
+/// Best-effort: post `panel` to the acting host as a private followup (its
+/// `data` is ephemeral), using this interaction's own token. A no-op without a
+/// token / app id (tests).
+fn spawn_panel_followup(state: &AppState, interaction: &discord::Interaction, panel: &Value) {
+    if let (Some(app_id), Some(token), Some(data)) = (
+        interaction.application_id.as_deref(),
+        interaction.token.as_deref(),
+        panel.get("data"),
+    ) {
+        spawn_followup(state, app_id, token, data.clone());
     }
 }
 
@@ -1605,6 +1709,216 @@ mod tests {
             denied.to_string().contains("Only a server manager"),
             "{denied}"
         );
+    }
+
+    /// README: "Reroll — picks a fresh set excluding everyone already drawn".
+    /// Two entrants, one winner: draw → W1; reroll → W2; a second reroll must
+    /// refuse rather than hand the win back to W1.
+    #[test]
+    fn a_second_reroll_never_redraws_a_previously_drawn_winner() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
+        state.store.enter(id, "100").unwrap();
+        state.store.enter(id, "200").unwrap();
+        let _ = body_json(handle_component(
+            &state,
+            &control_click(id, "draw", MANAGE_GUILD),
+        ));
+        let w1 = state.store.get(id).unwrap().unwrap().winners;
+        let _ = body_json(handle_component(
+            &state,
+            &control_click(id, "reroll", MANAGE_GUILD),
+        ));
+        let w2 = state.store.get(id).unwrap().unwrap().winners;
+        assert_ne!(w1, w2);
+        let third = body_json(handle_component(
+            &state,
+            &control_click(id, "reroll", MANAGE_GUILD),
+        ));
+        assert!(third.to_string().contains("already been drawn"), "{third}");
+        assert_eq!(state.store.get(id).unwrap().unwrap().winners, w2);
+    }
+
+    /// A stale Open panel's Cancel after the draw must not wipe the winners the
+    /// draw already announced (and DM'd).
+    #[test]
+    fn cancel_after_a_draw_keeps_the_announced_winners() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
+        state.store.enter(id, "100").unwrap();
+        let _ = body_json(handle_component(
+            &state,
+            &control_click(id, "draw", MANAGE_GUILD),
+        ));
+        let resp = body_json(handle_component(
+            &state,
+            &control_click(id, "cancel", MANAGE_GUILD),
+        ));
+        let g = state.store.get(id).unwrap().unwrap();
+        assert_eq!(g.status, Status::Ended, "{resp}");
+        assert_eq!(g.winners, vec!["100".to_string()]);
+        // No public "cancelled" notice: the stale panel becomes the Ended panel.
+        assert_eq!(resp["type"], 7, "{resp}");
+        assert!(resp.to_string().contains("giveaway:reroll:abc"), "{resp}");
+    }
+
+    /// Another plugin's button BEFORE the Enter button: the Enter button keeps
+    /// its own wording (with the count), and the neighbour keeps its id.
+    #[test]
+    fn the_enter_label_comes_from_the_enter_button_not_a_neighbour() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "Win {prize}! {entries} in" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ]);
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template.clone())))
+            .unwrap();
+        let v = body_json(handle_component(
+            &state,
+            &enter_click(id, "555", "0", template),
+        ));
+        let row = &v["data"]["components"][1]["components"];
+        assert_eq!(row[0]["custom_id"], "quickreplies:zzz");
+        assert_eq!(row[0]["label"], "Rules");
+        assert_eq!(row[1]["custom_id"], format!("giveaway:{id}"));
+        assert_eq!(row[1]["label"], "Enter (1)", "{row}");
+    }
+
+    /// First save: the template still carries the editor's default id. With
+    /// another interactive button first, the re-render must bind the button the
+    /// live message actually bound — not take over the neighbour.
+    #[test]
+    fn a_first_save_template_never_hijacks_a_neighbouring_button() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "Win {prize}! {entries} in" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": "btn_action" }
+            ]}
+        ]);
+        let live = json!([
+            { "type": 10, "content": "Win Nitro! 0 in" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ]);
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template)))
+            .unwrap();
+        let v = body_json(handle_component(&state, &enter_click(id, "555", "0", live)));
+        let row = &v["data"]["components"][1]["components"];
+        assert_eq!(row[0]["custom_id"], "quickreplies:zzz", "{row}");
+        assert_eq!(row[1]["custom_id"], format!("giveaway:{id}"), "{row}");
+    }
+
+    /// A host's "Leave as participant" on a stale panel after another host
+    /// cancelled: the in-place edit must stay a plain-content message — Discord
+    /// refuses switching a message between V2 and non-V2.
+    #[test]
+    fn leave_on_a_cancelled_giveaway_keeps_the_panel_plain_content() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
+        state.store.enter(id, "1").unwrap();
+        state.store.set_cancelled(id).unwrap();
+        let v = body_json(handle_component(
+            &state,
+            &control_click(id, "leave", MANAGE_GUILD),
+        ));
+        let flags = v["data"]["flags"].as_u64().unwrap_or(0);
+        assert!(
+            !(v["type"] == 7 && flags & 32768 != 0),
+            "type-7 edit of a non-V2 panel into a V2 message: {v}"
+        );
+    }
+
+    /// A template stored before saving refused browser-only uploads would make
+    /// every click fail (Discord refuses the whole edit). Such a giveaway falls
+    /// back to restyling the live button, so it keeps working.
+    #[test]
+    fn a_stored_template_naming_an_upload_falls_back_to_the_live_button() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "Win {prize}! {entries} in" },
+            { "type": 12, "items": [{ "media": { "url": "session://k1/prize.png" } }] },
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ]);
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template)))
+            .unwrap();
+        let live = json!([
+            { "type": 10, "content": "Win Nitro! 0 in" },
+            { "type": 12, "items": [{ "media": {
+                "url": "https://cdn.discordapp.com/attachments/1/2/prize.png",
+                "proxy_url": "https://media.discordapp.net/prize.png", "attachment_id": "2"
+            }}]},
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ]);
+        let v = body_json(handle_component(&state, &enter_click(id, "555", "0", live)));
+        assert_eq!(v["type"], 7, "{v}");
+        let s = v.to_string();
+        assert!(!s.contains("session://"), "{s}");
+        // The live message's own picture survives, cleaned to a sendable shape.
+        assert!(
+            s.contains("cdn.discordapp.com/attachments/1/2/prize.png"),
+            "{s}"
+        );
+        assert!(!s.contains("proxy_url"), "{s}");
+        assert!(s.contains("Enter (1)"), "{s}");
+    }
+
+    /// A click on someone's private copy of the giveaway (a Quick Replies reply
+    /// carrying its button) never re-renders that copy as the public message,
+    /// and never becomes the out-of-band refresh target.
+    #[test]
+    fn a_click_on_a_private_copy_is_never_mistaken_for_the_public_message() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
+            .unwrap();
+        let click: discord::Interaction = serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "1",
+            "application_id": "999000",
+            "token": "tok_copy",
+            "data": { "custom_id": format!("giveaway:{id}") },
+            "member": { "user": { "id": "555" }, "roles": [], "permissions": "0" },
+            "message": { "content": "", "components": template(id), "flags": 32832 }
+        }))
+        .unwrap();
+        let v = body_json(handle_component(&state, &click));
+        assert_eq!(v["type"], 4, "{v}");
+        assert!(v.to_string().contains("You're in"), "{v}");
+        assert!(state.refreshers.lock().unwrap().entries.is_empty());
     }
 
     #[test]

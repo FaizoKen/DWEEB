@@ -191,6 +191,17 @@ pub struct MessageRef {
     pub flags: Option<u64>,
 }
 
+impl MessageRef {
+    /// True when this is an ephemeral message — one of our panels, or someone's
+    /// private copy of the giveaway (a Quick Replies reply carrying its button),
+    /// never the public giveaway message. Its interaction token's `@original`
+    /// is that private message, so it must never be re-rendered as the public
+    /// message or cached as the out-of-band refresh target.
+    pub fn is_ephemeral(&self) -> bool {
+        self.flags.unwrap_or(0) & FLAG_EPHEMERAL != 0
+    }
+}
+
 impl Interaction {
     /// The acting member's user id, however the payload carries it.
     pub fn actor_id(&self) -> Option<&str> {
@@ -536,19 +547,301 @@ pub fn update_button_response(
 ) -> Option<Value> {
     let components = message.components.as_ref()?;
     let patched = restyle_button(components, custom_id, label, disabled);
+    Some(wrap_update(message, patched))
+}
+
+/// Wrap a re-rendered component tree as the `UPDATE_MESSAGE` for `message`,
+/// preserving its V2 flag / plain content. Every media reference is cleaned to
+/// the shape Discord accepts on the way back in (see [`sanitize_media`]), and a
+/// V2 message is kept inside the per-message text budget (see
+/// [`fit_text_budget`]) — an edit Discord refuses fails the member's click.
+fn wrap_update(message: &MessageRef, mut components: Value) -> Value {
+    sanitize_media(&mut components);
+    let flags = message.flags.unwrap_or(0);
+    let v2 = flags & FLAG_IS_COMPONENTS_V2 != 0;
+    if v2 {
+        fit_text_budget(&mut components, MAX_V2_TEXT);
+    }
     let mut data = json!({
-        "components": patched,
+        "components": components,
         "allowed_mentions": { "parse": [] },
     });
-    let flags = message.flags.unwrap_or(0);
-    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+    if v2 {
         // V2 forbids `content`; the text already lives inside `components`.
         data["flags"] = json!(FLAG_IS_COMPONENTS_V2);
     } else if let Some(content) = message.content.as_deref() {
         // Preserve the plain content so the edit doesn't blank the message body.
         data["content"] = json!(content);
     }
-    Some(json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data }))
+    json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data })
+}
+
+// ── media this service can (and can't) send (pure) ────────────────────────────
+
+const COMPONENT_FILE: u64 = 13;
+
+/// The fields Discord stamps onto every media item it returns. They're
+/// output-only: the update endpoints refuse an edit that echoes any of them back
+/// (the same list DWEEB strips before re-sending a restored message —
+/// `src/core/serialization/attachments.ts`).
+const RESOLVED_MEDIA_FIELDS: &[&str] = &[
+    "proxy_url",
+    "height",
+    "width",
+    "content_type",
+    "loading_state",
+    "id",
+    "placeholder",
+    "placeholder_version",
+    "content_scan_metadata",
+    "flags",
+];
+
+/// Longest file name an error message quotes before eliding the rest.
+const MAX_MEDIA_NAME: usize = 80;
+
+/// Whether Discord can fetch this media URL itself.
+fn is_sendable_url(url: &str) -> bool {
+    ["https://", "http://"].iter().any(|scheme| {
+        url.len() > scheme.len()
+            && url.as_bytes()[..scheme.len()].eq_ignore_ascii_case(scheme.as_bytes())
+    })
+}
+
+/// Every picture or file in a stored message template that this service could
+/// never send, named the way its author would recognise it. Empty when the
+/// whole template can be re-sent.
+///
+/// The template is captured from DWEEB's editor, where a picture uploaded from
+/// the author's computer is a `session://<id>/<name>` handle to a file that
+/// lives only in that browser — DWEEB's own Send uploads the bytes, but a
+/// re-render from here can't, and Discord refuses the **whole** edit over one
+/// media URL it can't fetch, so every click on the giveaway would fail. Only an
+/// `http(s)://` link is sendable, and a File component never is: it can only
+/// show an attachment uploaded *with* a message.
+pub fn unsendable_media(template: &Value) -> Vec<String> {
+    fn walk(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            Value::Object(o) => {
+                if o.get("type").and_then(Value::as_u64) == Some(COMPONENT_FILE) {
+                    out.push(describe_media(o.get("file")));
+                } else if let Some(media) = o.get("media") {
+                    let url = media.get("url").and_then(Value::as_str).unwrap_or("");
+                    if !is_sendable_url(url) {
+                        out.push(describe_media(Some(media)));
+                    }
+                }
+                o.values().for_each(|x| walk(x, out));
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(template, &mut out);
+    out
+}
+
+/// What to call an unsendable picture in a message to its author: the name of
+/// the file they uploaded (`session://<id>/<name>`, `attachment://<name>`), else
+/// the reference exactly as written.
+fn describe_media(media: Option<&Value>) -> String {
+    let url = media
+        .and_then(|m| m.get("url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if url.is_empty() {
+        return "a picture with no link".to_string();
+    }
+    let name = url
+        .strip_prefix("session://")
+        .and_then(|rest| rest.split_once('/').map(|(_, name)| name))
+        .or_else(|| url.strip_prefix("attachment://"))
+        .filter(|name| !name.is_empty())
+        .unwrap_or(url);
+    if name.chars().count() > MAX_MEDIA_NAME {
+        let mut short: String = name.chars().take(MAX_MEDIA_NAME).collect();
+        short.push('…');
+        short
+    } else {
+        name.to_string()
+    }
+}
+
+/// Clean every `media` / `file` object in an outgoing component tree to the
+/// shape Discord accepts on an edit: drop the resolved output-only fields, and
+/// keep exactly one reference — a concrete `url` (Discord re-resolves it) in
+/// preference to the `attachment_id` a fetched message carries beside it.
+fn sanitize_media(tree: &mut Value) {
+    match tree {
+        Value::Array(a) => a.iter_mut().for_each(sanitize_media),
+        Value::Object(o) => {
+            for key in ["media", "file"] {
+                if let Some(Value::Object(media)) = o.get_mut(key) {
+                    clean_media_object(media);
+                }
+            }
+            o.values_mut().for_each(sanitize_media);
+        }
+        _ => {}
+    }
+}
+
+fn clean_media_object(media: &mut Map<String, Value>) {
+    for field in RESOLVED_MEDIA_FIELDS {
+        media.remove(*field);
+    }
+    let has_url = media
+        .get("url")
+        .and_then(Value::as_str)
+        .is_some_and(|u| !u.is_empty());
+    if has_url {
+        media.remove("attachment_id");
+    } else {
+        media.remove("url");
+        let has_attachment = media
+            .get("attachment_id")
+            .and_then(Value::as_str)
+            .is_some_and(|a| !a.is_empty());
+        if !has_attachment {
+            media.remove("attachment_id");
+        }
+    }
+}
+
+// ── the V2 text budget (pure) ────────────────────────────────────────────────
+
+/// Text the V2 budget counts, in UTF-16 code units (how DWEEB counts Discord's
+/// limits): every text display `content`, button / option `label`, option
+/// `description` and select `placeholder` in the tree.
+fn text_units(v: &Value) -> usize {
+    match v {
+        Value::Array(a) => a.iter().map(text_units).sum(),
+        Value::Object(o) => o
+            .iter()
+            .map(|(k, val)| match (k.as_str(), val) {
+                ("content" | "label" | "description" | "placeholder", Value::String(s)) => {
+                    s.encode_utf16().count()
+                }
+                _ => text_units(val),
+            })
+            .sum(),
+        _ => 0,
+    }
+}
+
+/// Keep a re-rendered V2 message inside Discord's per-message text budget.
+///
+/// DWEEB validates the template against short placeholder samples, but
+/// `{winners}` expands to up to twenty mentions after a draw — a message near
+/// the limit then goes over it, Discord refuses the edit, and every click on the
+/// giveaway fails. Trimming the longest text display (where the expansion
+/// almost always landed) keeps the message editable.
+fn fit_text_budget(tree: &mut Value, budget: usize) {
+    let total = text_units(tree);
+    if total <= budget {
+        return;
+    }
+    let mut excess = total - budget;
+    let mut contents = Vec::new();
+    content_pointers(tree, &mut String::new(), &mut contents);
+    contents.sort_by_key(|c| std::cmp::Reverse(c.1));
+    for (pointer, len) in contents {
+        if excess == 0 {
+            break;
+        }
+        let Some(Value::String(text)) = tree.pointer_mut(&pointer) else {
+            continue;
+        };
+        // Keep `keep` units plus a one-unit ellipsis, removing at least `excess`.
+        let keep = len.saturating_sub(excess + 1);
+        let mut kept = String::new();
+        let mut units = 0;
+        for c in text.chars() {
+            if units + c.len_utf16() > keep {
+                break;
+            }
+            units += c.len_utf16();
+            kept.push(c);
+        }
+        kept.push('…');
+        excess = excess.saturating_sub(len.saturating_sub(units + 1));
+        *text = kept;
+    }
+}
+
+/// RFC 6901 pointers to every text display `content` string, with its length in
+/// UTF-16 units.
+fn content_pointers(v: &Value, path: &mut String, out: &mut Vec<(String, usize)>) {
+    match v {
+        Value::Array(a) => {
+            for (i, item) in a.iter().enumerate() {
+                let len = path.len();
+                path.push('/');
+                path.push_str(&i.to_string());
+                content_pointers(item, path, out);
+                path.truncate(len);
+            }
+        }
+        Value::Object(o) => {
+            for (k, val) in o {
+                let len = path.len();
+                path.push('/');
+                path.push_str(&escape_pointer(k));
+                if let ("content", Value::String(s)) = (k.as_str(), val) {
+                    out.push((path.clone(), s.encode_utf16().count()));
+                } else {
+                    content_pointers(val, path, out);
+                }
+                path.truncate(len);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn escape_pointer(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
+/// RFC 6901 pointer to the first object (depth-first, in the same order the
+/// patchers below walk) that satisfies `pred`.
+fn find_pointer(tree: &Value, pred: &dyn Fn(&Map<String, Value>) -> bool) -> Option<String> {
+    fn walk(v: &Value, path: &mut String, pred: &dyn Fn(&Map<String, Value>) -> bool) -> bool {
+        match v {
+            Value::Array(a) => {
+                for (i, item) in a.iter().enumerate() {
+                    let len = path.len();
+                    path.push('/');
+                    path.push_str(&i.to_string());
+                    if walk(item, path, pred) {
+                        return true;
+                    }
+                    path.truncate(len);
+                }
+                false
+            }
+            Value::Object(o) => {
+                if pred(o) {
+                    return true;
+                }
+                for (k, val) in o {
+                    let len = path.len();
+                    path.push('/');
+                    path.push_str(&escape_pointer(k));
+                    if walk(val, path, pred) {
+                        return true;
+                    }
+                    path.truncate(len);
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+    let mut path = String::new();
+    walk(tree, &mut path, pred).then_some(path)
 }
 
 // ── message placeholders (pure) ──────────────────────────────────────────────
@@ -655,21 +948,55 @@ fn is_token(s: &str) -> bool {
 /// Render the bound giveaway message from its stored `template` (the host's own
 /// message, captured with raw `{tokens}`): substitute every Text Display content
 /// and button label, then restyle the Enter button (label + `disabled`, and pin
-/// its `custom_id` to `enter_id`). Returns the component tree for an
-/// `UPDATE_MESSAGE`. Pure — the template is cloned, never mutated.
+/// its `custom_id` to `enter_id`). `live` is the component tree of the message
+/// as Discord echoed it, used to find the Enter button in a template captured
+/// before DWEEB bound it (see [`enter_pointer`]). Returns the component tree for
+/// an `UPDATE_MESSAGE`. Pure — the template is cloned, never mutated.
 pub fn render_bound_message(
     template: &Value,
     vars: &RenderVars,
     enter_id: &str,
     enter_label: Option<&str>,
     disabled: bool,
+    live: Option<&Value>,
 ) -> Value {
+    let target = enter_pointer(template, live, enter_id);
     let mut out = template.clone();
     substitute_tree(&mut out, vars);
     // Patch the Enter button last so its computed label (live count / "ended")
-    // wins over any substitution done to it above.
-    patch_enter_button(&mut out, enter_id, enter_label, disabled);
+    // wins over any substitution done to it above. Substitution only rewrites
+    // strings, so a pointer resolved on the raw template still addresses the
+    // same node here.
+    if !patch_button_with_id(&mut out, enter_id, enter_id, enter_label, disabled) {
+        if let Some(Value::Object(o)) = target.as_deref().and_then(|p| out.pointer_mut(p)) {
+            apply_button(o, enter_id, enter_label, disabled);
+        }
+    }
     out
+}
+
+/// Where the giveaway's Enter button sits in a (raw) template: the button that
+/// already carries `enter_id`; else — a template captured on first save, before
+/// DWEEB bound the button — the template node at the place the bound button
+/// sits in the `live` message; else the first interactive button. Resolving by
+/// position is what keeps another plugin's button that happens to come first
+/// (a Rules reply beside Enter) from being taken over, relabelled, and unbound.
+fn enter_pointer(template: &Value, live: Option<&Value>, enter_id: &str) -> Option<String> {
+    let has_id =
+        |o: &Map<String, Value>| o.get("custom_id").and_then(Value::as_str) == Some(enter_id);
+    if let Some(p) = find_pointer(template, &has_id) {
+        return Some(p);
+    }
+    if let Some(p) = live.and_then(|l| find_pointer(l, &has_id)) {
+        let same_place_is_a_button = template
+            .pointer(&p)
+            .and_then(Value::as_object)
+            .is_some_and(is_interactive_button);
+        if same_place_is_a_button {
+            return Some(p);
+        }
+    }
+    find_pointer(template, &|o| is_interactive_button(o))
 }
 
 /// Walk a component tree, substituting placeholders in the two user-text fields:
@@ -706,39 +1033,23 @@ fn substitute_tree(v: &mut Value, vars: &RenderVars) {
     }
 }
 
-/// The label of the giveaway's Enter button in a (raw) template — the lone
-/// interactive button — so the live count can be appended to the host's own
-/// wording. None when the template carries no interactive button.
-pub fn enter_button_label(template: &Value) -> Option<String> {
-    fn walk(v: &Value) -> Option<String> {
-        match v {
-            Value::Array(a) => a.iter().find_map(walk),
-            Value::Object(o) => {
-                if is_interactive_button(o) {
-                    return Some(
-                        o.get("label")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                    );
-                }
-                o.values().find_map(walk)
-            }
-            _ => None,
-        }
-    }
-    walk(template)
-}
-
-/// Restyle the giveaway's Enter button inside a rendered tree: set its label
-/// (when given) + `disabled`, and pin its `custom_id` to `enter_id`. The stored
-/// template may carry a stale/default id (it was captured before DWEEB adopted
-/// the minted one), so we target the button already carrying `enter_id` or — for
-/// a freshly-attached template — the first interactive button.
-fn patch_enter_button(tree: &mut Value, enter_id: &str, label: Option<&str>, disabled: bool) {
-    if !patch_button_with_id(tree, enter_id, enter_id, label, disabled) {
-        patch_first_interactive_button(tree, enter_id, label, disabled);
-    }
+/// The label of the giveaway's Enter button in a (raw) template — the same
+/// button [`render_bound_message`] restyles (see [`enter_pointer`]) — so the
+/// live count is appended to the host's own wording for *that* button, never a
+/// neighbour's. None when the template carries no interactive button.
+pub fn enter_button_label(
+    template: &Value,
+    live: Option<&Value>,
+    enter_id: &str,
+) -> Option<String> {
+    let pointer = enter_pointer(template, live, enter_id)?;
+    let node = template.pointer(&pointer)?;
+    Some(
+        node.get("label")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
 }
 
 /// Patch every button whose `custom_id == match_id` to `new_id` + label/disabled.
@@ -781,30 +1092,6 @@ fn patch_button_with_id(
     hit
 }
 
-/// Patch the first interactive button found (depth-first), pinning it to
-/// `new_id`. Returns whether one was patched.
-fn patch_first_interactive_button(
-    tree: &mut Value,
-    new_id: &str,
-    label: Option<&str>,
-    disabled: bool,
-) -> bool {
-    match tree {
-        Value::Array(a) => a
-            .iter_mut()
-            .any(|item| patch_first_interactive_button(item, new_id, label, disabled)),
-        Value::Object(o) => {
-            if is_interactive_button(o) {
-                apply_button(o, new_id, label, disabled);
-                return true;
-            }
-            o.values_mut()
-                .any(|val| patch_first_interactive_button(val, new_id, label, disabled))
-        }
-        _ => false,
-    }
-}
-
 /// An object that is an interactive button (type 2 carrying a `custom_id` — not a
 /// Link/Premium button, which have none).
 fn is_interactive_button(o: &Map<String, Value>) -> bool {
@@ -833,18 +1120,15 @@ pub fn update_message_from_template(
     enter_label: Option<&str>,
     disabled: bool,
 ) -> Value {
-    let components = render_bound_message(template, vars, enter_id, enter_label, disabled);
-    let mut data = json!({
-        "components": components,
-        "allowed_mentions": { "parse": [] },
-    });
-    let flags = message.flags.unwrap_or(0);
-    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
-        data["flags"] = json!(FLAG_IS_COMPONENTS_V2);
-    } else if let Some(content) = message.content.as_deref() {
-        data["content"] = json!(content);
-    }
-    json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data })
+    let components = render_bound_message(
+        template,
+        vars,
+        enter_id,
+        enter_label,
+        disabled,
+        message.components.as_ref(),
+    );
+    wrap_update(message, components)
 }
 
 // ── outgoing callbacks (pure) ────────────────────────────────────────────────
@@ -961,8 +1245,12 @@ pub fn host_panel(
                 control_id("reroll", id),
             )],
         ),
-        Status::Cancelled => ephemeral_text(
+        // Plain content like the other two states, never V2: a host's Leave or
+        // Cancel replaces the panel in place, and Discord refuses an edit that
+        // switches a message between V2 and non-V2.
+        Status::Cancelled => ephemeral_with_buttons(
             "\u{274C} This giveaway was cancelled \u{2014} there's nothing left to manage.",
+            vec![],
         ),
     }
 }
@@ -1544,7 +1832,8 @@ mod tests {
     fn render_bound_message_substitutes_text_and_restyles_enter_button() {
         let tree = sample_template();
         let v = open_vars("Nitro", 3);
-        let out = render_bound_message(&tree, &v, "giveaway:abc", Some("🎉 Enter (3)"), false);
+        let out =
+            render_bound_message(&tree, &v, "giveaway:abc", Some("🎉 Enter (3)"), false, None);
 
         // Body text rendered; pre-draw winners show TBD.
         assert_eq!(
@@ -1577,6 +1866,7 @@ mod tests {
             "giveaway:abc",
             Some("🏁 Giveaway ended"),
             true,
+            None,
         );
         assert_eq!(
             once[0]["components"][0]["content"],
@@ -1593,8 +1883,124 @@ mod tests {
             "giveaway:abc",
             Some("🏁 Giveaway ended"),
             true,
+            None,
         );
         assert_eq!(once, twice);
+    }
+
+    /// First save: the template still carries the editor's default id, and
+    /// another plugin's button comes first. The Enter button is found where the
+    /// bound button sits in the live message — the neighbour keeps its own id.
+    #[test]
+    fn a_stale_template_binds_the_button_at_the_live_buttons_place() {
+        let template = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": "btn_action" }
+            ]}
+        ]);
+        let live = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": "giveaway:xyz" }
+            ]}
+        ]);
+        let v = open_vars("Nitro", 0);
+        let out = render_bound_message(
+            &template,
+            &v,
+            "giveaway:xyz",
+            Some("Enter (0)"),
+            false,
+            Some(&live),
+        );
+        let row = &out[0]["components"];
+        assert_eq!(row[0]["custom_id"], "quickreplies:zzz");
+        assert_eq!(row[0]["label"], "Rules");
+        assert_eq!(row[1]["custom_id"], "giveaway:xyz");
+        assert_eq!(row[1]["label"], "Enter (0)");
+        // …and the count rides the Enter button's own wording.
+        assert_eq!(
+            enter_button_label(&template, Some(&live), "giveaway:xyz").as_deref(),
+            Some("Enter")
+        );
+    }
+
+    #[test]
+    fn unsendable_media_names_uploads_and_every_file() {
+        let template = json!([
+            { "type": 12, "items": [
+                { "media": { "url": "https://cdn.example/ok.png" } },
+                { "media": { "url": "session://abc/banner.png" } }
+            ]},
+            { "type": 17, "components": [
+                { "type": 9, "components": [{ "type": 10, "content": "x" }],
+                  "accessory": { "type": 11, "media": { "url": "attachment://thumb.jpg" } } },
+                { "type": 13, "file": { "url": "https://cdn.example/rules.pdf" } }
+            ]}
+        ]);
+        // An upload is named by its file name; anything else as written.
+        assert_eq!(
+            unsendable_media(&template),
+            vec!["banner.png", "thumb.jpg", "https://cdn.example/rules.pdf"]
+        );
+        let fine = json!([{ "type": 11, "media": { "url": "HTTPS://cdn.example/a.png" } }]);
+        assert!(unsendable_media(&fine).is_empty());
+    }
+
+    #[test]
+    fn an_echoed_message_is_cleaned_of_resolved_media_fields() {
+        let msg = MessageRef {
+            content: None,
+            components: Some(json!([
+                { "type": 12, "items": [{ "media": {
+                    "url": "https://cdn.discordapp.com/attachments/1/2/a.png",
+                    "proxy_url": "https://media.discordapp.net/a.png",
+                    "width": 10, "height": 10, "content_type": "image/png",
+                    "attachment_id": "2", "flags": 0, "id": "9"
+                }}]},
+                { "type": 1, "components": [
+                    { "type": 2, "style": 3, "label": "Enter", "custom_id": "giveaway:xyz" }
+                ]}
+            ])),
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+        };
+        let v = update_button_response(&msg, "giveaway:xyz", Some("Enter (1)"), false).unwrap();
+        let media = &v["data"]["components"][0]["items"][0]["media"];
+        assert_eq!(
+            media,
+            &json!({ "url": "https://cdn.discordapp.com/attachments/1/2/a.png" })
+        );
+    }
+
+    #[test]
+    fn a_re_render_stays_inside_the_v2_text_budget() {
+        let mut tree = json!([
+            { "type": 10, "content": "a".repeat(3990) },
+            { "type": 10, "content": "short" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "Enter (1)", "custom_id": "giveaway:xyz" }
+            ]}
+        ]);
+        fit_text_budget(&mut tree, MAX_V2_TEXT);
+        assert!(text_units(&tree) <= MAX_V2_TEXT, "{}", text_units(&tree));
+        // The long display took the cut; the short one and the label are intact.
+        assert!(tree[0]["content"].as_str().unwrap().ends_with('…'));
+        assert_eq!(tree[1]["content"], "short");
+        // Already inside the budget: untouched.
+        let mut ok = json!([{ "type": 10, "content": "hello" }]);
+        fit_text_budget(&mut ok, MAX_V2_TEXT);
+        assert_eq!(ok[0]["content"], "hello");
+    }
+
+    #[test]
+    fn the_cancelled_panel_is_plain_content_like_the_others() {
+        for status in [Status::Open, Status::Ended, Status::Cancelled] {
+            let panel = host_panel("xyz", status, false, 0, 1);
+            let flags = panel["data"]["flags"].as_u64().unwrap();
+            assert_eq!(flags & FLAG_IS_COMPONENTS_V2, 0, "{status:?}: {panel}");
+            assert_ne!(flags & FLAG_EPHEMERAL, 0, "{status:?}: {panel}");
+        }
     }
 
     #[test]
@@ -1607,7 +2013,8 @@ mod tests {
             ]}
         ]);
         let v = open_vars("Nitro", 0);
-        let out = render_bound_message(&tree, &v, "giveaway:xyz", Some("🎉 Enter (0)"), false);
+        let out =
+            render_bound_message(&tree, &v, "giveaway:xyz", Some("🎉 Enter (0)"), false, None);
         let btn = &out[0]["components"][0];
         assert_eq!(btn["custom_id"], "giveaway:xyz");
         assert_eq!(btn["label"], "🎉 Enter (0)");
@@ -1616,14 +2023,14 @@ mod tests {
     #[test]
     fn enter_button_label_reads_the_lone_interactive_button() {
         assert_eq!(
-            enter_button_label(&sample_template()).as_deref(),
+            enter_button_label(&sample_template(), None, "giveaway:abc").as_deref(),
             Some("🎉 Enter")
         );
         // A tree with only a link button (no custom_id) has no enter button.
         let link_only = json!([{ "type": 1, "components": [
             { "type": 2, "style": 5, "label": "Rules", "url": "https://x" }
         ]}]);
-        assert_eq!(enter_button_label(&link_only), None);
+        assert_eq!(enter_button_label(&link_only, None, "giveaway:abc"), None);
     }
 
     #[test]

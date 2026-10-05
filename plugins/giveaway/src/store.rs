@@ -145,6 +145,10 @@ pub struct Giveaway {
     pub status: Status,
     /// User ids of the currently-drawn winners (empty until a draw).
     pub winners: Vec<String>,
+    /// Everyone any draw or reroll of this giveaway has ever picked — what a
+    /// reroll excludes, so a second reroll can't hand the win back to someone
+    /// the first one replaced. A superset of `winners` once drawn.
+    pub drawn: Vec<String>,
 }
 
 /// A read view for the config UI. Carries the instance `id`, the live entry
@@ -260,11 +264,11 @@ impl Store {
     /// Load a giveaway (config + runtime state).
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<Giveaway>> {
         let conn = self.lock();
-        let row: Option<(String, String, String)> = conn
+        let row: Option<(String, String, String, String)> = conn
             .query_row(
-                "SELECT config, status, winners FROM instances WHERE id = ?1",
+                "SELECT config, status, winners, drawn FROM instances WHERE id = ?1",
                 [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map(Some)
             .or_else(|e| match e {
@@ -272,13 +276,15 @@ impl Store {
                 other => Err(other),
             })?;
         drop(conn);
-        Ok(row.and_then(|(config, status, winners)| {
+        Ok(row.and_then(|(config, status, winners, drawn)| {
             let config: InstanceConfig = serde_json::from_str(&config).ok()?;
             let winners: Vec<String> = serde_json::from_str(&winners).unwrap_or_default();
+            let drawn: Vec<String> = serde_json::from_str(&drawn).unwrap_or_default();
             Some(Giveaway {
                 config,
                 status: Status::parse(&status),
                 winners,
+                drawn,
             })
         }))
     }
@@ -367,31 +373,37 @@ impl Store {
 
     /// Finish the first draw only while the giveaway is still open. The status
     /// predicate prevents concurrent host clicks announcing different winners.
+    /// The drawn set starts as exactly these winners.
     pub fn commit_draw(&self, instance_id: &str, winners: &[String]) -> rusqlite::Result<bool> {
         let json = serde_json::to_string(winners).expect("serialize winners");
         let conn = self.lock();
         let n = conn.execute(
-            "UPDATE instances SET status = 'ended', winners = ?2
+            "UPDATE instances SET status = 'ended', winners = ?2, drawn = ?2
              WHERE id = ?1 AND status = 'open'",
             (instance_id, json),
         )?;
         Ok(n > 0)
     }
 
-    /// Replace winners only if nobody has rerolled the set this request loaded.
+    /// Replace winners only if nobody has rerolled the set this request loaded,
+    /// recording `drawn` (everyone ever picked, these winners included) in the
+    /// same write — `winners` is the compare-and-swap guard, and `drawn` only
+    /// ever changes beside it, so a lost race can't drop anyone from it.
     pub fn commit_reroll(
         &self,
         instance_id: &str,
         previous: &[String],
         winners: &[String],
+        drawn: &[String],
     ) -> rusqlite::Result<bool> {
         let previous_json = serde_json::to_string(previous).expect("serialize prior winners");
         let json = serde_json::to_string(winners).expect("serialize winners");
+        let drawn_json = serde_json::to_string(drawn).expect("serialize drawn");
         let conn = self.lock();
         let n = conn.execute(
-            "UPDATE instances SET winners = ?2
+            "UPDATE instances SET winners = ?2, drawn = ?4
              WHERE id = ?1 AND status = 'ended' AND winners = ?3",
-            (instance_id, json, previous_json),
+            (instance_id, json, previous_json, drawn_json),
         )?;
         Ok(n > 0)
     }
@@ -402,17 +414,21 @@ impl Store {
         let json = serde_json::to_string(winners).expect("serialize winners");
         let conn = self.lock();
         let n = conn.execute(
-            "UPDATE instances SET status = 'ended', winners = ?2 WHERE id = ?1",
+            "UPDATE instances SET status = 'ended', winners = ?2, drawn = ?2 WHERE id = ?1",
             (instance_id, json),
         )?;
         Ok(n > 0)
     }
 
-    /// Mark a giveaway cancelled (called off, no winners).
+    /// Call off a giveaway that is still open (no winners). Compare-and-swap on
+    /// `open`: a stale panel's Cancel — or a host racing another host's Draw —
+    /// must never wipe winners a draw has already announced and DM'd. Returns
+    /// whether this call was the one that cancelled it.
     pub fn set_cancelled(&self, instance_id: &str) -> rusqlite::Result<bool> {
         let conn = self.lock();
         let n = conn.execute(
-            "UPDATE instances SET status = 'cancelled', winners = '[]' WHERE id = ?1",
+            "UPDATE instances SET status = 'cancelled', winners = '[]'
+             WHERE id = ?1 AND status = 'open'",
             [instance_id],
         )?;
         Ok(n > 0)
@@ -430,7 +446,8 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
              config          TEXT NOT NULL,
              status          TEXT NOT NULL DEFAULT 'open',
              winners         TEXT NOT NULL DEFAULT '[]',
-             edit_token_hash TEXT
+             edit_token_hash TEXT,
+             drawn           TEXT NOT NULL DEFAULT '[]'
          );
          CREATE TABLE IF NOT EXISTS entries (
              instance_id TEXT NOT NULL,
@@ -443,6 +460,17 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     // keep a null digest, which `authorize_edit` reports as Forbidden.
     if !has_column(conn, "instances", "edit_token_hash")? {
         conn.execute("ALTER TABLE instances ADD COLUMN edit_token_hash TEXT", [])?;
+    }
+    // Migration for databases created before rerolls remembered everyone they
+    // picked. A pre-migration draw's current winners count as drawn; a winner
+    // an earlier reroll already replaced is unknowable now (that ledger never
+    // existed), so the next reroll excludes at least everyone holding the win.
+    if !has_column(conn, "instances", "drawn")? {
+        conn.execute(
+            "ALTER TABLE instances ADD COLUMN drawn TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+        conn.execute("UPDATE instances SET drawn = winners", [])?;
     }
     Ok(())
 }
@@ -596,13 +624,69 @@ mod tests {
         store.create("one", TOKEN, &config("Prize")).unwrap();
 
         assert!(store.commit_draw("one", &["a".into()]).unwrap());
+        assert_eq!(store.get("one").unwrap().unwrap().drawn, vec!["a"]);
         assert!(!store.commit_draw("one", &["b".into()]).unwrap());
         assert!(store
-            .commit_reroll("one", &["a".into()], &["c".into()])
+            .commit_reroll(
+                "one",
+                &["a".into()],
+                &["c".into()],
+                &["a".into(), "c".into()]
+            )
             .unwrap());
         assert!(!store
-            .commit_reroll("one", &["a".into()], &["d".into()])
+            .commit_reroll(
+                "one",
+                &["a".into()],
+                &["d".into()],
+                &["a".into(), "d".into()]
+            )
             .unwrap());
-        assert_eq!(store.get("one").unwrap().unwrap().winners, vec!["c"]);
+        let g = store.get("one").unwrap().unwrap();
+        assert_eq!(g.winners, vec!["c"]);
+        // The lost race left the drawn ledger exactly as the winner wrote it.
+        assert_eq!(g.drawn, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn cancelling_only_ever_calls_off_an_open_giveaway() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Prize")).unwrap();
+        assert!(store.commit_draw("one", &["a".into()]).unwrap());
+        // A stale panel's Cancel after the draw changes nothing.
+        assert!(!store.set_cancelled("one").unwrap());
+        let g = store.get("one").unwrap().unwrap();
+        assert_eq!(g.status, Status::Ended);
+        assert_eq!(g.winners, vec!["a"]);
+
+        store.create("two", TOKEN, &config("Prize")).unwrap();
+        assert!(store.set_cancelled("two").unwrap());
+        assert!(!store.set_cancelled("two").unwrap());
+    }
+
+    #[test]
+    fn migrates_the_drawn_ledger_from_the_current_winners() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE instances (
+                id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, config TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open', winners TEXT NOT NULL DEFAULT '[]',
+                edit_token_hash TEXT
+             );
+             CREATE TABLE entries (
+                instance_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+                PRIMARY KEY (instance_id, user_id)
+             );
+             INSERT INTO instances (id, created_at, config, status, winners)
+                VALUES ('old', 1, '{}', 'ended', '[\"7\"]');",
+        )
+        .unwrap();
+        init_schema(&conn).unwrap();
+        let drawn: String = conn
+            .query_row("SELECT drawn FROM instances WHERE id = 'old'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(drawn, "[\"7\"]");
     }
 }

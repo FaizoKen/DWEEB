@@ -93,6 +93,24 @@ when you save, and re-renders it from that template on each click — see
 placeholders and nothing changes: the live count just restamps the button as
 before. The same tokens also work in the **custom announcement**.
 
+Three details keep a re-render accepted by Discord:
+
+- **The Enter button is found by its binding, then by position.** The template
+  is captured *before* DWEEB binds the button, so on a first save it still
+  carries the editor's default id. The re-render binds the button sitting where
+  the live message's bound button sits — never simply the first button, which in
+  a message laid out `[Rules] [Enter]` would take over (and relabel) the other
+  plugin's button.
+- **Pictures must be links.** A picture uploaded from the author's computer lives
+  only in their browser (`session://…`), and Discord refuses the whole edit over
+  one picture it can't fetch — so saving refuses a placeholder template naming
+  one (or any File component), and a template stored before that check falls back
+  to restyling the live button. Media echoed back is cleaned of the output-only
+  fields Discord adds (`proxy_url`, `width`, …).
+- **The text stays inside Discord's 4000-character budget**: `{winners}` grows to
+  up to twenty mentions after a draw, so an over-budget render trims its longest
+  text display.
+
 ## How a click becomes an entry
 
 The decision is a pure function of the **interaction payload** alone — no Discord
@@ -121,8 +139,13 @@ instead of entering:
 | Control | What it does |
 |---|---|
 | **🎉 Draw winners** | Picks `winner_count` winners uniformly at random from the entrants and posts the public announcement (pinging them). Marks the giveaway ended. |
-| **🔁 Reroll** | After a draw, picks a fresh set **excluding everyone already drawn**, and announces again. |
-| **Cancel giveaway** | Calls it off with a public notice — no winners. |
+| **🔁 Reroll** | After a draw, picks a fresh set **excluding everyone any draw or reroll has picked**, and announces again. When nobody is left, it says so. |
+| **Cancel giveaway** | Calls off a giveaway that's still **open** with a public notice — no winners. Once drawn it can't be cancelled (that would erase announced winners). |
+
+After a draw the drawing host also gets the ended panel — with **Reroll** — as a
+private followup, since the public Enter button is disabled from then on. A
+stale panel's Draw or Cancel (another host got there first) is replaced in place
+with the panel for the giveaway's real state.
 | **Enter / Leave as participant** | A host can also enter the draw (or back out). |
 
 The draw is the **pure core** (`choose_winners`, a partial Fisher-Yates with the
