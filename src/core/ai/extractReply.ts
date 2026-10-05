@@ -10,7 +10,38 @@
 
 import type { ParsedAssistantReply } from "./types";
 
-const FENCE_RE = /```(?:json|json5|jsonc)?\s*\n?([\s\S]*?)```/gi;
+/** A fence opener: the backticks, an optional JSON language tag, its line break.
+ *  The longer tags come first — with `json` tried first, a ```json5 fence left
+ *  its "5" in the body and never parsed. */
+const FENCE_OPEN_RE = /```(?:json5|jsonc|json)?\s*\n?/gi;
+const FENCE = "```";
+
+/**
+ * Where a fence whose body is JSON closes: the first ``` outside a JSON string.
+ *
+ * The payload carries message text, and message text carries Discord code
+ * blocks — so a payload line like `"content": "Run:\n```js\n…\n```"` holds
+ * fences *inside a string*. The plain "next ```" closes the json fence there,
+ * leaving an unparseable half, and no edit was ever applied to a message with a
+ * code block in it. Returns -1 when no such closer exists (e.g. the body isn't
+ * JSON at all and an apostrophe-like quote never closes).
+ */
+function closingFenceOutsideStrings(text: string, from: number): number {
+  let inString = false;
+  let escaped = false;
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "`" && text.startsWith(FENCE, i)) return i;
+  }
+  return -1;
+}
 
 /**
  * Parse model-emitted JSON a little more forgivingly than `JSON.parse`.
@@ -110,20 +141,37 @@ export function extractReply(raw: string): ParsedAssistantReply {
   // (a "before/after" pair, an example followed by the real thing) the last one
   // wins — but all of them are stripped from the prose, because raw JSON walls
   // are never useful chat text.
-  for (const match of text.matchAll(FENCE_RE)) {
-    const body = match[1];
-    if (body === undefined) continue;
-    let parsed: unknown;
+  const parseMessage = (body: string): unknown | null => {
     try {
-      parsed = tolerantJsonParse(body);
+      const parsed = tolerantJsonParse(body);
+      return looksLikeMessage(parsed) ? parsed : null;
     } catch {
-      continue;
+      return null;
     }
-    if (looksLikeMessage(parsed)) {
-      payload = parsed;
-      const start = match.index ?? 0;
-      strippedRanges.push([start, start + match[0].length]);
+  };
+  let scanFrom = 0;
+  for (;;) {
+    FENCE_OPEN_RE.lastIndex = scanFrom;
+    const open = FENCE_OPEN_RE.exec(text);
+    if (!open) break;
+    const bodyStart = open.index + open[0].length;
+    const nextFence = text.indexOf(FENCE, bodyStart);
+    if (nextFence < 0) break;
+    // The string-aware closer first (a payload whose text holds a code block),
+    // then the plain next fence (prose fences, and JSON the scan misreads).
+    const outside = closingFenceOutsideStrings(text, bodyStart);
+    const closers = outside >= 0 && outside !== nextFence ? [outside, nextFence] : [nextFence];
+    let end = nextFence + FENCE.length;
+    for (const close of closers) {
+      const parsed = parseMessage(text.slice(bodyStart, close));
+      if (parsed !== null) {
+        payload = parsed;
+        end = close + FENCE.length;
+        strippedRanges.push([open.index, end]);
+        break;
+      }
     }
+    scanFrom = end;
   }
 
   // If no fenced block matched, try a bare top-level JSON object as a fallback —

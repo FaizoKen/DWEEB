@@ -39,7 +39,7 @@
  * already registered just continues past it.
  */
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { getPluginSummary, setPluginSummary } from "@/core/state/pluginSummaryCache";
 import { getPlugins, LINK_PLUGINS } from "@/core/plugins/registry";
@@ -63,6 +63,7 @@ import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { CheckCircleIcon, ChevronRightIcon, ExternalLinkIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
+import { useUniqueId } from "@/lib/useUniqueId";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateSetup.module.css";
 
@@ -142,7 +143,7 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   // Which slot's config UI is open (index into `slots`), or null for checklist.
   const [configuring, setConfiguring] = useState<number | null>(null);
   // Ties the disabled "Review in editor" to the visible note saying why.
-  const blockedId = useId();
+  const blockedId = useUniqueId("setup-blocked");
 
   // Nothing to wire (registry gone / unknown plugins / no matching components) —
   // bail out; the template is already applied to the editor.

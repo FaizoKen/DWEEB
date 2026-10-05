@@ -8,7 +8,12 @@
  */
 
 import { ButtonStyle, ComponentType, SeparatorSpacing } from "@/core/schema/types";
-import { hasInteractiveComponents, type CodegenInput, type WireNode } from "./payload";
+import {
+  hasInteractiveComponents,
+  objectEntries,
+  type CodegenInput,
+  type WireNode,
+} from "./payload";
 import { assign, hexColor, jsString, quote, raw, type Expr } from "./printer";
 
 const UNIT = 2;
@@ -149,7 +154,7 @@ class Generator {
     }
 
     if (node.type === ComponentType.StringSelect) {
-      const options = Array.isArray(node.options) ? (node.options as WireNode[]) : [];
+      const options = objectEntries(node.options);
       if (options.length) {
         calls.push({
           name: "addOptions",
@@ -174,9 +179,7 @@ class Generator {
         });
       }
     } else {
-      const defaults = Array.isArray(node.default_values)
-        ? (node.default_values as { id?: unknown; type?: unknown }[])
-        : [];
+      const defaults = objectEntries(node.default_values);
       const idsOf = (type: string) =>
         defaults
           .filter((value) => value.type === type && typeof value.id === "string")

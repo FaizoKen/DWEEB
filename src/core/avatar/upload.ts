@@ -50,9 +50,10 @@ export async function uploadAvatarImage(
     return { ok: false, error: "Couldn't read that image. Try a different file." };
   }
 
-  // Should be unreachable after downscaling — a 256² image is far under the cap
-  // — but the check keeps a surprising encoder from producing a request the
-  // server would only reject after the whole upload.
+  // Reached only by an image too detailed to compress even after stepping
+  // down: an opaque one falls back to JPEG, a transparent one retries at
+  // smaller sizes first (`prepareAvatarImage`). Checked here so the server
+  // isn't sent a request it would only reject after the whole upload.
   if (blob.size > AVATAR_MAX_UPLOAD_BYTES) {
     return { ok: false, error: "That image is too complex to compress. Try a simpler one." };
   }

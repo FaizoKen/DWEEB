@@ -61,4 +61,13 @@ describe("buildSystemPrompt", () => {
     expect(Array.isArray(parsed.components)).toBe(true);
     expect(context).not.toContain('"_id"');
   });
+
+  it("context keeps an in-browser upload, so the model echoes it back instead of blanking it", () => {
+    const upload = "session://blob123/photo.png";
+    const context = buildPromptContext(
+      attachEditorFields({ components: [{ type: 12, items: [{ media: { url: upload } }] }] }),
+    );
+    expect(context).toContain(`"url": "${upload}"`);
+    expect(context).not.toContain('"url": ""');
+  });
 });

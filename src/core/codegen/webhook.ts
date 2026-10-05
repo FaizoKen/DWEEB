@@ -14,6 +14,15 @@ import { quote } from "./printer";
 
 const PLACEHOLDER_URL = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN";
 
+/**
+ * A single-quoted shell word. Nothing inside single quotes expands — not `$(…)`,
+ * not a backtick — and the only character that needs care, `'` itself, is
+ * spelled `'\''`. Double quotes (what `quote` produces) still expand both.
+ */
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 /** The payload as sent: with Discord's `attachments` index when files ride along. */
 function wireBody({ payload, attachments }: CodegenInput): WirePayload | Record<string, unknown> {
   if (!attachments.length) return payload;
@@ -70,7 +79,7 @@ export function generateCurl(input: CodegenInput): string {
     "  -F 'payload_json=<-;type=application/json' \\",
     ...input.attachments.map(
       (name, index) =>
-        `  -F ${quote(`files[${index}]=@./${name}`)}${index < input.attachments.length - 1 ? " \\" : " <<'JSON'"}`,
+        `  -F ${shellWord(`files[${index}]=@./${name}`)}${index < input.attachments.length - 1 ? " \\" : " <<'JSON'"}`,
     ),
     json,
     "JSON",

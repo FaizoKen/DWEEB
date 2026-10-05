@@ -56,6 +56,39 @@ describe("extractReply", () => {
     expect(payload).toBeNull();
     expect(text).toBe(raw.trim());
   });
+
+  it("finds a payload whose text holds a Discord code block (``` inside a string)", () => {
+    const payload = {
+      components: [{ type: 10, content: "Run this:\n```js\nconsole.log(1)\n```" }],
+    };
+    const raw = `Added the snippet.\n${FENCE(JSON.stringify(payload, null, 2))}\nAnything else?`;
+    const out = extractReply(raw);
+    expect(out.payload).toEqual(payload);
+    expect(out.text).toBe("Added the snippet.\n\nAnything else?");
+    // Single-line JSON, and a string that is only a code block.
+    const tight = { components: [{ type: 10, content: '```diff\n+ "added"\n```' }] };
+    expect(extractReply(FENCE(JSON.stringify(tight))).payload).toEqual(tight);
+  });
+
+  it("still skips an ordinary code fence in the prose before the payload", () => {
+    const raw = [
+      "Your bot can send it with:",
+      '```js\nchannel.send({ content: "it\'s here" })\n```',
+      FENCE('{"components":[{"type":10,"content":"Hi"}]}'),
+    ].join("\n");
+    const { text, payload } = extractReply(raw);
+    expect(payload).toEqual({ components: [{ type: 10, content: "Hi" }] });
+    expect(text).toContain("channel.send");
+  });
+
+  it("reads a ```json5 or ```jsonc fence", () => {
+    const body = '{"components":[{"type":10,"content":"Hi"},]}';
+    for (const tag of ["json5", "jsonc", "JSON"]) {
+      expect(extractReply("```" + tag + "\n" + body + "\n```").payload, tag).toEqual({
+        components: [{ type: 10, content: "Hi" }],
+      });
+    }
+  });
 });
 
 describe("streamingProse", () => {

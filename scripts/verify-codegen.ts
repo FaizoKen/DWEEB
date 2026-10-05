@@ -168,6 +168,14 @@ const EDGE_CASES: Record<string, unknown> = {
       { type: 12, items: [{ media: { url: "attachment://shot_one.png" } }] },
     ],
   },
+  // A share link's filenames are someone else's: each must come out of every
+  // target as an inert local basename (the shell target runs under bash here).
+  "edge-hostile-attachment-names": {
+    components: [
+      { type: 13, file: { url: "attachment://$(touch PWNED) it's `x`.txt" } },
+      { type: 12, items: [{ media: { url: "attachment://../../.ssh/id_rsa" } }] },
+    ],
+  },
   "edge-thread": {
     thread_name: "Release notes",
     applied_tags: ["623456789012345678"],

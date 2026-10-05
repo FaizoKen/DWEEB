@@ -17,7 +17,7 @@
  */
 
 import rawGuide from "../../../server/src/ai_prompt.txt?raw";
-import { encodeJson } from "@/core/serialization/encode";
+import { stripEditorFields } from "@/core/serialization/normalize";
 import type { WebhookMessage } from "@/core/schema/types";
 
 /** The shared instruction template, newline-normalized (a Windows checkout may
@@ -29,10 +29,16 @@ export const SCHEMA_GUIDE: string = rawGuide.replace(/\r\n/g, "\n").trimEnd();
  * The live message as the JSON the prompt embeds — also what the built-in
  * provider sends to the proxy as `context` (the server wraps it under its own
  * copy of the template, so the client never supplies instructions).
+ *
+ * Unlike the JSON export, in-browser uploads keep their `session://` URL here.
+ * The model returns the whole message, so whatever it is shown is what comes
+ * back into the editor: shown the export's blank `"url": ""`, a "change the
+ * title" request echoed every uploaded image back as empty and wiped it. The
+ * reference is no credential — only this browser can resolve it.
  */
 export function buildPromptContext(current: WebhookMessage): string {
   try {
-    return encodeJson(current);
+    return JSON.stringify(stripEditorFields(current), null, 2);
   } catch {
     return '{ "components": [] }';
   }

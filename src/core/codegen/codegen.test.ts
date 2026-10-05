@@ -4,7 +4,7 @@ import { TEMPLATES } from "@/data/presets";
 import { attachEditorFields } from "@/core/serialization/normalize";
 import { buildSessionUrl } from "@/core/state/attachmentStore";
 import { CODE_TARGETS, generateCode, isCodeTarget } from "./index";
-import { prepareCodegenInput } from "./payload";
+import { prepareCodegenInput, safeAttachmentName } from "./payload";
 import { quote } from "./printer";
 
 /**
@@ -202,6 +202,49 @@ describe("discord.py target", () => {
     expect(code).toContain("type=discord.SelectDefaultValueType.user,");
     expect(code).toContain('discord.PartialEmoji(name="x", id="{emoji}")');
   });
+
+  it("emits a default's type only when it names a real enum member", () => {
+    // The type is spliced in as an attribute name, so anything else is source.
+    const payload =
+      'user if __import__("os").system("touch PWNED") else discord.SelectDefaultValueType.user';
+    const message = attachEditorFields({
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 5,
+              custom_id: "pick",
+              default_values: [
+                { id: "123456789012345678", type: payload },
+                { id: "223456789012345678", type: "user" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const code = generateCode(message, "discordpy");
+    expect(code).not.toContain("__import__");
+    expect(code).toContain("id=223456789012345678,");
+    expect(code).not.toContain("123456789012345678,");
+  });
+
+  it("skips a missing option or default entry instead of throwing", () => {
+    const message = attachEditorFields({
+      components: [
+        {
+          type: 1,
+          components: [{ type: 3, custom_id: "s", options: [null, { label: "A", value: "a" }] }],
+        },
+        { type: 1, components: [{ type: 5, custom_id: "u", default_values: [null] }] },
+      ],
+    });
+    for (const { id: target } of CODE_TARGETS) {
+      expect(() => generateCode(message, target), target).not.toThrow();
+    }
+    expect(generateCode(message, "discordjs")).toContain('.setLabel("A")');
+  });
 });
 
 describe("plain-HTTP targets", () => {
@@ -288,9 +331,75 @@ describe("uploads", () => {
     );
     const curl = generateCode(message, "curl");
     expect(curl).toContain("-F 'payload_json=<-;type=application/json'");
-    expect(curl).toContain('-F "files[0]=@./banner.png"');
+    expect(curl).toContain("-F 'files[0]=@./banner.png'");
     // Discord maps each multipart part to its reference through this index.
     expect(curl).toContain('"attachments": [');
+  });
+
+  describe("a filename from someone else's message", () => {
+    // Share links and pasted JSON keep a hand-typed attachment:// name as is, and
+    // the person running the code is not the person who wrote the message.
+    const hostile = attachEditorFields({
+      components: [
+        { type: 13, file: { url: "attachment://$(touch PWNED) it's `x`.txt" } },
+        { type: 12, items: [{ media: { url: "attachment://../../.ssh/id_rsa" } }] },
+        // Built by hand, as a crafted link would be — buildSessionUrl tidies names.
+        {
+          type: 12,
+          items: [
+            { media: { url: `session://blob-9/${encodeURIComponent('"; rm -rf ~ #.png')}` } },
+          ],
+        },
+      ],
+    });
+
+    it("becomes a plain local basename, and the reference follows it", () => {
+      const input = prepareCodegenInput(hostile);
+      expect(input.attachments).toEqual([
+        "__touch_PWNED__it_s__x_.txt",
+        "____.ssh_id_rsa",
+        "___rm_-rf____.png",
+      ]);
+      for (const name of input.attachments) expect(name).toMatch(/^[A-Za-z0-9_-][\w.-]*$/);
+      const json = JSON.stringify(input.payload);
+      for (const name of input.attachments) expect(json).toContain(`attachment://${name}`);
+      expect(json).not.toContain("$(");
+      expect(json).not.toContain("../");
+    });
+
+    it("can't run a command or reach outside the working directory in any target", () => {
+      for (const { id: target } of CODE_TARGETS) {
+        const code = generateCode(hostile, target);
+        expect(code, target).not.toContain("$(");
+        expect(code, target).not.toContain("`x`");
+        expect(code, target).not.toContain("../");
+        expect(code, target).not.toContain("rm -rf");
+      }
+      // Every curl -F part is a single-quoted word: nothing inside expands.
+      const parts = generateCode(hostile, "curl")
+        .split("\n")
+        .filter((line) => line.startsWith("  -F") && line.includes("files["));
+      expect(parts).toHaveLength(3);
+      for (const line of parts) expect(line).toMatch(/^ {2}-F '[^']*'( \\| <<'JSON')$/);
+    });
+
+    it("keeps two names that only reduce alike as two files", () => {
+      const twins = attachEditorFields({
+        components: [
+          { type: 13, file: { url: "attachment://a b.png" } },
+          { type: 13, file: { url: "attachment://a?b.png" } },
+          { type: 13, file: { url: "attachment://a b.png" } },
+        ],
+      });
+      expect(prepareCodegenInput(twins).attachments).toEqual(["a_b.png", "a_b_2.png"]);
+    });
+
+    it("falls back to a usable name when nothing usable is left", () => {
+      expect(safeAttachmentName("..")).toBe("file");
+      expect(safeAttachmentName("/// ")).toBe("file");
+      expect(safeAttachmentName(".env")).toBe("env");
+      expect(safeAttachmentName("report.pdf")).toBe("report.pdf");
+    });
   });
 
   it("drops the fields Discord stamps on a restored media item", () => {

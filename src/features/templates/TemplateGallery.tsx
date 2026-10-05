@@ -40,7 +40,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useMessageStore } from "@/core/state/messageStore";
+import { getMessageDocumentGeneration, useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/savedMessagesStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
@@ -153,6 +153,17 @@ export function TemplateGallery() {
   const replaceMessageFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
   const clearAll = useMessageStore((s) => s.clearAll);
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
+  // Library cards whose body is still loading, and whether this gallery is
+  // still on screen — it unmounts on close, so a load that finishes after a
+  // close (or a close-and-reopen) belongs to nobody and must not apply.
+  const loadingLibraryIds = useRef(new Set<string>());
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const savedEntries = useSavedMessagesStore((s) => s.entries);
   const removeEntry = useSavedMessagesStore((s) => s.remove);
   // The connected server — whose library the Posted tab shows.
@@ -584,10 +595,31 @@ export function TemplateGallery() {
                 posted: isPosted,
               }),
         onPick: () => {
+          // A repeat click on a card still loading waits for the first one.
+          if (loadingLibraryIds.current.has(entry.id)) return;
           void (async () => {
-            const full = hasDetails
-              ? entry
-              : await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
+            // Loading a card's body can take a moment. If the user moves on
+            // meanwhile — picks another card or a template, types into the
+            // editor, closes the directory (which unmounts it) — applying the
+            // late result would overwrite their newer work, so it's dropped.
+            const generation = getMessageDocumentGeneration();
+            const before = useMessageStore.getState().message;
+            let full = hasDetails ? entry : null;
+            if (!full) {
+              loadingLibraryIds.current.add(entry.id);
+              try {
+                full = await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
+              } finally {
+                loadingLibraryIds.current.delete(entry.id);
+              }
+              if (
+                !mountedRef.current ||
+                getMessageDocumentGeneration() !== generation ||
+                useMessageStore.getState().message !== before
+              ) {
+                return;
+              }
+            }
             const loaded = full ? libraryEntryMessage(full) : null;
             if (!full || !loaded) {
               pushToast(

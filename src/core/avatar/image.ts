@@ -29,7 +29,9 @@
  *    cap, while JPEG holds the same image in a few tens of KiB.
  *
  * So: keep PNG whenever the image has any transparency, and otherwise keep PNG
- * only while it stays under {@link PNG_SIZE_BUDGET}, falling back to JPEG.
+ * only while it stays under {@link PNG_SIZE_BUDGET}, falling back to JPEG. A
+ * transparent PNG still over the upload cap is redrawn smaller instead
+ * ({@link transparentFallbackSizes}).
  */
 
 /** Edge length we downscale to. Larger than Discord ever displays an avatar. */
@@ -49,6 +51,23 @@ export const PNG_SIZE_BUDGET = 96 * 1024;
 
 /** JPEG quality for the photo fallback — visually clean at avatar sizes. */
 const JPEG_QUALITY = 0.85;
+
+/**
+ * Smaller edges a transparent avatar steps down to when its PNG runs past the
+ * upload cap. It can't take the JPEG fallback without losing its transparency,
+ * and a detailed cutout (fur, hair, a photo with its background removed) holds
+ * up to 256 KiB of raw RGBA at 256² that PNG compresses poorly. Still at or
+ * above the size Discord displays an avatar at.
+ */
+const TRANSPARENT_FALLBACK_SIZES = [192, 128] as const;
+
+/**
+ * The smaller edges to retry a too-large transparent PNG at, given the edge it
+ * was rendered at — never upscaling past the source.
+ */
+export function transparentFallbackSizes(renderedSize: number): number[] {
+  return TRANSPARENT_FALLBACK_SIZES.filter((size) => size < renderedSize);
+}
 
 export interface CropRect {
   sx: number;
@@ -135,13 +154,17 @@ export async function prepareAvatarImage(file: File): Promise<PreparedAvatar> {
     }
     const size = targetSize(crop.size);
 
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new AvatarImageError("Couldn't process that image in this browser.");
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, crop.sx, crop.sy, crop.size, crop.size, 0, 0, size, size);
+    const draw = (edge: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } => {
+      const canvas = document.createElement("canvas");
+      canvas.width = edge;
+      canvas.height = edge;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new AvatarImageError("Couldn't process that image in this browser.");
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(bitmap, crop.sx, crop.sy, crop.size, crop.size, 0, 0, edge, edge);
+      return { canvas, ctx };
+    };
+    const { canvas, ctx } = draw(size);
 
     // `getImageData` can throw on a tainted canvas. Our source is a local file,
     // so it never is — but treat a failure as "assume transparency" (PNG),
@@ -155,8 +178,18 @@ export async function prepareAvatarImage(file: File): Promise<PreparedAvatar> {
 
     const png = await toBlob(canvas, { mime: "image/png" });
     const encoding = chooseEncoding({ transparent, pngBytes: png.size });
-    const blob = encoding.mime === "image/png" ? png : await toBlob(canvas, encoding);
-    return { blob, size };
+    if (encoding.mime === "image/jpeg") return { blob: await toBlob(canvas, encoding), size };
+
+    // PNG stays PNG, but a detailed transparent image can still be over the
+    // cap at full size: step down rather than refuse it.
+    let blob = png;
+    let edge = size;
+    for (const smaller of transparentFallbackSizes(size)) {
+      if (blob.size <= AVATAR_MAX_UPLOAD_BYTES) break;
+      blob = await toBlob(draw(smaller).canvas, { mime: "image/png" });
+      edge = smaller;
+    }
+    return { blob, size: edge };
   } finally {
     bitmap.close();
   }

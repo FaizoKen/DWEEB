@@ -7,7 +7,12 @@
  */
 
 import { ButtonStyle, ComponentType, SeparatorSpacing } from "@/core/schema/types";
-import { hasInteractiveComponents, type CodegenInput, type WireNode } from "./payload";
+import {
+  hasInteractiveComponents,
+  objectEntries,
+  type CodegenInput,
+  type WireNode,
+} from "./payload";
 import { hexColor, indentLines, list, pyString, quote, raw, render, type Expr } from "./printer";
 
 const UNIT = 4;
@@ -37,6 +42,15 @@ const CHANNEL_TYPES: Record<number, string> = {
   15: "forum",
   16: "media",
 };
+
+/**
+ * The `discord.SelectDefaultValueType` members. A default's `type` is spliced
+ * into the source as an attribute name, so it must be one of these exactly: the
+ * import boundary keeps fields verbatim, and anything else — a crafted
+ * `user if __import__("os").system(…) else …` from a share link — would run as
+ * Python inside `build_view()`. discord.js skips an unknown type the same way.
+ */
+const DEFAULT_VALUE_TYPES = new Set(["user", "role", "channel"]);
 
 /** A snowflake as discord.py wants it — an int — or the raw text if it isn't one. */
 const snowflake = (value: string): string => (/^\d+$/.test(value) ? value : quote(value));
@@ -125,7 +139,7 @@ function select(node: WireNode): Expr {
   }
 
   if (node.type === ComponentType.StringSelect) {
-    const options = Array.isArray(node.options) ? (node.options as WireNode[]) : [];
+    const options = objectEntries(node.options);
     kwargs.push([
       "options",
       list(
@@ -145,11 +159,14 @@ function select(node: WireNode): Expr {
       ),
     ]);
   } else {
-    const defaults = Array.isArray(node.default_values)
-      ? (node.default_values as { id?: unknown; type?: unknown }[])
-      : [];
+    const defaults = objectEntries(node.default_values);
     const values = defaults
-      .filter((value) => typeof value.id === "string" && typeof value.type === "string")
+      .filter(
+        (value) =>
+          typeof value.id === "string" &&
+          typeof value.type === "string" &&
+          DEFAULT_VALUE_TYPES.has(value.type),
+      )
       .map((value) =>
         call(
           "discord.SelectDefaultValue",

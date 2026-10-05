@@ -6,6 +6,7 @@ import {
   hasTransparency,
   squareCropRect,
   targetSize,
+  transparentFallbackSizes,
 } from "./image";
 
 /**
@@ -86,5 +87,18 @@ describe("chooseEncoding", () => {
     // The budget exists so the JPEG path engages while the request would still
     // have been accepted — a budget at/above the cap would rescue nothing.
     expect(PNG_SIZE_BUDGET).toBeLessThan(128 * 1024);
+  });
+});
+
+describe("transparentFallbackSizes", () => {
+  it("steps a full-size transparent avatar down twice before giving up", () => {
+    // Transparency rules out the JPEG fallback, so a detailed cutout whose PNG
+    // runs past the upload cap gets smaller instead of refused.
+    expect(transparentFallbackSizes(AVATAR_TARGET_SIZE)).toEqual([192, 128]);
+  });
+
+  it("never upscales a source that was already smaller", () => {
+    expect(transparentFallbackSizes(160)).toEqual([128]);
+    expect(transparentFallbackSizes(100)).toEqual([]);
   });
 });
