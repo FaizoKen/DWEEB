@@ -158,9 +158,11 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 
 // ── Roles a self-role menu may never hand out ───────────────────────────────
 
-/// Permission bits that make a role a *staff* role: moderation, server
-/// administration, or reach into members' privacy. A self-role menu may never
-/// hand one out.
+/// The permissions that make a role a *staff* role — moderation, server
+/// administration, or reach into members' privacy — under the names Discord's
+/// role editor shows, so a refusal can say which toggle to turn off. Most
+/// consequential first, since a refusal names only the first few. A self-role
+/// menu may never hand out a role carrying one.
 ///
 /// Why this exists: creating a menu needs no Discord identity (instance
 /// creation is anonymous, like every DWEEB plugin), and a click is judged only
@@ -170,26 +172,54 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 /// server's Moderator role and give it to themselves with the shared bot.
 /// Discord only checks the bot's role hierarchy, which says nothing about who
 /// configured the menu.
-pub const STAFF_PERMISSIONS: u64 = (1 << 1) // KICK_MEMBERS
-    | (1 << 2) // BAN_MEMBERS
-    | (1 << 3) // ADMINISTRATOR
-    | (1 << 4) // MANAGE_CHANNELS
-    | (1 << 5) // MANAGE_GUILD
-    | (1 << 7) // VIEW_AUDIT_LOG
-    | (1 << 13) // MANAGE_MESSAGES
-    | (1 << 17) // MENTION_EVERYONE
-    | (1 << 19) // VIEW_GUILD_INSIGHTS
-    | (1 << 22) // MUTE_MEMBERS
-    | (1 << 23) // DEAFEN_MEMBERS
-    | (1 << 24) // MOVE_MEMBERS
-    | (1 << 27) // MANAGE_NICKNAMES
-    | (1 << 28) // MANAGE_ROLES
-    | (1 << 29) // MANAGE_WEBHOOKS
-    | (1 << 30) // MANAGE_GUILD_EXPRESSIONS
-    | (1 << 33) // MANAGE_EVENTS
-    | (1 << 34) // MANAGE_THREADS
-    | (1 << 40) // MODERATE_MEMBERS
-    | (1 << 41); // VIEW_CREATOR_MONETIZATION_ANALYTICS
+///
+/// **Mention @everyone is deliberately absent.** It is in Discord's old default
+/// permission set, so ordinary roles carry it without anyone choosing to —
+/// blocking it refused community roles on three live menus the day it
+/// shipped — and it hands the person this guards against nothing new: they
+/// post through a webhook, which can already ping @everyone.
+const STAFF_PERMISSION_NAMES: &[(u64, &str)] = &[
+    (1 << 3, "Administrator"),
+    (1 << 5, "Manage Server"),
+    (1 << 28, "Manage Roles"),
+    (1 << 4, "Manage Channels"),
+    (1 << 29, "Manage Webhooks"),
+    (1 << 2, "Ban Members"),
+    (1 << 1, "Kick Members"),
+    (1 << 40, "Timeout Members"),
+    (1 << 13, "Manage Messages"),
+    (1 << 34, "Manage Threads and Posts"),
+    (1 << 27, "Manage Nicknames"),
+    (1 << 30, "Manage Expressions"),
+    (1 << 33, "Manage Events"),
+    (1 << 7, "View Audit Log"),
+    (1 << 19, "View Server Insights"),
+    (1 << 41, "View Server Subscription Insights"),
+    (1 << 22, "Mute Members"),
+    (1 << 23, "Deafen Members"),
+    (1 << 24, "Move Members"),
+];
+
+/// Every bit in [`STAFF_PERMISSION_NAMES`], so the mask and the names a
+/// refusal prints can never disagree.
+pub const STAFF_PERMISSIONS: u64 = {
+    let mut bits = 0;
+    let mut i = 0;
+    while i < STAFF_PERMISSION_NAMES.len() {
+        bits |= STAFF_PERMISSION_NAMES[i].0;
+        i += 1;
+    }
+    bits
+};
+
+/// The staff permissions among `bits`, by name, most consequential first.
+pub fn staff_permission_names(bits: u64) -> Vec<&'static str> {
+    STAFF_PERMISSION_NAMES
+        .iter()
+        .filter(|(bit, _)| bits & bit != 0)
+        .map(|(_, name)| *name)
+        .collect()
+}
 
 /// Why a role can't be part of a self-role menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,21 +228,39 @@ pub enum RoleBlock {
     Everyone,
     /// An integration's own role or the booster role — Discord manages it.
     Managed,
-    /// It carries a [`STAFF_PERMISSIONS`] bit.
-    Staff,
+    /// It carries staff permissions: the role's [`STAFF_PERMISSIONS`] bits.
+    Staff(u64),
     /// Not one of this server's roles (deleted, or from another server).
     Missing,
 }
 
 impl RoleBlock {
-    /// The reason, phrased to follow a role name ("**Moderator** — …").
-    pub fn reason(self) -> &'static str {
+    /// The reason, phrased to follow a role name ("Moderator (it has Ban
+    /// Members)") — naming the permissions, since "moderator or admin
+    /// permissions" alone sends an admin hunting for which toggle is at fault.
+    pub fn reason(self) -> String {
         match self {
-            RoleBlock::Everyone => "every member already has @everyone",
-            RoleBlock::Managed => "Discord manages it (a bot's own role or the booster role)",
-            RoleBlock::Staff => "it carries moderator or admin permissions",
-            RoleBlock::Missing => "it isn't one of this server's roles any more",
+            RoleBlock::Everyone => "every member already has @everyone".into(),
+            RoleBlock::Managed => {
+                "Discord manages it — a bot's own role or the booster role".into()
+            }
+            RoleBlock::Staff(bits) => {
+                format!("it has {}", name_list(&staff_permission_names(bits)))
+            }
+            RoleBlock::Missing => "it isn't one of this server's roles any more".into(),
         }
+    }
+}
+
+/// "A", "A and B", "A, B and C", or "A, B, C and 2 more": at most three names,
+/// so a role holding a dozen staff permissions doesn't swamp the message.
+fn name_list(names: &[&str]) -> String {
+    match names {
+        [] => "moderator or admin permissions".into(),
+        [a] => (*a).into(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        [a, b, c, rest @ ..] => format!("{a}, {b}, {c} and {} more", rest.len()),
     }
 }
 
@@ -232,24 +280,26 @@ pub fn role_block(
     if role.managed {
         return Some(RoleBlock::Managed);
     }
-    if role.permissions & STAFF_PERMISSIONS != 0 {
-        return Some(RoleBlock::Staff);
+    let staff = role.permissions & STAFF_PERMISSIONS;
+    if staff != 0 {
+        return Some(RoleBlock::Staff(staff));
     }
     None
 }
 
 /// The save-time refusal for a menu listing roles it may never hand out,
-/// naming each with its reason so the admin knows what to change.
+/// naming each with its reason so the admin knows what to change. Plain text:
+/// the config page shows it as-is, so markdown would print its asterisks.
 pub fn blocked_roles_message(blocked: &[(String, RoleBlock)]) -> String {
     let list = blocked
         .iter()
         .take(5)
-        .map(|(name, why)| format!("**{name}** ({})", why.reason()))
+        .map(|(name, why)| format!("{name} ({})", why.reason()))
         .collect::<Vec<_>>()
         .join(", ");
     let more = if blocked.len() > 5 { ", …" } else { "" };
     format!(
-        "A self-role menu can't hand out {list}{more}. Pick roles without moderator or admin permissions — give staff powers through a separate role members can't pick."
+        "A self-role menu can't hand out {list}{more}. Pick roles without moderator or admin permissions, or turn those permissions off for the role in Server Settings → Roles — give staff powers through a separate role members can't pick."
     )
 }
 
@@ -315,12 +365,15 @@ mod tests {
         assert_eq!(role_block("200000000000000001", guild, &roles), None);
         assert_eq!(role_block("200000000000000006", guild, &roles), None);
         assert_eq!(role_block(guild, guild, &roles), Some(RoleBlock::Everyone));
-        for staff in [
-            "200000000000000002",
-            "200000000000000003",
-            "200000000000000004",
+        for (staff, bit) in [
+            ("200000000000000002", 1 << 3),
+            ("200000000000000003", 1 << 2),
+            ("200000000000000004", 1 << 40),
         ] {
-            assert_eq!(role_block(staff, guild, &roles), Some(RoleBlock::Staff));
+            assert_eq!(
+                role_block(staff, guild, &roles),
+                Some(RoleBlock::Staff(bit))
+            );
         }
         assert_eq!(
             role_block("200000000000000005", guild, &roles),
@@ -330,9 +383,58 @@ mod tests {
             role_block("999999999999999999", guild, &roles),
             Some(RoleBlock::Missing)
         );
-        let msg = blocked_roles_message(&[("Moderator".into(), RoleBlock::Staff)]);
-        assert!(msg.contains("**Moderator**"), "{msg}");
+        let msg = blocked_roles_message(&[("Moderator".into(), RoleBlock::Staff(1 << 2))]);
+        assert!(msg.contains("Moderator (it has Ban Members)"), "{msg}");
         assert!(msg.contains("moderator or admin"), "{msg}");
+        assert!(
+            !msg.contains("**"),
+            "the config page prints markdown as-is: {msg}"
+        );
+    }
+
+    /// Discord's old default permission set carries Mention @everyone, so an
+    /// ordinary community role can too — blocking it refused live menus'
+    /// everyday roles. Neither it nor the rest of that set makes a staff role.
+    #[test]
+    fn mention_everyone_and_the_old_default_set_are_not_staff_permissions() {
+        let guild = "100000000000000000";
+        const MENTION_EVERYONE: u64 = 1 << 17;
+        const OLD_DEFAULT_PERMISSIONS: u64 = 104_324_673;
+        assert_eq!(OLD_DEFAULT_PERMISSIONS & MENTION_EVERYONE, MENTION_EVERYONE);
+        assert_eq!(STAFF_PERMISSIONS & MENTION_EVERYONE, 0);
+        assert_eq!(STAFF_PERMISSIONS & OLD_DEFAULT_PERMISSIONS, 0);
+        let roles = vec![
+            role("200000000000000001", false, MENTION_EVERYONE),
+            role("200000000000000002", false, OLD_DEFAULT_PERMISSIONS),
+        ];
+        assert_eq!(role_block("200000000000000001", guild, &roles), None);
+        assert_eq!(role_block("200000000000000002", guild, &roles), None);
+    }
+
+    #[test]
+    fn a_refusal_names_the_permissions_to_turn_off() {
+        assert_eq!(RoleBlock::Staff(1 << 3).reason(), "it has Administrator");
+        assert_eq!(
+            RoleBlock::Staff((1 << 2) | (1 << 1)).reason(),
+            "it has Ban Members and Kick Members"
+        );
+        // A role with many staff permissions names the weightiest three.
+        assert_eq!(
+            RoleBlock::Staff(STAFF_PERMISSIONS).reason(),
+            format!(
+                "it has Administrator, Manage Server, Manage Roles and {} more",
+                STAFF_PERMISSION_NAMES.len() - 3
+            )
+        );
+        // One name per bit, no bit twice: the mask is exactly the named table.
+        assert_eq!(
+            STAFF_PERMISSIONS.count_ones() as usize,
+            STAFF_PERMISSION_NAMES.len()
+        );
+        for (bit, name) in STAFF_PERMISSION_NAMES {
+            assert_eq!(bit.count_ones(), 1, "{name}");
+            assert_eq!(staff_permission_names(*bit), vec![*name]);
+        }
     }
 
     #[test]

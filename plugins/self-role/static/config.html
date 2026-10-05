@@ -674,8 +674,10 @@
             const tag = document.createElement("span");
             tag.className = "warn-tag";
             tag.textContent = "🔒 staff role";
-            tag.title =
-              "This role carries moderator or admin permissions, so a self-role menu never hands it out. Give staff powers through a separate role members can't pick.";
+            const perms = staffPermissionList(r);
+            tag.title = perms
+              ? `This role has ${perms} — moderator or admin permissions, which a self-role menu never hands out. Turn them off for the role in Server Settings → Roles, or give staff powers through a separate role members can't pick.`
+              : "This role carries moderator or admin permissions, so a self-role menu never hands it out. Give staff powers through a separate role members can't pick.";
             row.appendChild(tag);
           } else if (r.assignable === false) {
             const tag = document.createElement("span");
@@ -1390,7 +1392,12 @@
         const staff = roles.filter((r) => selected.has(r.id) && r.privileged === true);
         if (staff.length)
           return fail(
-            `A self-role menu can't hand out ${staff.map((r) => r.name).join(", ")} — ${staff.length === 1 ? "it carries" : "they carry"} moderator or admin permissions. Pick roles without staff permissions.`,
+            `A self-role menu can't hand out ${staff
+              .map((r) => {
+                const perms = staffPermissionList(r);
+                return perms ? `${r.name} (it has ${perms})` : r.name;
+              })
+              .join(", ")} — moderator and admin permissions are never handed out. Pick roles without them, or turn them off for the role in Server Settings → Roles.`,
           );
 
         const replyText = $("replyText").value.trim();
@@ -1520,6 +1527,15 @@
         }
       }
 
+      // The staff permissions a role carries, as the service names them:
+      // "Administrator", "Ban Members and Kick Members", or the first three and
+      // "N more". Empty when the service didn't say (an older deploy).
+      function staffPermissionList(r) {
+        const names = Array.isArray(r.staff_permissions) ? r.staff_permissions : [];
+        if (names.length <= 1) return names.join("");
+        if (names.length <= 3) return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+        return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+      }
       function fail(m) {
         $("error").textContent = m;
         sendResize();

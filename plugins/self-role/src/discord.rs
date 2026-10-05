@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::store::{InstanceConfig, ManagedRole, Requirement, ResponseDef};
+use crate::validate::RoleBlock;
 
 // Interaction request types.
 pub const TYPE_PING: u8 = 1;
@@ -439,8 +440,8 @@ pub struct ReplyOutcome<'a> {
     /// Adds a `max` cap refused.
     pub blocked: &'a [String],
     /// Adds this service refused because the role is one a self-role menu must
-    /// never hand out (see `validate::role_block`).
-    pub refused: &'a [String],
+    /// never hand out (see `validate::role_block`), each with its reason.
+    pub refused: &'a [(String, RoleBlock)],
     /// When the menu grants temporary roles: the removal time (unix seconds),
     /// appended to the "Added …" line.
     pub expires_at_unix: Option<i64>,
@@ -513,10 +514,32 @@ pub fn build_reply(cfg: &InstanceConfig, outcome: &ReplyOutcome) -> Value {
     if !refused.is_empty() {
         let names: Vec<String> = refused
             .iter()
-            .map(|id| role_label(&cfg.roles, id))
+            .map(|(id, why)| format!("{} ({})", role_label(&cfg.roles, id), why.reason()))
             .collect();
+        // Name the fix only when it's one an admin can make on the role itself:
+        // turning a permission off. A managed role or @everyone can't be fixed.
+        let staff_bits: Vec<u64> = refused
+            .iter()
+            .filter_map(|(_, why)| match why {
+                RoleBlock::Staff(bits) => Some(*bits),
+                _ => None,
+            })
+            .collect();
+        let tail = if staff_bits.len() == refused.len() {
+            let perms = staff_bits.iter().fold(0, |all, bits| all | bits);
+            format!(
+                " \u{2014} a self-role menu never grants moderator or admin permissions. Ask an admin to remove {} from the role, or to pick a different one.",
+                if perms.count_ones() == 1 {
+                    "that permission"
+                } else {
+                    "those permissions"
+                }
+            )
+        } else {
+            ". Ask an admin to pick a different role.".into()
+        };
         lines.push(format!(
-            "\u{1F6AB} I can't hand out {} from this menu \u{2014} it carries moderator or admin permissions (or Discord manages it), and a self-role menu never grants those. Ask an admin to pick a different role.",
+            "\u{1F6AB} I can't hand out {} from this menu{tail}",
             join_human(&names)
         ));
     }
@@ -844,15 +867,37 @@ mod tests {
     fn reply_explains_a_refused_staff_role() {
         let id = "1".repeat(18);
         let cfg = cfg_with(vec![mrole(&id, "Moderator")], None);
+        let refused = [(id.clone(), RoleBlock::Staff(1 << 2))];
         let v = build_reply(
             &cfg,
             &ReplyOutcome {
-                refused: std::slice::from_ref(&id),
+                refused: &refused,
                 ..Default::default()
             },
         );
         let t = reply_text(&v);
-        assert!(t.contains("**Moderator**"), "{t}");
+        assert!(t.contains("**Moderator** (it has Ban Members)"), "{t}");
         assert!(t.contains("never grants"), "{t}");
+        assert!(t.contains("remove that permission"), "{t}");
+    }
+
+    /// A managed role has no permission an admin could turn off, so the reply
+    /// mustn't tell them to.
+    #[test]
+    fn reply_for_a_managed_role_asks_for_a_different_role() {
+        let id = "1".repeat(18);
+        let cfg = cfg_with(vec![mrole(&id, "Some Bot")], None);
+        let refused = [(id.clone(), RoleBlock::Managed)];
+        let v = build_reply(
+            &cfg,
+            &ReplyOutcome {
+                refused: &refused,
+                ..Default::default()
+            },
+        );
+        let t = reply_text(&v);
+        assert!(t.contains("**Some Bot** (Discord manages it"), "{t}");
+        assert!(t.contains("pick a different role"), "{t}");
+        assert!(!t.contains("remove"), "{t}");
     }
 }

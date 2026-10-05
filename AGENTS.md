@@ -2289,7 +2289,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   a persisted Activity draft is keyed only on an instance Discord's activity-instance endpoint
   confirms (any doubt disables persistence for that session — never another channel's draft).
   (8) Self Role refuses @everyone, managed roles and roles with moderation/admin permissions at
-  save, and re-checks at click. (9) A never-expire grant exempts only clicks from the server
+  save, and re-checks at click; every refusal names the permission to turn off, taken from the
+  one table that also defines the mask (`STAFF_PERMISSION_NAMES`). Mention @everyone is
+  deliberately not on it: it is in Discord's old default permission set, so ordinary roles carry
+  it (blocking it refused community roles on 3 of 205 live menus the day it shipped), and the
+  webhook poster this guards against can already ping @everyone. (9) A never-expire grant exempts only clicks from the server
   holding it, the Message Info toggle's custom_id carries a per-boot MAC over
   guild|channel|message, a message another server holds answers 409 `slot_taken`, and Message
   Info (which proves where a message lives) takes such a foreign grant over. (10) Manager-only

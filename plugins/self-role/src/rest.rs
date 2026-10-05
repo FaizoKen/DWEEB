@@ -128,6 +128,10 @@ pub struct RoleView {
     /// menu may never hand it out (see `validate::role_block`) — the picker
     /// shows it locked with the reason instead of letting a save be refused.
     pub privileged: bool,
+    /// Which of those permissions it carries, by the name Discord's role editor
+    /// shows, so the picker can say which toggle to turn off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub staff_permissions: Vec<&'static str>,
 }
 
 /// One role as the self-role safety check needs it (see `validate::role_block`).
@@ -335,8 +339,8 @@ pub async fn connect(
             let below_bot = r.position < bot_top_pos
                 || (r.position == bot_top_pos && snowflake(&r.id) > bot_top_id);
             let assignable = can_manage && !r.managed && below_bot;
-            let privileged =
-                r.permissions.parse::<u64>().unwrap_or(0) & crate::validate::STAFF_PERMISSIONS != 0;
+            let staff_permissions =
+                crate::validate::staff_permission_names(r.permissions.parse::<u64>().unwrap_or(0));
             RoleView {
                 id: r.id,
                 name: r.name,
@@ -344,7 +348,8 @@ pub async fn connect(
                 position: r.position,
                 managed: r.managed,
                 assignable,
-                privileged,
+                privileged: !staff_permissions.is_empty(),
+                staff_permissions,
             }
         })
         .collect();

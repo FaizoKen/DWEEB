@@ -368,7 +368,7 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
     // the menu was saved — or a menu saved before this check existed — must not
     // hand out a staff role either. Only grants are judged; taking a role away
     // is always safe.
-    let mut refused: Vec<String> = Vec::new();
+    let mut refused: Vec<(String, RoleBlock)> = Vec::new();
     let mut unchecked: Vec<String> = Vec::new();
     if !changes.add.is_empty() {
         match roles_for_click(state, &token, guild_id).await {
@@ -379,8 +379,8 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
                         // A role newer than our list reads as Missing; Discord itself
                         // refuses one that's really gone.
                         None | Some(RoleBlock::Missing) => true,
-                        Some(_) => {
-                            refused.push(rid.clone());
+                        Some(why) => {
+                            refused.push((rid.clone(), why));
                             false
                         }
                     })
@@ -804,7 +804,10 @@ mod tests {
             &state, &click,
         )));
         let text = v["data"]["components"][0]["content"].as_str().unwrap();
-        assert!(text.contains("**Moderator**"), "{text}");
+        assert!(
+            text.contains("**Moderator** (it has Ban Members)"),
+            "{text}"
+        );
         assert!(text.contains("never grants"), "{text}");
     }
 
@@ -843,7 +846,7 @@ mod tests {
             &state, &click,
         )));
         let text = v["data"]["components"][0]["content"].as_str().unwrap();
-        assert!(text.contains("**Admin**"), "{text}");
+        assert!(text.contains("**Admin** (it has Administrator)"), "{text}");
         assert!(!text.contains("Removed"), "{text}");
     }
 }
