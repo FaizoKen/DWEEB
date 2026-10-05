@@ -155,3 +155,40 @@ describe("timestamps", () => {
     }
   });
 });
+
+describe("fenced code blocks", () => {
+  // Discord's codeBlock rule closes at the next ``` anywhere; the preview used
+  // to close only on a line starting with one, swallowing everything after.
+  it("closes at a fence that ends the last code line", () => {
+    const ast = parseMarkdown("```\nnpm install\nnpm run dev```\nThen visit the page.");
+    expect(ast.blocks.map((b) => b.kind)).toEqual(["codeblock", "paragraph"]);
+    expect(ast.blocks[0]).toEqual({
+      kind: "codeblock",
+      lang: null,
+      value: "npm install\nnpm run dev",
+    });
+  });
+
+  it("closes a one-line ```code``` block, with no language", () => {
+    const ast = parseMarkdown("```hello```\nnext line");
+    expect(ast.blocks.map((b) => b.kind)).toEqual(["codeblock", "paragraph"]);
+    expect(ast.blocks[0]).toEqual({ kind: "codeblock", lang: null, value: "hello" });
+  });
+
+  it("keeps the language tag and the ordinary fenced form", () => {
+    expect(parseMarkdown("```js\nconst a = 1;\n```").blocks).toEqual([
+      { kind: "codeblock", lang: "js", value: "const a = 1;" },
+    ]);
+    expect(parseMarkdown("intro\n```\ncode\n```\noutro").blocks.map((b) => b.kind)).toEqual([
+      "paragraph",
+      "codeblock",
+      "paragraph",
+    ]);
+  });
+
+  it("treats an unclosed fence as code to the end of the message", () => {
+    expect(parseMarkdown("```py\nprint(1)\nprint(2)").blocks).toEqual([
+      { kind: "codeblock", lang: "py", value: "print(1)\nprint(2)" },
+    ]);
+  });
+});

@@ -18,6 +18,7 @@ import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from
 import type { WebhookMessage } from "@/core/schema/types";
 import { CURRENT_VERSION, migrate } from "./version";
 import { attachEditorFields, stripEditorFields, stripSessionAttachments } from "./normalize";
+import { withoutResolvedMedia } from "./resolvedMedia";
 
 const SEPARATOR = ".";
 
@@ -43,6 +44,18 @@ export type DecodeResult = DecodeOk | DecodeErr;
 
 /** Decode a share token. Never throws — failures come back as DecodeErr. */
 export function decodeShare(token: string): DecodeResult {
+  // A link copied from the Share dialog is built through URLSearchParams, which
+  // percent-encodes lz-string's `+` and `$` (`%2B`/`%24`), so a token taken
+  // straight out of such a link — what JSON Import does with a pasted share URL
+  // — arrives still encoded and wouldn't decompress. `%` is outside lz-string's
+  // alphabet, so decoding can never corrupt a raw token.
+  if (token.includes("%")) {
+    try {
+      token = decodeURIComponent(token);
+    } catch {
+      // A malformed escape — let it fail as an undecodable body below.
+    }
+  }
   const sepIdx = token.indexOf(SEPARATOR);
   if (sepIdx <= 0) {
     return { ok: false, error: "Share token is missing its version prefix." };
@@ -74,9 +87,15 @@ export function decodeShare(token: string): DecodeResult {
   }
 }
 
-/** JSON-encode for download/clipboard. Indented for human review. */
+/** JSON-encode for download/clipboard. Indented for human review. The JSON tab
+ *  tells people to POST this as-is, so a restored message loses the read-only
+ *  media fields Discord would refuse (see `resolvedMedia.ts`). */
 export function encodeJson(message: WebhookMessage): string {
-  return JSON.stringify(stripSessionAttachments(stripEditorFields(message)), null, 2);
+  return JSON.stringify(
+    withoutResolvedMedia(stripSessionAttachments(stripEditorFields(message))),
+    null,
+    2,
+  );
 }
 
 /** Parse a JSON string (as produced by `encodeJson` or pasted from Discord). */

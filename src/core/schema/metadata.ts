@@ -108,6 +108,25 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
   },
 };
 
+/**
+ * The display metadata for any component type — including one this schema
+ * doesn't know. The import boundary keeps such components on purpose (a newer
+ * Discord type, or one another tool emits; see the validator's `KNOWN_TYPES`),
+ * and `COMPONENT_META`'s `Record` type hides the `undefined` a raw lookup then
+ * returns: reading `.label` off it threw out of the tree and the preview, so a
+ * pasted `{"type": 18}` took the whole editor down. Every lookup keyed by a
+ * node's own `type` goes through here.
+ */
+export function componentMeta(type: number): ComponentMeta {
+  return (
+    COMPONENT_META[type as ComponentTypeValue] ?? {
+      label: `Unknown component (type ${type})`,
+      description: "A component type DWEEB doesn't know yet — kept as-is.",
+      glyph: "?",
+    }
+  );
+}
+
 /** The add menu's name for a component type — its `addLabel` when adding reads
  *  differently from what the tree calls the result, else its label. */
 export function addMenuLabel(type: ComponentTypeValue): string {

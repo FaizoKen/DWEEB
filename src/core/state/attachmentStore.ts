@@ -33,11 +33,29 @@
  */
 
 import {
-  deleteAttachmentBlob,
   deleteAttachmentBlobs,
   loadAttachmentBlobs,
   putAttachmentBlobs,
+  pruneAttachmentBlobs,
 } from "./attachmentDb";
+import { otherTabsOpen, startTabPresence } from "./tabPresence";
+
+// Every tab answers the others' "anyone there?" before they delete stored
+// upload bytes — see `tabPresence`.
+startTabPresence();
+
+/**
+ * Delete persisted bytes only when no other DWEEB tab is open: each tab judges
+ * orphans from its own editor and saves, and another tab may still show (and,
+ * after a reload, need) an upload this one no longer references. Memory is
+ * freed regardless; a tab that finds itself alone prunes the leftovers.
+ */
+function deleteStoredWhenAlone(ids: string[]): void {
+  if (ids.length === 0) return;
+  void otherTabsOpen().then((others) => {
+    if (!others) void deleteAttachmentBlobs(ids);
+  });
+}
 
 const SESSION_PREFIX = "session://";
 
@@ -108,7 +126,7 @@ export function forgetAttachment(blobId: string): void {
   if (!record) return;
   if (record.objectUrl) URL.revokeObjectURL(record.objectUrl);
   blobs.delete(blobId);
-  void deleteAttachmentBlob(blobId);
+  deleteStoredWhenAlone([blobId]);
   notify();
 }
 
@@ -130,8 +148,9 @@ export function garbageCollect(referencedUrls: Iterable<string>): void {
     changed = true;
   }
   // Evict the same ids from IndexedDB so orphaned uploads don't accumulate
-  // across sessions (e.g. a component deleted, or a draft replaced by import).
-  if (removed.length > 0) void deleteAttachmentBlobs(removed);
+  // across sessions (e.g. a component deleted, or a draft replaced by import) —
+  // unless another tab may still be using them.
+  deleteStoredWhenAlone(removed);
   if (changed) notify();
 }
 
@@ -161,6 +180,10 @@ export function hydrateAttachments(referencedUrls: Iterable<string>): Promise<vo
       changed = true;
     }
     if (changed) notify();
+    // Orphans are pruned only by a tab that is alone, in the background.
+    void otherTabsOpen().then((others) => {
+      if (!others) void pruneAttachmentBlobs(ids);
+    });
   });
   return hydration;
 }

@@ -21,6 +21,15 @@ import {
   subscribeAttachments,
 } from "@/core/state/attachmentStore";
 
+/**
+ * A stored media `url` as a string. The import boundary keeps whatever a
+ * payload carries, and a hand-written `"url": 42` must preview as "no source"
+ * rather than throw out of every renderer that treats it as text.
+ */
+export function mediaUrlText(url: unknown): string {
+  return typeof url === "string" ? url : "";
+}
+
 export function useResolvedMediaUrl(url: string): string | null {
   useSyncExternalStore(subscribeAttachments, getAttachmentSnapshot, getAttachmentSnapshot);
   const session = parseSessionUrl(url);

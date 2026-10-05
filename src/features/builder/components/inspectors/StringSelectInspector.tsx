@@ -74,7 +74,12 @@ export function StringSelectInspector({ node }: Props) {
   };
 
   const addOption = () => {
-    const n = node.options.length + 1;
+    // The first unused number from the list's length on: after removing
+    // "Option 1" from the defaults, `length + 1` was `option_2` again — a
+    // duplicate value, flagged the moment the option appeared.
+    const taken = new Set(node.options.map((o) => o.value));
+    let n = node.options.length + 1;
+    while (taken.has(`option_${n}`)) n++;
     patch<StringSelectComponent>(node._id, {
       options: [...node.options, { label: `Option ${n}`, value: `option_${n}` }],
     });

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type InputHTMLAttributes,
@@ -77,8 +78,15 @@ export function ColorInput({
     if (parsed != null) onChange(parsed);
   };
 
+  // Set only for the duration of Escape's own blur. That blur runs
+  // synchronously, inside a render whose `draft` still holds the text being
+  // abandoned — so an emptied field read as "clear the colour" and Escape
+  // wiped the accent instead of reverting it.
+  const escapingRef = useRef(false);
+
   const commitDraft = () => {
     setEditing(false);
+    if (escapingRef.current) return;
     if (draft.trim() === "") {
       if (clearable) onChange(null);
       return;
@@ -90,7 +98,9 @@ export function ColorInput({
     if (e.key === "Enter") e.currentTarget.blur();
     if (e.key === "Escape") {
       setDraft(display);
+      escapingRef.current = true;
       e.currentTarget.blur();
+      escapingRef.current = false;
     }
   };
 

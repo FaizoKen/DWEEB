@@ -46,13 +46,22 @@ export function wrapInline(s: EditState, marker: string, placeholder = ""): Edit
   const after = text.slice(selEnd);
 
   // Unwrap — markers captured inside the selection.
-  if (selected.length >= 2 * n && selected.startsWith(marker) && selected.endsWith(marker)) {
+  if (
+    selected.length >= 2 * n &&
+    selected.startsWith(marker) &&
+    selected.endsWith(marker) &&
+    carriesMarker(marker, leadingRun(selected, marker), trailingRun(selected, marker))
+  ) {
     const inner = selected.slice(n, selected.length - n);
     return { text: before + inner + after, selStart, selEnd: selStart + inner.length };
   }
 
   // Unwrap — markers sit just outside the selection.
-  if (before.endsWith(marker) && after.startsWith(marker)) {
+  if (
+    before.endsWith(marker) &&
+    after.startsWith(marker) &&
+    carriesMarker(marker, trailingRun(before, marker), leadingRun(after, marker))
+  ) {
     return {
       text: before.slice(0, before.length - n) + selected + after.slice(n),
       selStart: selStart - n,
@@ -76,12 +85,54 @@ export function wrapInline(s: EditState, marker: string, placeholder = ""): Edit
   };
 }
 
+/** Length of the run of `ch` (a single character) at the start of `s`. */
+function leadingRun(s: string, ch: string): number {
+  let n = 0;
+  while (n < s.length && s[n] === ch) n++;
+  return n;
+}
+
+/** Length of the run of `ch` (a single character) at the end of `s`. */
+function trailingRun(s: string, ch: string): number {
+  let n = 0;
+  while (n < s.length && s[s.length - 1 - n] === ch) n++;
+  return n;
+}
+
+/**
+ * Whether marker runs of these lengths on both sides actually carry `marker`.
+ * Only italic needs the count: a lone `*` is italic but two are bold, so an
+ * odd run (`*x*`, `***x***`) holds an italic marker while an even one
+ * (`**x**`) doesn't — and unwrapping one `*` from `**bold**` turned it into
+ * `*italic*` instead of adding italic on top. Every other marker is matched
+ * whole, so its presence is enough.
+ */
+function carriesMarker(marker: string, left: number, right: number): boolean {
+  if (marker !== "*") return true;
+  return left % 2 === 1 && right % 2 === 1;
+}
+
 /** Whether the selection is currently wrapped by `marker` (drives highlighting). */
 export function isInlineActive(s: EditState, marker: string): boolean {
   const { text, selStart, selEnd } = s;
   const n = marker.length;
   const before = text.slice(0, selStart);
   const after = text.slice(selEnd);
+
+  if (marker === "*") {
+    // Italic by run parity, the same rule `wrapInline` unwraps by — so
+    // `***bold italic***` reads as italic too, and `**bold**` doesn't.
+    const selected = text.slice(selStart, selEnd);
+    if (before.endsWith("*") && after.startsWith("*")) {
+      return carriesMarker("*", trailingRun(before, "*"), leadingRun(after, "*"));
+    }
+    return (
+      selected.length >= 2 &&
+      selected.startsWith("*") &&
+      selected.endsWith("*") &&
+      carriesMarker("*", leadingRun(selected, "*"), trailingRun(selected, "*"))
+    );
+  }
 
   if (before.endsWith(marker) && after.startsWith(marker)) {
     // A lone `*`/`_` neighboured by a second one is really `**`/`__`, not this.
@@ -103,12 +154,16 @@ export function isInlineActive(s: EditState, marker: string): boolean {
 
 /** Expand the selection to whole lines and return the enclosing block. */
 function lineBlock(text: string, selStart: number, selEnd: number) {
-  const start = text.lastIndexOf("\n", selStart - 1) + 1;
-  let end = text.indexOf("\n", selEnd);
+  // `lastIndexOf` clamps a negative fromIndex to 0, where it finds a newline
+  // sitting AT index 0 — so a caret on an empty first line resolved to the
+  // line after it, and the edit duplicated the newline.
+  const start = selStart === 0 ? 0 : text.lastIndexOf("\n", selStart - 1) + 1;
+  // A selection that ends just past a newline (Shift+Down from a line start,
+  // a drag to the next line's start) holds nothing of that next line — act on
+  // the lines it actually covers rather than pulling the next one in.
+  const last = selEnd > selStart && text[selEnd - 1] === "\n" ? selEnd - 1 : selEnd;
+  let end = text.indexOf("\n", last);
   if (end === -1) end = text.length;
-  // A collapsed caret sitting just past a trailing newline should still act on
-  // the line it's on, not pull in the previous one.
-  if (selEnd > selStart && end > start && text[end - 1] === "\n") end -= 1;
   return { start, end, block: text.slice(start, end) };
 }
 

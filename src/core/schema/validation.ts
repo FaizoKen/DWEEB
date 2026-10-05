@@ -66,6 +66,8 @@ export interface ValidationResult {
 }
 
 const SNOWFLAKE_RE = /^\d{15,25}$/;
+/** The largest component `id` Discord accepts — a signed 32-bit integer. */
+const COMPONENT_ID_MAX = 2_147_483_647;
 
 /**
  * Discord rejects a webhook username that contains "clyde" or "discord"
@@ -444,6 +446,15 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[], slot: Slot)
       severity: "error",
       code: "COMPONENT_ID_NOT_INTEGER",
       message: "Component id must be a whole number.",
+    });
+  } else if (node.id !== undefined && (node.id < 0 || node.id > COMPONENT_ID_MAX)) {
+    // Discord stores the id as a 32-bit integer (0 = "assign one for me"), so a
+    // bigger one passed here and was refused on send.
+    issues.push({
+      nodeId: node._id,
+      severity: "error",
+      code: "COMPONENT_ID_RANGE",
+      message: `Component id must be between 0 and ${COMPONENT_ID_MAX}.`,
     });
   }
 

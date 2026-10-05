@@ -21,6 +21,7 @@
 
 import type { WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
+import type { PendingEditOrigin, RestoredOrigin } from "./messageStore";
 
 const STORAGE_KEY = "dweeb.history.v1";
 
@@ -32,6 +33,22 @@ const MAX_BYTES = 1_000_000;
 /** One undo/redo step — a full snapshot of the message at that point. */
 export interface HistoryFrame {
   message: WebhookMessage;
+  /**
+   * The step swapped in a different document (template, import, restore,
+   * clear…) rather than editing this one. Undo/redo across it must also swap
+   * which posted message the editor is linked to — otherwise undoing a Restore
+   * left "Update" aimed at the restored message, and an Update overwrote it
+   * with the unrelated draft. Persisted (it is just a flag).
+   */
+  replaced?: true;
+  /**
+   * The Discord origins that were live while this frame's document was in the
+   * editor, handed back when undo/redo crosses a {@link replaced} step. Memory
+   * only, never persisted: a restore origin carries a webhook URL, which is a
+   * credential. A frame revived from storage has none, and crossing it lands
+   * on an unlinked document — the safe answer.
+   */
+  origins?: { restoredFrom: RestoredOrigin | null; pendingEditOrigin: PendingEditOrigin | null };
 }
 
 /**
@@ -51,6 +68,19 @@ function serializeFrame(message: WebhookMessage): string {
 }
 
 /**
+ * A stored step: the bare message for an ordinary edit (the format every
+ * record has always used), or the message wrapped with a marker for a
+ * {@link HistoryFrame.replaced} step. Older builds read a wrapped step as a
+ * malformed frame and drop it, which leaves the rest of the history intact.
+ */
+const REPLACED_KEY = "__dweebReplaced";
+
+function serializeStep(frame: HistoryFrame): string {
+  const json = serializeFrame(frame.message);
+  return frame.replaced ? `{"${REPLACED_KEY}":1,"message":${json}}` : json;
+}
+
+/**
  * Persist the undo/redo stacks. Silently no-ops on quota errors (keeping the
  * previous record beats throwing inside the auto-save subscriber).
  */
@@ -63,7 +93,7 @@ export function saveHistory(past: readonly HistoryFrame[], future: readonly Hist
     // then restore chronological order for storage.
     const pastJson: string[] = [];
     for (let i = past.length - 1; i >= 0 && pastJson.length < MAX_FRAMES_PER_STACK; i--) {
-      const json = serializeFrame(past[i]!.message);
+      const json = serializeStep(past[i]!);
       if (bytes + json.length > MAX_BYTES) break;
       bytes += json.length;
       pastJson.push(json);
@@ -73,7 +103,7 @@ export function saveHistory(past: readonly HistoryFrame[], future: readonly Hist
     // `future[0]` is the next redo step — nearest-first already.
     const futureJson: string[] = [];
     for (let i = 0; i < future.length && futureJson.length < MAX_FRAMES_PER_STACK; i++) {
-      const json = serializeFrame(future[i]!.message);
+      const json = serializeStep(future[i]!);
       if (bytes + json.length > MAX_BYTES) break;
       bytes += json.length;
       futureJson.push(json);
@@ -116,7 +146,12 @@ function reviveFrames(raw: unknown): HistoryFrame[] {
   const frames: HistoryFrame[] = [];
   for (const payload of raw) {
     try {
-      frames.push({ message: attachEditorFields(payload) });
+      const wrapped = payload as Record<string, unknown> | null;
+      if (wrapped && typeof wrapped === "object" && wrapped[REPLACED_KEY] === 1) {
+        frames.push({ message: attachEditorFields(wrapped.message), replaced: true });
+      } else {
+        frames.push({ message: attachEditorFields(payload) });
+      }
     } catch {
       // Malformed frame (older incompatible build) — skip it.
     }

@@ -338,15 +338,38 @@ function takenCustomIds(message: WebhookMessage): Set<string> {
  * instantly invalid on both rows, with the fix folded away behind the Action
  * panel's "Set the ID manually" disclosure. A numeric suffix keeps the default
  * readable (`btn_action_2`); an existing `_N` suffix is bumped rather than
- * stacked (`btn_action_2` → `btn_action_3`, never `btn_action_2_2`).
+ * stacked (`btn_action_2` → `btn_action_3`, never `btn_action_2_2`). The stem is
+ * trimmed so the suffixed id still fits Discord's 100-unit cap — duplicating a
+ * button whose id is already at the cap must not mint an invalid copy.
  */
 export function uniqueCustomId(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base;
   const stem = base.replace(/_\d+$/, "");
+  const max = Math.min(LIMITS.BUTTON_CUSTOM_ID, LIMITS.SELECT_CUSTOM_ID);
   for (let n = 2; ; n++) {
-    const candidate = `${stem}_${n}`;
+    const suffix = `_${n}`;
+    const candidate = `${stem.slice(0, max - suffix.length)}${suffix}`;
     if (!taken.has(candidate)) return candidate;
   }
+}
+
+/**
+ * A `custom_id` for a component that is *becoming* interactive outside the add
+ * paths — a Link button switched to an interactive style, a plugin detached —
+ * unique against everything already in the message. `exceptId` names the node
+ * being changed, whose own current id doesn't count as taken.
+ */
+export function freshCustomId(base: string, exceptId?: EditorId): string {
+  const { message } = useMessageStore.getState();
+  const taken = new Set<string>();
+  for (const top of message.components) {
+    forEachNode(top, (n) => {
+      if (exceptId !== undefined && n._id === exceptId) return;
+      const cid = (n as { custom_id?: unknown }).custom_id;
+      if (typeof cid === "string" && cid) taken.add(cid);
+    });
+  }
+  return uniqueCustomId(base, taken);
 }
 
 /**
@@ -461,6 +484,19 @@ function canAcceptChild(
     return parent.components.length < LIMITS.ACTION_ROW_BUTTONS;
   }
   return false;
+}
+
+/**
+ * Whether `duplicate(id)` has room to place a copy beside the original. A
+ * duplicate is an add into the same parent, so it passes the same gate every
+ * add path and drag does — without it, Duplicate ignored the caps the Add
+ * buttons respect (a sixth button in a full row, an 11th top-level component),
+ * producing a message that can't be sent. The tree disables its Duplicate
+ * button on the same answer.
+ */
+export function canDuplicateNode(message: WebhookMessage, id: EditorId): boolean {
+  const loc = findById(message, id);
+  return loc !== null && canAcceptChild(loc.parent, loc.node, message);
 }
 
 /** A parent's reorderable child list (null === the top level). */
@@ -605,6 +641,28 @@ function pushHistory(
   return { past, future: [] };
 }
 
+/** The Discord origins live right now, as a history frame records them. */
+function originsOf(state: MessageState): NonNullable<HistoryFrame["origins"]> {
+  return { restoredFrom: state.restoredFrom, pendingEditOrigin: state.pendingEditOrigin };
+}
+
+/**
+ * {@link pushHistory} for a step that swaps in a different document — a
+ * template, an import, a restore, a clear. The frame remembers that it was a
+ * swap and which posted message the outgoing document was linked to, so undo
+ * can hand that link back instead of leaving the editor aimed at the message
+ * the swap brought in (see {@link HistoryFrame.replaced}). Never coalesces.
+ */
+function pushReplaceHistory(state: MessageState): Pick<MessageState, "past" | "future"> {
+  lastEditTag = null;
+  const past: HistoryFrame[] = [
+    ...state.past,
+    { message: state.message, replaced: true, origins: originsOf(state) },
+  ];
+  if (past.length > HISTORY_LIMIT) past.shift();
+  return { past, future: [] };
+}
+
 /**
  * Initial editor state.
  *
@@ -642,7 +700,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   replaceMessage(next) {
     beginNewDocument();
     set((s) => ({
-      ...pushHistory(s),
+      ...pushReplaceHistory(s),
       message: reassignIds(next),
       selectedId: null,
       restoredFrom: null,
@@ -653,7 +711,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   replaceMessageFromRestore(next, origin) {
     beginNewDocument();
     set((s) => ({
-      ...pushHistory(s),
+      ...pushReplaceHistory(s),
       message: reassignIds(next),
       selectedId: null,
       restoredFrom: origin,
@@ -673,7 +731,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   loadDefaultPreset() {
     beginNewDocument();
     set((s) => ({
-      ...pushHistory(s),
+      ...pushReplaceHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
       selectedId: null,
       restoredFrom: null,
@@ -684,7 +742,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   clearAll() {
     beginNewDocument();
     set((s) => ({
-      ...pushHistory(s),
+      ...pushReplaceHistory(s),
       // A fresh, empty message — drops every message-level option (username,
       // avatar, mentions, thread name…) along with the component tree.
       message: { components: [] },
@@ -1241,6 +1299,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   duplicate(id) {
     set((s) => {
+      // The copy lands beside the original, so it needs the room an add would.
+      if (!canDuplicateNode(s.message, id)) return s;
       const cloneWithIds = <T extends AnyComponent>(node: T): T => {
         const next = { ...node, _id: newId() } as T;
         if (isContainer(next)) {
@@ -1436,26 +1496,53 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     // End any in-flight coalescing burst so the next field edit records its own
     // frame rather than folding into the step we're about to restore.
     lastEditTag = null;
+    // Crossing a document swap is itself a swap: async work started for the
+    // document being left (an origin lookup, a scheduled-post edit) must not
+    // land on the one coming back.
+    if (get().past.at(-1)?.replaced) beginNewDocument();
     set((s) => {
       const prev = s.past[s.past.length - 1];
       if (!prev) return s;
+      if (!prev.replaced) {
+        // An edit step: the document — and which posted message it updates —
+        // is unchanged, so "post, undo a typo, Update" still targets the post.
+        return {
+          past: s.past.slice(0, -1),
+          future: [{ message: s.message }, ...s.future],
+          message: prev.message,
+        };
+      }
       return {
         past: s.past.slice(0, -1),
-        future: [{ message: s.message }, ...s.future],
+        future: [{ message: s.message, replaced: true, origins: originsOf(s) }, ...s.future],
         message: prev.message,
+        selectedId: null,
+        restoredFrom: prev.origins?.restoredFrom ?? null,
+        pendingEditOrigin: prev.origins?.pendingEditOrigin ?? null,
       };
     });
   },
 
   redo() {
     lastEditTag = null;
+    if (get().future[0]?.replaced) beginNewDocument();
     set((s) => {
       const [next, ...rest] = s.future;
       if (!next) return s;
+      if (!next.replaced) {
+        return {
+          past: [...s.past, { message: s.message }],
+          future: rest,
+          message: next.message,
+        };
+      }
       return {
-        past: [...s.past, { message: s.message }],
+        past: [...s.past, { message: s.message, replaced: true, origins: originsOf(s) }],
         future: rest,
         message: next.message,
+        selectedId: null,
+        restoredFrom: next.origins?.restoredFrom ?? null,
+        pendingEditOrigin: next.origins?.pendingEditOrigin ?? null,
       };
     });
   },

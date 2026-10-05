@@ -1,11 +1,12 @@
 /**
  * Guards the upload-persistence startup contract: `loadAttachmentBlobs` must
- * restore exactly the reachable blobs and prune every orphan key in the same
- * pass — without `IDBCursor.delete()` on its key-only cursor. That call throws
- * `InvalidStateError` ("The cursor is a key cursor"), and since the throw
- * happens inside the cursor's success handler it aborts the whole transaction.
- * v1.0.0 shipped exactly that: any returning user with one orphaned upload got
- * a crash beacon AND lost hydration of their still-referenced uploads.
+ * restore exactly the reachable blobs, and `pruneAttachmentBlobs` must remove
+ * every orphan key — without `IDBCursor.delete()` on its key-only cursor. That
+ * call throws `InvalidStateError` ("The cursor is a key cursor"), and since the
+ * throw happens inside the cursor's success handler it aborts the whole
+ * transaction. v1.0.0 shipped exactly that (load and prune were then one pass):
+ * any returning user with one orphaned upload got a crash beacon AND lost
+ * hydration of their still-referenced uploads.
  *
  * Runs against `fake-indexeddb`, which enforces the spec's key-cursor
  * restriction, so a regression fails here instead of in production.
@@ -50,11 +51,12 @@ describe("attachmentDb", () => {
       upload("stale", "stale.bin", "orphaned upload"),
     ]);
 
-    // The v1.0.0 regression: the orphan's delete threw inside the cursor
-    // callback, aborted the transaction, and this came back [] instead.
     const restored = await db.loadAttachmentBlobs(["keep"]);
     expect(restored.map((r) => r.id)).toEqual(["keep"]);
     expect(await restored.find((r) => r.id === "keep")?.file.text()).toBe("still referenced");
+    // The v1.0.0 regression: the orphan's delete threw inside the cursor
+    // callback and aborted the transaction.
+    await db.pruneAttachmentBlobs(new Set(["keep"]));
 
     // The orphan row is really gone: asking for it afterwards finds nothing.
     const second = await db.loadAttachmentBlobs(["keep", "stale"]);
@@ -66,6 +68,7 @@ describe("attachmentDb", () => {
     await db.putAttachmentBlobs([upload("a", "a.txt", "x"), upload("b", "b.txt", "y")]);
 
     expect(await db.loadAttachmentBlobs([])).toEqual([]);
+    await db.pruneAttachmentBlobs(new Set());
     expect(await db.loadAttachmentBlobs(["a", "b"])).toEqual([]);
   });
 

@@ -2,7 +2,7 @@ import type { FileComponent } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
 import { cn } from "@/lib/cn";
 import { parseSessionUrl } from "@/core/state/attachmentStore";
-import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
+import { mediaUrlText, useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import styles from "./FileRenderer.module.css";
 
 export function FileRenderer({ node }: { node: FileComponent }) {
@@ -11,8 +11,11 @@ export function FileRenderer({ node }: { node: FileComponent }) {
   // single click target.
   const selectedId = useMessageStore((s) => s.selectedId);
   const obscured = node.spoiler === true && selectedId !== node._id;
-  const url = node.file.url ?? "";
-  const attachmentId = node.file.attachment_id;
+  const url = mediaUrlText(node.file.url);
+  // Text-only, for the same reason as the url: an imported payload isn't bound
+  // by the types, and a numeric id would throw on `.slice` below.
+  const attachmentId =
+    typeof node.file.attachment_id === "string" ? node.file.attachment_id : undefined;
   const session = parseSessionUrl(url);
   const resolved = useResolvedMediaUrl(url);
 

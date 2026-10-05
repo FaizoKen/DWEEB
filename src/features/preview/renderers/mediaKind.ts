@@ -13,8 +13,10 @@ const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "ogv"]);
 
 export type MediaKind = "image" | "video";
 
-export function mediaKindFromName(name: string, contentType?: string): MediaKind | null {
-  if (contentType) {
+export function mediaKindFromName(name: string, contentType?: unknown): MediaKind | null {
+  // Restored media carries `content_type` as text; an imported payload may carry
+  // anything, which must fall back to the extension rather than throw.
+  if (typeof contentType === "string" && contentType) {
     if (contentType.startsWith("image/")) return "image";
     if (contentType.startsWith("video/")) return "video";
   }

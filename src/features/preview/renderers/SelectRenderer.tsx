@@ -25,7 +25,9 @@ interface Props {
 
 export function SelectRenderer({ node }: Props) {
   const selections = collectSelections(node);
-  const placeholder = node.placeholder?.trim() || "Make a selection";
+  const rawPlaceholder: unknown = node.placeholder;
+  const placeholder =
+    (typeof rawPlaceholder === "string" ? rawPlaceholder.trim() : "") || "Make a selection";
 
   return (
     <div className={cn(styles.select, node.disabled && styles.disabled)}>
@@ -52,13 +54,26 @@ export function SelectRenderer({ node }: Props) {
   );
 }
 
+/**
+ * The values a closed select shows. Read defensively: the import boundary
+ * keeps whatever a payload carries (a null option, an object where the
+ * `default_values` array belongs), and the preview must never be the thing
+ * that throws on a bad import — that takes the whole editor down with it.
+ */
 function collectSelections(node: SelectComponent): string[] {
   if (node.type === ComponentType.StringSelect) {
-    return node.options.filter((o) => o.default).map((o) => o.label);
+    return node.options
+      .filter((o) => !!o && typeof o === "object" && o.default)
+      .map((o) => String(o.label ?? ""));
   }
-  const dvs = (node as Exclude<SelectComponent, StringSelectComponent>).default_values;
-  if (!dvs || dvs.length === 0) return [];
-  return dvs.map((dv) => formatDefault(node, dv));
+  const dvs: unknown = (node as Exclude<SelectComponent, StringSelectComponent>).default_values;
+  if (!Array.isArray(dvs)) return [];
+  return dvs
+    .filter(
+      (dv): dv is { id: string; type: "user" | "role" | "channel" } =>
+        !!dv && typeof dv === "object",
+    )
+    .map((dv) => formatDefault(node, dv));
 }
 
 function formatDefault(
@@ -66,7 +81,9 @@ function formatDefault(
   dv: { id: string; type: "user" | "role" | "channel" },
 ): string {
   const prefix = symbolForDefault(node, dv);
-  return `${prefix}${dv.id.slice(-6)}`;
+  // `String()`: hand-written JSON often carries the snowflake as a number,
+  // which the import boundary keeps — `.slice` on it threw out of the preview.
+  return `${prefix}${String(dv.id).slice(-6)}`;
 }
 
 function symbolForDefault(

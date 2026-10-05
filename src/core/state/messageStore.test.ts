@@ -109,6 +109,68 @@ describe("whole-document generation", () => {
 });
 
 /**
+ * Undo/redo across a whole-document swap swaps which posted message the editor
+ * is linked to as well. Undoing a Restore used to leave `restoredFrom` aimed at
+ * the restored message while the editor showed the unrelated draft again — the
+ * bar still said "Update", the "Replaces" warning was suppressed, and one click
+ * PATCHed the posted message with that draft.
+ */
+describe("undo/redo across a document swap", () => {
+  const origin = {
+    webhookUrl: "https://discord.com/api/webhooks/123456789012345678/tok",
+    messageId: "223456789012345678",
+  };
+  const other = {
+    webhookUrl: "https://discord.com/api/webhooks/123456789012345678/tok",
+    messageId: "323456789012345678",
+  };
+
+  beforeEach(() => {
+    seed({ components: [textDisplay("t1", "my draft")] });
+    useMessageStore.setState({ restoredFrom: null, pendingEditOrigin: null });
+  });
+
+  it("undoing a restore unlinks the editor; redoing it links it again", () => {
+    useMessageStore
+      .getState()
+      .replaceMessageFromRestore({ components: [textDisplay("p", "posted")] }, origin);
+    const generation = getMessageDocumentGeneration();
+
+    useMessageStore.getState().undo();
+    expect(content(useMessageStore.getState().message)).toBe("my draft");
+    expect(useMessageStore.getState().restoredFrom).toBeNull();
+    // Async work started for the restored document must not land here.
+    expect(getMessageDocumentGeneration()).not.toBe(generation);
+
+    useMessageStore.getState().redo();
+    expect(content(useMessageStore.getState().message)).toBe("posted");
+    expect(useMessageStore.getState().restoredFrom).toEqual(origin);
+  });
+
+  it("undoing a template over a restored message links the restored message again", () => {
+    useMessageStore
+      .getState()
+      .replaceMessageFromRestore({ components: [textDisplay("p", "posted")] }, origin);
+    useMessageStore.getState().replaceMessage({ components: [textDisplay("tpl", "template")] });
+    expect(useMessageStore.getState().restoredFrom).toBeNull();
+
+    useMessageStore.getState().undo();
+    expect(content(useMessageStore.getState().message)).toBe("posted");
+    expect(useMessageStore.getState().restoredFrom).toEqual(origin);
+  });
+
+  it("undoing an edit keeps the link — post, undo a typo, Update still targets the post", () => {
+    useMessageStore.getState().setRestoreOrigin(other);
+    useMessageStore.getState().setUsername("typo");
+    const generation = getMessageDocumentGeneration();
+
+    useMessageStore.getState().undo();
+    expect(useMessageStore.getState().restoredFrom).toEqual(other);
+    expect(getMessageDocumentGeneration()).toBe(generation);
+  });
+});
+
+/**
  * Every factory hands a new button/select the same readable default custom_id
  * (`btn_action`, `select_option`…). Discord requires custom_ids to be unique per
  * message, so the store makes them unique *on insert and on duplicate* — the

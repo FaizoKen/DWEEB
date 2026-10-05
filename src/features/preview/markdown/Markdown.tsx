@@ -215,16 +215,20 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
  * the CDN 404s the id, instead of leaving a broken image.
  */
 function CustomEmoji({ name, id, animated }: { name: string; id: string; animated: boolean }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <span>:{name}:</span>;
+  const src = `https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "webp"}?size=24&quality=lossless`;
+  // The failure belongs to the id that 404'd: this component is keyed by its
+  // position, so editing the id inside `<:name:id>` re-renders it in place,
+  // and a plain flag left the text fallback up for good.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) return <span>:{name}:</span>;
   return (
     <img
       className={styles.emoji}
-      src={`https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "webp"}?size=24&quality=lossless`}
+      src={src}
       alt={`:${name}:`}
       loading="lazy"
       decoding="async"
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(src)}
     />
   );
 }

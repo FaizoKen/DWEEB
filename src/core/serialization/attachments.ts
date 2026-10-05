@@ -25,6 +25,7 @@
 
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "./normalize";
+import { RESOLVED_MEDIA_FIELDS } from "./resolvedMedia";
 import { getAttachmentFile, parseSessionUrl } from "@/core/state/attachmentStore";
 
 export interface CollectedFile {
@@ -38,21 +39,6 @@ export interface CollectedAttachments {
   /** Files to upload in multipart parts (positional). Deduped by blob id. */
   files: CollectedFile[];
 }
-
-const RESOLVED_MEDIA_FIELDS = [
-  "proxy_url",
-  "height",
-  "width",
-  "content_type",
-  "loading_state",
-  // Discord also stamps these onto every restored media item. They're all
-  // output-only — the execute/update endpoint 400s if any are sent back.
-  "id",
-  "placeholder",
-  "placeholder_version",
-  "content_scan_metadata",
-  "flags",
-] as const;
 
 /** Drop server-only resolved fields and reconcile `url` vs `attachment_id`. */
 function cleanMedia(raw: Record<string, unknown>): Record<string, unknown> {

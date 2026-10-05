@@ -23,6 +23,23 @@ function isTextEntry(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * A field whose arrow keys do something of their own — stepping a date, time
+ * or number, moving between a textarea's lines — unlike a single-line search
+ * box, where ArrowDown is the way into the menu's results.
+ */
+function ownsArrowKeys(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || /^(TEXTAREA|SELECT)$/.test(target.tagName)) return true;
+  return (
+    target instanceof HTMLInputElement &&
+    /^(date|time|datetime-local|month|week|number|range)$/.test(target.type)
+  );
+}
+
+const FOCUSABLE =
+  "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
 interface TriggerProps {
   onClick?: (e: ReactMouseEvent) => void;
   onKeyDown?: (e: ReactKeyboardEvent) => void;
@@ -83,9 +100,7 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
   const focusPastTrigger = (backward: boolean) => {
     const trigger = triggerElement();
     if (!trigger) return;
-    const selector =
-      "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
       (element) =>
         !panelRef.current?.contains(element) &&
         !element.closest("[inert]") &&
@@ -214,6 +229,25 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
                 visibility: pos ? "visible" : "hidden",
               }}
               onKeyDown={(event) => {
+                // A form field inside the panel whose arrows mean something
+                // (the timestamp picker's date and time) keeps its own keys:
+                // arrows step the value, and Tab walks to the next field — the
+                // panel only takes Tab over at its edge, to leave past the
+                // trigger. Hijacking them left those fields mouse-only.
+                if (ownsArrowKeys(event.target)) {
+                  if (event.key === "Tab") {
+                    const fields = Array.from(
+                      panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
+                    );
+                    const at = fields.indexOf(event.target as HTMLElement);
+                    const next = at + (event.shiftKey ? -1 : 1);
+                    if (at >= 0 && next >= 0 && next < fields.length) return;
+                    event.preventDefault();
+                    focusPastTrigger(event.shiftKey);
+                    return;
+                  }
+                  if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                }
                 const items = menuItems();
                 if (items.length === 0) return;
                 const current = document.activeElement;

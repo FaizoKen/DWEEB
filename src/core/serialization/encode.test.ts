@@ -249,6 +249,70 @@ describe("attachEditorFields — structurally incomplete payloads", () => {
     const attached = attachEditorFields(stripEditorFields(original));
     expect(stripEditorFields(attached)).toEqual(stripEditorFields(original));
   });
+
+  // The entries of the walked arrays, and the scalar fields renderers read as
+  // strings, crashed the live validator or the preview the same way the
+  // missing arrays did — reachable by anyone sending a crafted share link.
+  const inRow = (child: unknown) => ({
+    components: [{ type: ComponentType.ActionRow, components: [child] }],
+  });
+
+  it("repairs malformed string-select options instead of crashing the validator", () => {
+    const attached = attachEditorFields(
+      inRow({
+        type: ComponentType.StringSelect,
+        custom_id: "s",
+        options: [null, { value: "a" }, { label: "b", value: "b", description: 5, emoji: "x" }],
+      }),
+    );
+    expect(() => validateMessage(attached)).not.toThrow();
+    const sel = (attached.components[0] as unknown as { components: Array<{ options: unknown[] }> })
+      .components[0]!;
+    expect(sel.options).toEqual([
+      { label: "", value: "" },
+      { label: "", value: "a" },
+      { label: "b", value: "b" },
+    ]);
+    expect(validateMessage(attached).issues.map((i) => i.code)).toContain("OPTION_LABEL_MISSING");
+  });
+
+  it("never trusts a non-string snowflake in a select's default values", () => {
+    const attached = attachEditorFields(
+      inRow({
+        type: ComponentType.UserSelect,
+        custom_id: "u",
+        default_values: [null, { id: 123456789012345680, type: "user" }],
+      }),
+    );
+    expect(() => validateMessage(attached)).not.toThrow();
+    const sel = (
+      attached.components[0] as unknown as { components: Array<{ default_values: unknown[] }> }
+    ).components[0]!;
+    // A JSON number has already lost the snowflake's low digits: flagged, not
+    // stringified into somebody else's id.
+    expect(sel.default_values).toEqual([{ id: "" }, { id: "", type: "user" }]);
+    const notArray = attachEditorFields(
+      inRow({ type: ComponentType.RoleSelect, custom_id: "r", default_values: { id: "1" } }),
+    );
+    expect(() => validateMessage(notArray)).not.toThrow();
+  });
+
+  it("coerces media fields the renderers read as strings", () => {
+    const attached = attachEditorFields({
+      components: [
+        { type: ComponentType.File, file: { url: 42, content_type: 7, attachment_id: 9 } },
+        { type: ComponentType.MediaGallery, items: [{ media: { url: {} }, description: 3 }] },
+      ],
+    });
+    expect(() => validateMessage(attached)).not.toThrow();
+    const [file, gallery] = attached.components as unknown as [
+      { file: Record<string, unknown> },
+      { items: Array<{ media: Record<string, unknown>; description?: unknown }> },
+    ];
+    expect(file.file).toEqual({ url: "" });
+    expect(gallery.items[0]!.media).toEqual({ url: "" });
+    expect(gallery.items[0]!.description).toBeUndefined();
+  });
 });
 
 describe("mention policy round-trips", () => {

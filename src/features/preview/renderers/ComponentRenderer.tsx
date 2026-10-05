@@ -13,7 +13,7 @@
 import { memo } from "react";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { isSelect } from "@/core/schema/guards";
-import { COMPONENT_META } from "@/core/schema/metadata";
+import { componentMeta } from "@/core/schema/metadata";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
@@ -76,7 +76,7 @@ export const ComponentRenderer = memo(function ComponentRenderer({ node }: Compo
       data-node-id={node._id}
       className={cn(styles.wrapper, isSelected && styles.selected)}
       role="group"
-      aria-label={`${COMPONENT_META[node.type].label} component. Press Enter to edit.`}
+      aria-label={`${componentMeta(node.type).label} component. Press Enter to edit.`}
       tabIndex={0}
       onClick={(e) => {
         e.stopPropagation();

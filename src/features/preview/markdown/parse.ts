@@ -63,6 +63,14 @@ export interface MarkdownAst {
   blocks: BlockNode[];
 }
 
+/**
+ * A closed fenced block, matched against the text from the opening fence on:
+ * an optional language tag ending its line, then the content up to the next
+ * ``` (Discord's own codeBlock rule, with the tag charset widened for `c++` /
+ * `c#`). Leading and trailing blank lines inside the fence are trimmed.
+ */
+const CLOSED_FENCE = /^```(?:([a-z0-9_+\-.#]+?)\n+)?\n*([\s\S]+?)\n*```/i;
+
 export function parseMarkdown(input: string): MarkdownAst {
   // Normalize newlines and trim leading/trailing blank lines (Discord does the
   // same) so a stray blank at either end doesn't render as an empty gap.
@@ -73,8 +81,21 @@ export function parseMarkdown(input: string): MarkdownAst {
   while (i < lines.length) {
     const line = lines[i]!;
 
-    // Code fence
+    // Code fence. Discord closes the block at the NEXT ``` anywhere — at the end
+    // of a code line (`npm run dev```), or on the opening line itself
+    // (```hello```) — not only on a line that starts with one, and whatever
+    // follows the closing fence renders as ordinary text again. Waiting for a
+    // line-leading fence swallowed the rest of the message into the block.
     if (line.startsWith("```")) {
+      const rest = lines.slice(i).join("\n");
+      const closed = CLOSED_FENCE.exec(rest);
+      if (closed) {
+        blocks.push({ kind: "codeblock", lang: closed[1] ?? null, value: closed[2]! });
+        const after = rest.slice(closed[0].length);
+        if (after.trim()) blocks.push(...parseMarkdown(after).blocks);
+        break;
+      }
+      // Unclosed: the rest of the message is code, as Discord shows it.
       const lang = line.slice(3).trim() || null;
       const body: string[] = [];
       i++;

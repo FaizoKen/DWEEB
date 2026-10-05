@@ -25,7 +25,7 @@
  */
 
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
-import { useMessageStore } from "@/core/state/messageStore";
+import { freshCustomId, useMessageStore } from "@/core/state/messageStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
@@ -373,7 +373,9 @@ export function PluginPanel({ node }: Props) {
       clearPluginSummary(customId);
       if (attached) clearPluginEditToken(customId, attached.id);
     }
-    writeCustomId(DETACH_DEFAULTS[target]);
+    // Unique against the rest of the message, as on every add path: two
+    // detached buttons both landing on `button_action` were instant duplicates.
+    writeCustomId(freshCustomId(DETACH_DEFAULTS[target], node._id));
   };
 
   const handleDetachLink = () => {

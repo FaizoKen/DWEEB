@@ -42,9 +42,22 @@ interface AvatarFieldProps {
   value: string;
   onChange(next: string): void;
   placeholders?: PlaceholderGroup[];
+  /* `Field` wires its hint/error onto the element carrying the control id —
+     this component — so they're forwarded to the input they describe. */
+  "aria-describedby"?: string;
+  "aria-errormessage"?: string;
+  "aria-invalid"?: boolean | "true" | "false";
 }
 
-export function AvatarField({ id, value, onChange, placeholders }: AvatarFieldProps) {
+export function AvatarField({
+  id,
+  value,
+  onChange,
+  placeholders,
+  "aria-describedby": ariaDescribedBy,
+  "aria-errormessage": ariaErrorMessage,
+  "aria-invalid": ariaInvalid,
+}: AvatarFieldProps) {
   const canUpload = useAvatarUploadConfigured();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -113,6 +126,9 @@ export function AvatarField({ id, value, onChange, placeholders }: AvatarFieldPr
     >
       <PlaceholderInput
         id={id}
+        aria-describedby={ariaDescribedBy}
+        aria-errormessage={ariaErrorMessage}
+        aria-invalid={ariaInvalid}
         className={canUpload ? styles.inputWithButton : undefined}
         data-meta-field="avatar"
         type="url"

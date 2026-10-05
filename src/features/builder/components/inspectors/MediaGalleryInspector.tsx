@@ -42,7 +42,9 @@ export function MediaGalleryInspector({ node }: Props) {
   // text pastes still reach their inputs.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (!e.clipboardData) return;
+      // Already handled by a field that took the paste for itself (the avatar
+      // URL uploads a pasted screenshot) — don't add it to the gallery too.
+      if (e.defaultPrevented || !e.clipboardData) return;
       const files = filesFromClipboard(e.clipboardData).filter((f) =>
         matchesAccept(f, GALLERY_ACCEPT),
       );

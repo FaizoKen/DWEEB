@@ -19,7 +19,7 @@ import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { BrokenImageIcon } from "./BrokenImageIcon";
-import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
+import { mediaUrlText, useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import { mediaKindFromName, mediaNameFromUrl } from "./mediaKind";
 import { usePreviewMediaPriority } from "../mediaPriorityContext";
 import styles from "./MediaGalleryRenderer.module.css";
@@ -89,22 +89,28 @@ function GalleryItem({
   // Reveal follows the editor selection: clicking the item selects it (which
   // reveals it), and selecting another item/node re-blurs this one.
   const obscured = item.spoiler === true && !selected;
-  const [sourceAspect, setSourceAspect] = useState<number | null>(null);
-  const [failed, setFailed] = useState(false);
+  const url = mediaUrlText(item.media.url);
+  const priority = usePreviewMediaPriority(url);
+  const src = useResolvedMediaUrl(defaultMediaPreviewUrl(url));
+  // Both facts learned from a loaded image belong to that image's source. A
+  // plain failure flag outlived it (with the <img> swapped out, nothing could
+  // ever clear it — every later URL showed the broken glyph), and a stale
+  // aspect would size a new picture to the old one's shape.
+  const [aspect, setAspect] = useState<{ src: string; ratio: number } | null>(null);
+  const sourceAspect = aspect && aspect.src === src ? aspect.ratio : null;
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = src !== null && failedSrc === src;
   // A cached image can be `complete` before the load listener attaches, so
   // `onLoad` alone would miss it and leave the fallback geometry — read the
   // element's state directly on mount as well.
   const readImageState = (el: HTMLImageElement | null) => {
-    if (!el || !el.complete) return;
+    if (!el || !el.complete || src === null) return;
     if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-      setSourceAspect(el.naturalWidth / el.naturalHeight);
+      setAspect({ src, ratio: el.naturalWidth / el.naturalHeight });
     } else if (el.currentSrc) {
-      setFailed(true);
+      setFailedSrc(src);
     }
   };
-  const url = item.media.url ?? "";
-  const priority = usePreviewMediaPriority(url);
-  const src = useResolvedMediaUrl(defaultMediaPreviewUrl(url));
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
   const hasAlt = Boolean(item.description);
   // Galleries accept video items too — render a <video> for those so an mp4
@@ -156,12 +162,12 @@ function GalleryItem({
             fetchPriority={priority ? "high" : "auto"}
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setFailed(true)}
+            onError={() => setFailedSrc(src)}
             onLoad={(e) => {
-              setFailed(false);
+              setFailedSrc(null);
               const el = e.currentTarget;
               if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-                setSourceAspect(el.naturalWidth / el.naturalHeight);
+                setAspect({ src, ratio: el.naturalWidth / el.naturalHeight });
               }
             }}
           />

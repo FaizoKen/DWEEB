@@ -29,7 +29,9 @@ interface AttachmentPickerProps {
 export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProps) {
   const fileInputId = useUniqueId("attach");
   const inputRef = useRef<HTMLInputElement>(null);
-  const session = isSessionUrl(url) ? parseSessionUrl(url) : null;
+  // An imported payload isn't bound by the types: a non-string url reads as
+  // "no upload" here instead of throwing out of `isSessionUrl`.
+  const session = typeof url === "string" && isSessionUrl(url) ? parseSessionUrl(url) : null;
   const record = useAttachmentRecord(session?.blobId ?? null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +90,10 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
   });
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (!e.clipboardData) return;
+      // A field that took the paste for itself (the avatar URL uploads a
+      // pasted screenshot) has already handled it — without this the same
+      // image also replaced the selected component's media.
+      if (e.defaultPrevented || !e.clipboardData) return;
       const file = fileFromClipboard(e.clipboardData);
       if (!file) return;
       e.preventDefault();

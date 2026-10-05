@@ -55,7 +55,21 @@ export function EmojiField({ emoji: current, onChange }: Props) {
       setEmoji(parsed);
       return;
     }
-    setEmoji({ ...emoji, name: raw || undefined });
+    // Emptying the field removes the emoji. A custom emoji's id lives behind
+    // the Advanced fold, and keeping it left the button sending an emoji the
+    // field no longer showed.
+    if (!raw) {
+      setEmoji(undefined);
+      return;
+    }
+    // Only an alias edit (`thinking`) renames a custom emoji; anything else is
+    // a different emoji typed over it (🔥), which must shed the old id —
+    // Discord renders by id, so the button would still show the custom one.
+    if (emoji.id && !/^[\w~]+$/.test(raw)) {
+      setEmoji({ name: raw });
+      return;
+    }
+    setEmoji({ ...emoji, name: raw });
   };
 
   return (

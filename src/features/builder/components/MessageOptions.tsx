@@ -39,10 +39,10 @@ import { mergeAllowedMentions, webhookMentionParse } from "@/core/schema/mention
 import { Disclosure } from "@/ui/Disclosure";
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
-import { TextInput } from "@/ui/TextInput";
 import { TextArea } from "@/ui/TextArea";
 import { BellIcon, ChevronDownIcon, ForumIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
+import { SnowflakeListInput } from "./SnowflakeListInput";
 import styles from "./ComponentTree.module.css";
 
 type MentionKind = "everyone" | "roles" | "users";
@@ -147,14 +147,6 @@ export function MessageOptions() {
     setAllowed(mergeAllowedMentions(am, patch));
   };
 
-  const onSnowflakeList = (raw: string): string[] | undefined => {
-    const ids = raw
-      .split(/[\s,]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    return ids.length > 0 ? ids : undefined;
-  };
-
   return (
     <div ref={rootRef} className={styles.options}>
       <div className={styles.optionsTabs}>
@@ -256,10 +248,10 @@ export function MessageOptions() {
               warning={issueAt("mention_roles")?.warning}
             >
               {(id) => (
-                <TextInput
+                <SnowflakeListInput
                   id={id}
-                  value={(am?.roles ?? []).join(" ")}
-                  onChange={(e) => updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })}
+                  ids={am?.roles}
+                  onChange={(roles) => updateAllowed({ roles })}
                   placeholder="e.g. 1185234567890123456 1185234567890123457"
                   data-reveal-focus="mention_roles"
                 />
@@ -273,10 +265,10 @@ export function MessageOptions() {
               warning={issueAt("mention_users")?.warning}
             >
               {(id) => (
-                <TextInput
+                <SnowflakeListInput
                   id={id}
-                  value={(am?.users ?? []).join(" ")}
-                  onChange={(e) => updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })}
+                  ids={am?.users}
+                  onChange={(users) => updateAllowed({ users })}
                   placeholder="e.g. 1185234567890123456"
                   data-reveal-focus="mention_users"
                 />
@@ -320,10 +312,10 @@ export function MessageOptions() {
             warning={issueAt("applied_tags")?.warning}
           >
             {(id) => (
-              <TextInput
+              <SnowflakeListInput
                 id={id}
-                value={(message.applied_tags ?? []).join(" ")}
-                onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
+                ids={message.applied_tags}
+                onChange={setAppliedTags}
                 placeholder="e.g. 1185234567890123456"
                 data-reveal-focus="applied_tags"
               />

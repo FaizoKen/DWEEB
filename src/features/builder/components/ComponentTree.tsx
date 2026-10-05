@@ -34,7 +34,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { planSiblingMove, useMessageStore } from "@/core/state/messageStore";
+import { canDuplicateNode, planSiblingMove, useMessageStore } from "@/core/state/messageStore";
 import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
 import { Avatar } from "@/activity/Avatar";
 import {
@@ -44,7 +44,7 @@ import {
 } from "@/features/builder/scrollTreeRow";
 import { toastWithUndo } from "@/features/builder/undoToast";
 import {
-  COMPONENT_META,
+  componentMeta,
   CONTAINER_PICKER,
   ROW_SELECT_PICKER,
   TOP_LEVEL_PICKER,
@@ -478,11 +478,11 @@ function DragGhost() {
   }, [drag, ghostStart, ghostRef]);
 
   if (!drag) return null;
-  // Gallery items aren't components, so they carry no COMPONENT_META entry —
+  // Gallery items aren't components, so they carry no component meta —
   // give them a dedicated ghost. Everything else reads from its type meta.
   const isGalleryItem = drag.parentKind === "gallery";
-  const glyph = isGalleryItem ? "▦" : COMPONENT_META[drag.type].glyph;
-  const label = isGalleryItem ? "Media" : COMPONENT_META[drag.type].label;
+  const glyph = isGalleryItem ? "▦" : componentMeta(drag.type).glyph;
+  const label = isGalleryItem ? "Media" : componentMeta(drag.type).label;
   return createPortal(
     <div ref={ghostRef} className={styles.ghost} aria-hidden="true">
       <span className={styles.ghostGlyph}>{glyph}</span>
@@ -960,14 +960,22 @@ function usePointerDragRow({
 
   // Unmount cleanup: clear any pending long-press timer, detach the touchmove
   // blocker, and cancel an in-flight auto-scroll frame so none can fire against
-  // an unmounted component.
+  // an unmounted component. A row that unmounts mid-drag (an Activity peer
+  // deleted, moved or replaced it) also ends the drag session it owns: only
+  // `endDrag` ever cleared it, and its pointer events died with the row — the
+  // ghost stayed on screen and `body.dnd-active` kept the page unselectable.
   useEffect(() => {
     return () => {
       const state = stateRef.current;
       if (state) releasePointerState(state);
       stopAutoScroll();
+      if (state?.isDragging) {
+        setDrag(null);
+        setGhostStart(null);
+        setDropTarget(null);
+      }
     };
-  }, [releasePointerState, stopAutoScroll]);
+  }, [releasePointerState, stopAutoScroll, setDrag, setGhostStart, setDropTarget]);
 
   const consumeJustDragged = useCallback(() => {
     if (justDraggedRef.current) {
@@ -1123,6 +1131,9 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const moveToParent = useMessageStore((s) => s.moveToParent);
   const remove = useMessageStore((s) => s.remove);
   const duplicate = useMessageStore((s) => s.duplicate);
+  // Mirrors the store gate, so a copy that would overflow its parent is not
+  // offered at all (a boolean selector: only a flip re-renders the row).
+  const duplicateRoom = useMessageStore((s) => canDuplicateNode(s.message, node._id));
   const addContainerChild = useMessageStore((s) => s.addContainerChild);
   const addContainerComponent = useMessageStore((s) => s.addContainerComponent);
   const addContainerSection = useMessageStore((s) => s.addContainerSection);
@@ -1130,7 +1141,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const addRowButton = useMessageStore((s) => s.addRowButton);
   const addRowSelect = useMessageStore((s) => s.addRowSelect);
   const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
-  const meta = COMPONENT_META[node.type];
+  const meta = componentMeta(node.type);
   const issues = useNodeIssues(node._id);
   const severity = worstSeverity(issues);
   const rowSummary = summarize(node);
@@ -1350,7 +1361,12 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
                 arrowKey={downKey}
                 onMove={() => moveSibling(node._id, 1)}
               />
-              <IconButton size="sm" label="Duplicate" onClick={() => duplicate(node._id)}>
+              <IconButton
+                size="sm"
+                label="Duplicate"
+                disabled={!duplicateRoom}
+                onClick={() => duplicate(node._id)}
+              >
                 <CopyIcon size={12} />
               </IconButton>
               <IconButton size="sm" variant="danger" label="Delete" onClick={onDelete}>
@@ -1610,7 +1626,8 @@ function GalleryItemNode({
 
 /** Short right-aligned summary for a gallery media row: its filename or state. */
 function summarizeGalleryItem(item: MediaGalleryItem): string {
-  const url = item.media.url?.trim();
+  // Typed as a string, but an imported payload isn't bound by the types.
+  const url = typeof item.media.url === "string" ? item.media.url.trim() : "";
   if (url) {
     const withoutQuery = url.split(/[?#]/)[0] ?? url;
     const segment = withoutQuery.split("/").filter(Boolean).pop();
@@ -1671,7 +1688,18 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
             };
           })}
           disabled={node.components.length >= LIMITS.CONTAINER_CHILDREN}
-          trigger={<AddChildButton label="Add to container" />}
+          trigger={
+            // At the cap the menu refuses to open; the button has to say so
+            // rather than look ready and do nothing.
+            node.components.length >= LIMITS.CONTAINER_CHILDREN ? (
+              <AddChildButton
+                label={`Container limit of ${LIMITS.CONTAINER_CHILDREN} reached`}
+                disabled
+              />
+            ) : (
+              <AddChildButton label="Add to container" />
+            )
+          }
         />
       </li>,
     );
@@ -1740,6 +1768,7 @@ const AddChildButton = forwardRef<
   {
     label: string;
     onClick?: () => void;
+    disabled?: boolean;
     "aria-haspopup"?: AriaAttributes["aria-haspopup"];
     "aria-expanded"?: AriaAttributes["aria-expanded"];
     "aria-controls"?: string;
@@ -1772,7 +1801,8 @@ function childGroups(node: AnyComponent): {
 
 function summarize(node: AnyComponent): string {
   if (node.type === ComponentType.TextDisplay) {
-    const t = node.content.replace(/\s+/g, " ").trim();
+    const content: unknown = node.content;
+    const t = (typeof content === "string" ? content : "").replace(/\s+/g, " ").trim();
     return t.length > 40 ? `${t.slice(0, 40)}…` : t;
   }
   if (node.type === ComponentType.Container) {

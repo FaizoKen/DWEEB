@@ -174,20 +174,22 @@ export function deleteAttachmentBlobs(ids: Iterable<string>): Promise<void> {
 }
 
 /**
- * Restore only reachable uploads and remove every other persisted key. The
- * key cursor never reads values, so stale large blobs are deleted without
- * first cloning their bytes into the renderer process.
+ * Read back the persisted uploads named by `ids` — the ones a live editor root
+ * still references. Removing the rest is {@link pruneAttachmentBlobs}' job, a
+ * separate step so the caller can first ask whether another tab still needs
+ * any of them (see `tabPresence`).
  */
 export function loadAttachmentBlobs(
   ids: Iterable<string>,
 ): Promise<Array<{ id: string; file: File }>> {
   const live = new Set(Array.from(ids).filter(Boolean));
+  if (live.size === 0) return Promise.resolve([]);
   return openDb().then((db) => {
     if (!db) return [];
     return new Promise<Array<{ id: string; file: File }>>((resolve) => {
       let tx: IDBTransaction;
       try {
-        tx = db.transaction(STORE, "readwrite");
+        tx = db.transaction(STORE, "readonly");
       } catch {
         resolve([]);
         return;
@@ -200,21 +202,6 @@ export function loadAttachmentBlobs(
           if (req.result) found.push(req.result);
         };
       }
-      const cursorReq = store.openKeyCursor();
-      cursorReq.onsuccess = () => {
-        const cursor = cursorReq.result;
-        if (!cursor) return;
-        const key = cursor.key;
-        if (typeof key === "string" && !live.has(key)) {
-          // Not `cursor.delete()`: that throws InvalidStateError on a key
-          // cursor, and an exception here aborts the transaction — discarding
-          // the live blobs gathered above. A store-level delete stays
-          // value-free; preventDefault keeps a failed one equally non-fatal.
-          const del = store.delete(key);
-          del.onerror = (event) => event.preventDefault();
-        }
-        cursor.continue();
-      };
       tx.oncomplete = () =>
         resolve(
           found
@@ -225,6 +212,44 @@ export function loadAttachmentBlobs(
             .map((record) => ({ id: record.id, file: toFile(record) })),
         );
       tx.onabort = tx.onerror = () => resolve([]);
+    });
+  });
+}
+
+/**
+ * Remove every persisted key outside `live`. The key cursor never reads values,
+ * so stale large blobs are deleted without first cloning their bytes into the
+ * renderer process.
+ */
+export function pruneAttachmentBlobs(live: ReadonlySet<string>): Promise<void> {
+  return openDb().then((db) => {
+    if (!db) return;
+    return new Promise<void>((resolve) => {
+      let tx: IDBTransaction;
+      try {
+        tx = db.transaction(STORE, "readwrite");
+      } catch {
+        resolve();
+        return;
+      }
+      const store = tx.objectStore(STORE);
+      const cursorReq = store.openKeyCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (!cursor) return;
+        const key = cursor.key;
+        if (typeof key === "string" && !live.has(key)) {
+          // Not `cursor.delete()`: that throws InvalidStateError on a key
+          // cursor, and an exception here aborts the transaction. A store-level
+          // delete stays value-free; preventDefault keeps a failed one equally
+          // non-fatal.
+          const del = store.delete(key);
+          del.onerror = (event) => event.preventDefault();
+        }
+        cursor.continue();
+      };
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => resolve();
     });
   });
 }

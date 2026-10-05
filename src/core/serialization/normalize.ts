@@ -214,14 +214,29 @@ function repairStructure(stamped: Record<string, unknown>, type: number): void {
   if (type === ComponentType.MediaGallery && !Array.isArray(stamped.items)) {
     stamped.items = [];
   }
-  if (type === ComponentType.StringSelect && !Array.isArray(stamped.options)) {
-    stamped.options = [];
+  if (type === ComponentType.StringSelect) {
+    stamped.options = Array.isArray(stamped.options)
+      ? (stamped.options as unknown[]).map(repairOption)
+      : [];
   }
-  if (type === ComponentType.Thumbnail && !isPlainObject(stamped.media)) {
-    stamped.media = { url: "" };
+  if (SNOWFLAKE_SELECT_TYPES.has(type) && "default_values" in stamped) {
+    if (Array.isArray(stamped.default_values)) {
+      stamped.default_values = (stamped.default_values as unknown[]).map(repairDefaultValue);
+    } else {
+      delete stamped.default_values;
+    }
   }
-  if (type === ComponentType.File && !isPlainObject(stamped.file)) {
-    stamped.file = { url: "" };
+  if (type === ComponentType.Thumbnail) {
+    stamped.media = repairMedia(stamped.media);
+  }
+  if (type === ComponentType.File) {
+    stamped.file = repairMedia(stamped.file);
+  }
+  if ("emoji" in stamped && !isPlainObject(stamped.emoji)) delete stamped.emoji;
+  for (const key of ["label", "placeholder", "description"] as const) {
+    if (key in stamped && stamped[key] != null && typeof stamped[key] !== "string") {
+      delete stamped[key];
+    }
   }
   if (type === ComponentType.TextDisplay && typeof stamped.content !== "string") {
     stamped.content = "";
@@ -236,6 +251,60 @@ function repairStructure(stamped: Record<string, unknown>, type: number): void {
   if (type === ComponentType.Section && !isPlainObject(stamped.accessory)) {
     throw new Error("Section is missing its `accessory` — it needs one thumbnail or button.");
   }
+}
+
+/** User, role, mentionable and channel selects — the ones carrying snowflake
+ *  `default_values`. */
+const SNOWFLAKE_SELECT_TYPES: ReadonlySet<number> = new Set([
+  ComponentType.UserSelect,
+  ComponentType.RoleSelect,
+  ComponentType.MentionableSelect,
+  ComponentType.ChannelSelect,
+]);
+
+/**
+ * The *entries* of the arrays {@link repairStructure} guarantees are walked
+ * just as unguarded: `countCharacters` reads `opt.label.length`, the validator
+ * reads `dv.id` and every option's fields, the preview slices `dv.id`. A `null`
+ * entry or a field of the wrong type therefore crashed the live validator (or
+ * the preview) for anyone opening a crafted share link — the same failure as
+ * the missing arrays, one level down. Entries are coerced, never invented: a
+ * bad string becomes `""`, which the validator names precisely.
+ */
+function repairOption(raw: unknown): Record<string, unknown> {
+  const opt: Record<string, unknown> = isPlainObject(raw) ? { ...raw } : {};
+  if (typeof opt.label !== "string") opt.label = "";
+  if (typeof opt.value !== "string") opt.value = "";
+  if ("description" in opt && typeof opt.description !== "string") delete opt.description;
+  if ("emoji" in opt && !isPlainObject(opt.emoji)) delete opt.emoji;
+  if ("default" in opt && typeof opt.default !== "boolean") delete opt.default;
+  return opt;
+}
+
+/**
+ * A default value's `id` must be a string. A number is never trusted as one:
+ * hand-written JSON that writes a snowflake as a number has already lost its
+ * low digits to `JSON.parse`, so stringifying it would point at somebody else —
+ * `""` instead makes the validator flag the entry.
+ */
+function repairDefaultValue(raw: unknown): Record<string, unknown> {
+  const dv: Record<string, unknown> = isPlainObject(raw) ? { ...raw } : {};
+  if (typeof dv.id !== "string") dv.id = "";
+  return dv;
+}
+
+/** A media object (`media`, `file`, a gallery item's `media`) whose fields the
+ *  renderers and validator read as strings. */
+function repairMedia(raw: unknown): Record<string, unknown> {
+  const media: Record<string, unknown> = isPlainObject(raw) ? { ...raw } : {};
+  if (typeof media.url !== "string") media.url = "";
+  if ("content_type" in media && typeof media.content_type !== "string") {
+    delete media.content_type;
+  }
+  if ("attachment_id" in media && typeof media.attachment_id !== "string") {
+    delete media.attachment_id;
+  }
+  return media;
 }
 
 function attachNode(raw: unknown): AnyComponent {
@@ -261,11 +330,18 @@ function attachNode(raw: unknown): AnyComponent {
   // the validator reads `item.media.url` with no guard.
   if (Array.isArray(stamped.items)) {
     stamped.items = (stamped.items as unknown[]).map((item) => {
-      const base = isPlainObject(item) ? item : {};
+      const base: Record<string, unknown> = isPlainObject(item) ? { ...item } : {};
+      if (
+        "description" in base &&
+        base.description != null &&
+        typeof base.description !== "string"
+      ) {
+        delete base.description;
+      }
       return {
         ...base,
         _id: newId(),
-        media: isPlainObject(base.media) ? base.media : { url: "" },
+        media: repairMedia(base.media),
       };
     });
   }

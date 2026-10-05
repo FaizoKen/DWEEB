@@ -7,7 +7,7 @@
  * would leak into the exported payload.
  */
 
-import { useMessageStore } from "@/core/state/messageStore";
+import { freshCustomId, useMessageStore } from "@/core/state/messageStore";
 import { LIMITS } from "@/core/schema/limits";
 import { LINK_PLUGINS } from "@/core/plugins/registry";
 import { matchLinkPlugin } from "@/core/plugins/linkManifest";
@@ -218,7 +218,10 @@ function makeInteractive(
     type: ComponentType.Button,
     style,
     label: "label" in prev ? prev.label : "Click me",
-    custom_id: "custom_id" in prev ? prev.custom_id : "btn_action",
+    // A Link/Premium button has no id to keep, so it gets the factory default
+    // made unique like every add path does — the bare default collided with any
+    // other button already holding it, flagging both rows as duplicates.
+    custom_id: "custom_id" in prev ? prev.custom_id : freshCustomId("btn_action", prev._id),
     disabled: prev.disabled,
     emoji: "emoji" in prev ? prev.emoji : undefined,
   };
