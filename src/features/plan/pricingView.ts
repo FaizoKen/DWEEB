@@ -40,3 +40,11 @@ export function pricingView(
   // both at once), so treat it as a load about to start rather than a failure.
   return "loading";
 }
+
+/** A quota as the cards print it, split into the words before its number and
+ *  the number itself ("Last 100" → "Last ", 100) — what the purchase ledger
+ *  counts up. Null when it ends in no number ("Unlimited"). */
+export function splitQuota(value: string): { prefix: string; n: number } | null {
+  const m = /^(.*?)(\d+)$/.exec(value);
+  return m ? { prefix: m[1] ?? "", n: Number(m[2]) } : null;
+}

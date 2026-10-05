@@ -71,6 +71,9 @@ export const loginFlow: PopupFlow<LoginResult> = {
   },
   isError: (r) => "error" in r,
   successKey: () => "login",
+  // "It finished" carries nothing to forge — every tab just re-reads the
+  // session cookie they all share — so a sign-in in one tab signs in the rest.
+  everyTab: true,
   stripHashKeys: ["dweeb_login"],
   doneMessage: "Signed in — you can close this window.",
 };

@@ -34,6 +34,10 @@ import styles from "./FeedbackDialog.module.css";
 
 const TOPGG_REVIEW_URL = "https://top.gg/bot/1511769679096447016#reviews";
 
+/** How long a send may run before the dialog gives up on it — which also caps
+ *  how long the dialog stays shut against closing (see `closeUnlessSending`). */
+const SEND_TIMEOUT_MS = 15_000;
+
 export function FeedbackDialog() {
   const activityMode = isActivityMode();
   const close = useFeedbackStore((s) => s.closeFeedback);
@@ -80,19 +84,37 @@ export function FeedbackDialog() {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ac.abort();
+    }, SEND_TIMEOUT_MS);
 
     const result = await submitFeedback(
       { tag, summary, details, contact: contact.trim() || undefined },
       ac.signal,
     );
+    clearTimeout(timer);
     setBusy(false);
     if (!result.ok) {
-      if (result.error === "Cancelled.") return;
+      if (result.error === "Cancelled.") {
+        if (timedOut) setError("That took too long — check your connection and try again.");
+        return;
+      }
       setError(result.error);
       return;
     }
     clearFeedbackDraft();
     setSent(true);
+  };
+
+  // A send in flight can't be called back: closing used to abort a request the
+  // server may already have posted, keep the draft, and offer it again on the
+  // next open — a second click on Send then filed the report twice. So the
+  // dialog stays put until the answer lands (the footer's Close is disabled
+  // for the same span), which SEND_TIMEOUT_MS bounds.
+  const closeUnlessSending = () => {
+    if (!busy) close();
   };
 
   if (sent) {
@@ -143,7 +165,7 @@ export function FeedbackDialog() {
   return (
     <Modal
       open
-      onClose={close}
+      onClose={closeUnlessSending}
       title="Send feedback"
       footer={
         <>

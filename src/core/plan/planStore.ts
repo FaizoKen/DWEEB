@@ -63,8 +63,15 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     if (!id) return;
     const st = get();
     const generation = accountGeneration;
-    // Same server + already loaded/loading → skip unless forced.
-    if (!force && id === st.guildId && (st.status === "ready" || st.status === "loading")) return;
+    // Same server + already loaded/loading → skip unless forced. A "ready" that
+    // holds no plan is the signed-out answer (a 401), not a warm cache: reading
+    // again is how reopening the pricing modal after signing in clears it.
+    if (
+      !force &&
+      id === st.guildId &&
+      (st.status === "loading" || (st.status === "ready" && st.plan !== null))
+    )
+      return;
     // Switching servers clears the previous server's tier so we never briefly
     // show it against the new one.
     set({ guildId: id, status: "loading", error: null, plan: id === st.guildId ? st.plan : null });

@@ -40,7 +40,7 @@ import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
-import { pricingView } from "./pricingView";
+import { pricingView, splitQuota } from "./pricingView";
 import styles from "./PricingModal.module.css";
 
 interface TierDef {
@@ -138,6 +138,7 @@ export function PricingModal() {
   const reloadPlan = usePlanStore((s) => s.load);
   const guilds = useAuthStore((s) => s.guilds);
   const authStatus = useAuthStore((s) => s.status);
+  const authUser = useAuthStore((s) => s.user);
   const login = useAuthStore((s) => s.login);
 
   // Which server this is: the live guild list first, then the connected
@@ -149,13 +150,16 @@ export function PricingModal() {
 
   // A plan read that answered 401 means the session lapsed server-side while
   // this tab still thinks it's signed in. The notice below offers a fresh
-  // sign-in; once it lands (the session re-hydrates to "authed"), read again.
+  // sign-in; once it lands, read again. Keyed on the user too: that sign-in
+  // re-checks an "authed" tab without the status ever changing, and every
+  // successful check sets a new user — keyed on the status alone, the notice
+  // outlived the sign-in that should have cleared it.
   useEffect(() => {
     if (view === "signed-out" && authStatus === "authed" && guildId) {
       void reloadPlan(guildId, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read on an auth transition only: re-reading on every view change would loop on a 401 that persists
-  }, [authStatus]);
+  }, [authStatus, authUser]);
 
   const currentTier: PlanTier | null = plan?.tier ?? null;
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
@@ -962,9 +966,16 @@ function PerkRow({
   delay: number;
 }) {
   const isUnlimited = to === "Unlimited";
-  const fromNum = Number.isFinite(Number(from)) ? Number(from) : 0;
-  const counted = useCountUp(fromNum, isUnlimited ? 0 : Number(to), animate && !isUnlimited, delay);
-  const display = isUnlimited ? "∞" : String(counted);
+  const target = isUnlimited ? null : splitQuota(to);
+  const counted = useCountUp(
+    splitQuota(from)?.n ?? 0,
+    target?.n ?? 0,
+    animate && target !== null,
+    delay,
+  );
+  // "Last 100" counts its number and keeps its words; a value with no number
+  // to count shows as written (it used to run `Number("Last 100")` → "NaN").
+  const display = isUnlimited ? "∞" : target ? `${target.prefix}${counted}` : to;
   const changed = from !== to;
   return (
     <li

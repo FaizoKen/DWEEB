@@ -82,7 +82,31 @@ describe("welcome record round-trip", () => {
   it("returns null with storage unavailable, and writes are no-ops", () => {
     delete (globalThis as { localStorage?: Storage }).localStorage;
     expect(readWelcomeRecord()).toBeNull();
-    expect(() => writeWelcomeRecord("shown")).not.toThrow();
-    expect(welcomeAutoDecision()).toBe("show");
+    expect(writeWelcomeRecord("shown")).toBe(false);
+    // No record can be kept, so the one-time offer would recur on every load:
+    // make none at all.
+    expect(welcomeAutoDecision()).toBe("no");
+  });
+
+  it("survives storage that throws on read — site data blocked — and offers nothing", () => {
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      setItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    } as unknown as Storage;
+    expect(readWelcomeRecord()).toBeNull();
+    expect(welcomeAutoDecision()).toBe("no");
+    expect(writeWelcomeRecord("announced")).toBe(false);
+  });
+
+  it("reports a write that doesn't read back", () => {
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: () => null,
+      setItem: () => {},
+    } as unknown as Storage;
+    expect(writeWelcomeRecord("announced")).toBe(false);
   });
 });

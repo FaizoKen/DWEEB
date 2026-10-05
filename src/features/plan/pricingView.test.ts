@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlanInfo } from "@/core/guild/api";
-import { pricingView } from "./pricingView";
+import { pricingView, splitQuota } from "./pricingView";
 
 /**
  * The pricing modal's state, read off the plan store. Every Upgrade, promo, and
@@ -42,5 +42,18 @@ describe("pricingView", () => {
     expect(pricingView(G, "ready", PLAN)).toBe("ready");
     expect(pricingView(G, "loading", PLAN)).toBe("ready");
     expect(pricingView(G, "error", PLAN)).toBe("ready");
+  });
+});
+
+describe("splitQuota", () => {
+  it("counts the number in a worded quota and keeps the words", () => {
+    // The purchase ledger used to count `Number("Last 100")` up to "NaN".
+    expect(splitQuota("Last 100")).toEqual({ prefix: "Last ", n: 100 });
+    expect(splitQuota("30")).toEqual({ prefix: "", n: 30 });
+  });
+
+  it("has nothing to count in a value that ends in no number", () => {
+    expect(splitQuota("Unlimited")).toBeNull();
+    expect(splitQuota("")).toBeNull();
   });
 });

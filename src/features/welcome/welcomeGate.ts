@@ -39,10 +39,24 @@ export interface WelcomeRecord {
 
 const STATUSES: readonly string[] = ["shown", "announced"];
 
+/**
+ * The raw stored record: the string (or null when none was written), or
+ * `undefined` when storage can't be read at all — missing, or blocked so that
+ * `getItem` itself throws. App reads this from a `useState` initializer, so a
+ * throw escaping here took the whole app to the ErrorBoundary.
+ */
+function readRaw(): string | null | undefined {
+  if (typeof localStorage === "undefined") return undefined;
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read the welcome record, or null if never written / unreadable. */
 export function readWelcomeRecord(): WelcomeRecord | null {
-  if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = readRaw();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as WelcomeRecord;
@@ -54,14 +68,19 @@ export function readWelcomeRecord(): WelcomeRecord | null {
   }
 }
 
-/** Record how the auto-encounter stands. Never throws. */
-export function writeWelcomeRecord(status: WelcomeRecordStatus): void {
-  if (typeof localStorage === "undefined") return;
+/**
+ * Record how the auto-encounter stands. Never throws. True only when the record
+ * reads back — a store that silently drops writes would otherwise have the offer
+ * made again on every load.
+ */
+export function writeWelcomeRecord(status: WelcomeRecordStatus): boolean {
+  if (typeof localStorage === "undefined") return false;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ status, at: Date.now() }));
+    return readWelcomeRecord()?.status === status;
   } catch {
-    // Storage disabled or over quota — worst case the app offers the film once
-    // more on a later visit, which is harmless.
+    // Storage disabled or over quota.
+    return false;
   }
 }
 
@@ -73,6 +92,10 @@ export function welcomeAutoDecision(suppress = false): WelcomeAutoDecision {
   // the prompt without writing a record so a later organic visit can still
   // receive the one-time orientation.
   if (suppress) return "no";
+  // Storage we can't read is storage we can't write the record to either — the
+  // one-time offer would come back on every load. The More menu's "Watch the
+  // intro" still reaches the film.
+  if (readRaw() === undefined) return "no";
   if (readWelcomeRecord()) return "no";
   if (hasGalleryEverAutoOpened() || loadDraft() !== null) return "announce";
   return "show";

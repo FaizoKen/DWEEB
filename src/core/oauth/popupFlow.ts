@@ -19,8 +19,15 @@
  * pending" before opening it; the returning popup recognises itself purely from
  * that flag, and hands its result back over BOTH a BroadcastChannel and a
  * localStorage poll/`storage` event (each origin-global, swap-proof). The
- * opener/name/handle paths are kept as fast best-effort extras. Browsers that
- * block the popup fall back to a full-page redirect, so a flow always completes.
+ * opener's handle poll is kept as a fast best-effort extra. Browsers that block
+ * the popup fall back to a full-page redirect, so a flow always completes.
+ *
+ * A result proves nothing about who asked for it: any page can open a DWEEB
+ * window, or link to one, carrying a return URL of its choosing. So a result is
+ * acted on only by the tab that started the flow — the opener holding a live
+ * attempt for a popup, or the tab that redirected itself for a full-page return.
+ * Without that, a crafted `#dweeb_webhook=<their webhook>` opened Send prefilled
+ * with a stranger's webhook, and a click on Send posted the draft to them.
  *
  * All storage keys, the BroadcastChannel, and the popup's `window.name` are
  * derived from `flow.kind`, so flows never collide.
@@ -40,9 +47,15 @@ export interface PopupFlow<R> {
   parse(loc: { hash: string; search: string }): R | null;
   /** Whether a parsed result represents the user backing out / an error. */
   isError(result: R): boolean;
-  /** Stable identity used to dedupe a success across the three delivery
-   *  channels (e.g. the webhook URL, or the added guild id). */
+  /** Stable identity of a success (e.g. the webhook URL, or the added guild id),
+   *  used to recognise one delivery arriving over several channels. */
   successKey(result: R): string;
+  /** Whether every open tab acts on this flow's popup result, rather than only
+   *  the tab that started the flow. Only for a result with nothing worth
+   *  forging — the login flow's "finished" signal, which merely makes a tab
+   *  re-read the session cookie every tab already shares — so a sign-in in one
+   *  tab signs the others in too. */
+  everyTab?: boolean;
   /** Fragment param names this flow leaves in the URL, stripped on a full-page
    *  return so the credential/marker doesn't linger in the address bar. */
   stripHashKeys?: string[];
@@ -56,10 +69,79 @@ export interface PopupFlow<R> {
  *  short enough that an abandoned attempt can't haunt a later page load. */
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
+/** The same result arriving twice this close together is one delivery that came
+ *  over two channels (or from both the opener's handle poll and the popup's own
+ *  relay) — not a second run of the flow, such as signing in again later. */
+const DUPLICATE_WINDOW_MS = 3000;
+
 const channelName = (kind: string) => `dweeb_${kind}`;
 const pendingKey = (kind: string) => `dweeb_${kind}_pending`;
 const resultKey = (kind: string) => `dweeb_${kind}_result`;
 const selfRedirectKey = (kind: string) => `dweeb_${kind}_self_redirect`;
+const attemptKey = (kind: string) => `dweeb_${kind}_attempt`;
+
+/* ── this tab's attempts ────────────────────────────────────────────────── */
+
+/**
+ * Popup attempts this tab started, by kind → start time. Only a tab holding a
+ * live attempt acts on a popup result (bar {@link PopupFlow.everyTab} flows):
+ * the result channels are origin-global, so the arrival of a result says nothing
+ * about who asked for it. Kept in memory and mirrored to sessionStorage, which
+ * is per tab and survives the opener being reloaded mid-flow.
+ */
+const attempts = new Map<string, number>();
+
+function markAttempt(kind: string): void {
+  const now = Date.now();
+  attempts.set(kind, now);
+  try {
+    sessionStorage.setItem(attemptKey(kind), String(now));
+  } catch {
+    /* the in-memory copy still covers this page */
+  }
+}
+
+/** When this tab's live attempt for `kind` started, or null without one. */
+function attemptStartedAt(kind: string): number | null {
+  const now = Date.now();
+  const inMemory = attempts.get(kind);
+  if (inMemory !== undefined && now - inMemory < PENDING_TTL_MS) return inMemory;
+  try {
+    const stored = Number(sessionStorage.getItem(attemptKey(kind)));
+    if (stored > 0 && now - stored < PENDING_TTL_MS) return stored;
+  } catch {
+    /* storage blocked: memory was the only record */
+  }
+  return null;
+}
+
+function endAttempt(kind: string): void {
+  attempts.delete(kind);
+  try {
+    sessionStorage.removeItem(attemptKey(kind));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Flows whose full-page return this load proved it started — recorded by
+ *  {@link relayPopupIfApplicable}, which consumes the sessionStorage mark before
+ *  the app (and {@link consumeReturn}) gets to run. */
+const selfRedirectedReturns = new Set<string>();
+
+/** Whether this tab redirected itself into `kind`'s flow. One use per load. */
+function takeSelfRedirect(kind: string): boolean {
+  if (selfRedirectedReturns.delete(kind)) return true;
+  try {
+    if (sessionStorage.getItem(selfRedirectKey(kind)) != null) {
+      sessionStorage.removeItem(selfRedirectKey(kind));
+      return true;
+    }
+  } catch {
+    /* no storage — nothing can prove it */
+  }
+  return false;
+}
 
 /* ── pending-mark handshake ─────────────────────────────────────────────── */
 
@@ -141,6 +223,7 @@ export function openPopup(flow: PopupFlow<unknown>): Window | null {
   const popup = window.open("about:blank", channelName(flow.kind), centeredFeatures());
   if (!popup) return null;
   markPending(flow.kind); // the handshake the returning popup recognises itself by
+  markAttempt(flow.kind); // and what lets THIS tab act on the result it brings
   return popup;
 }
 
@@ -235,22 +318,24 @@ export function relayPopupIfApplicable<R>(flow: PopupFlow<R>): boolean {
   if (!result) return false;
 
   // A tab that redirected itself owns its return — even if it has an opener.
+  // Remembered for `consumeReturn`, since the mark itself is spent here.
   let selfRedirected = false;
   try {
     selfRedirected = sessionStorage.getItem(selfRedirectKey(flow.kind)) != null;
     if (selfRedirected) sessionStorage.removeItem(selfRedirectKey(flow.kind));
   } catch {
-    /* sessionStorage blocked — the signals below still gate us */
+    /* sessionStorage blocked — the pending mark below still gates us */
   }
-  if (selfRedirected) return false;
+  if (selfRedirected) {
+    selfRedirectedReturns.add(flow.kind);
+    return false;
+  }
 
-  // The pending-mark is the reliable signal; opener/name are fast extras for the
-  // (lucky) case the swap didn't sever them.
-  const isPopup =
-    isPending(flow.kind) ||
-    (!!window.opener && window.opener !== window) ||
-    window.name === channelName(flow.kind);
-  if (!isPopup) return false;
+  // Only the pending mark — set by `openPopup` in one of this browser's DWEEB
+  // tabs moments ago — makes this load a popup returning to its opener.
+  // `window.opener` and `window.name` prove nothing: a page that opens a DWEEB
+  // window chooses both, along with the URL it carries.
+  if (!isPending(flow.kind)) return false;
 
   deliverResult(flow, result);
   clearPopupPending(flow);
@@ -291,10 +376,32 @@ export function subscribePopupResult<R>(
   handler: (result: R) => void,
 ): () => void {
   const cleanups: Array<() => void> = [];
-  let lastKey = "";
+  // The last delivery, so the same result reaching us again over another
+  // channel moments later counts once — while the same result arriving later
+  // still (signing in again after signing out, re-adding the bot to the same
+  // server) is a new run of the flow and is delivered. A page-lifetime "seen
+  // that key" swallowed every such second run.
+  let last: { key: string; at: number } | null = null;
 
-  const deliver = (result: R | null) => {
+  /** `storedAt` is the handoff's write time, for a result read from storage. */
+  const deliver = (result: R | null, storedAt?: number) => {
     if (result == null) return;
+    // Only the tab that started this flow acts on its result, unless it's one
+    // every tab may act on. A tab without a live attempt leaves the stored
+    // handoff alone: the tab that owns it may still be about to read it.
+    const since = attemptStartedAt(flow.kind);
+    if (since === null && !flow.everyTab) return;
+    // A handoff written before this attempt began is an earlier run's leftover
+    // (a duplicate write that landed after its delivery), never this attempt's
+    // answer.
+    if (since !== null && storedAt !== undefined && storedAt < since) {
+      try {
+        localStorage.removeItem(resultKey(flow.kind));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     // Drop the handoff FIRST — even for a duplicate — so a redundant write (e.g.
     // the handle poll re-broadcasting after the channel already delivered) can't
     // linger in localStorage and re-fire on a later load.
@@ -304,11 +411,15 @@ export function subscribePopupResult<R>(
     } catch {
       /* ignore */
     }
-    if (!flow.isError(result)) {
-      const key = flow.successKey(result);
-      if (key === lastKey) return; // already delivered via another channel
-      lastKey = key;
-    }
+    const key = flow.isError(result) ? "\u0000error" : flow.successKey(result);
+    const now = Date.now();
+    // The first result answers this tab's attempt, which ends it — so the same
+    // result arriving again finds no attempt. A tab acting on another tab's run
+    // (an `everyTab` flow) has no attempt to end, and recognises a repeat by
+    // its timing instead.
+    if (since === null && last && last.key === key && now - last.at < DUPLICATE_WINDOW_MS) return;
+    last = { key, at: now };
+    endAttempt(flow.kind);
     handler(result);
   };
 
@@ -325,7 +436,7 @@ export function subscribePopupResult<R>(
       const parsed = JSON.parse(raw) as { at?: number; result?: R };
       const fresh = !parsed.at || Date.now() - parsed.at < PENDING_TTL_MS;
       if (parsed.result != null && fresh) {
-        deliver(parsed.result);
+        deliver(parsed.result, typeof parsed.at === "number" ? parsed.at : undefined);
         return;
       }
     } catch {
@@ -381,11 +492,17 @@ export function hasReturn(flow: PopupFlow<unknown>): boolean {
  * full-page (popup-blocked) return. Returns the result, or null when this load
  * isn't such a return. The flow's markers are wiped right away so a credential
  * doesn't linger in the address bar or history; anything else in the URL is kept.
+ *
+ * Only a tab that sent itself into the flow ({@link redirectFullPage}) gets the
+ * result back. Anyone can send a link carrying a return: a crafted
+ * `#dweeb_webhook=` URL used to open Send prefilled with the sender's webhook.
+ * Such a link is still stripped, and otherwise ignored.
  */
 export function consumeReturn<R>(flow: PopupFlow<R>): R | null {
   if (typeof window === "undefined") return null;
-  const result = flow.parse({ hash: window.location.hash, search: window.location.search });
-  if (!result) return null;
+  const parsed = flow.parse({ hash: window.location.hash, search: window.location.search });
+  if (!parsed) return null;
+  const result = takeSelfRedirect(flow.kind) ? parsed : null;
 
   const url = new URL(window.location.href);
   for (const key of flow.stripSearchKeys ?? []) url.searchParams.delete(key);

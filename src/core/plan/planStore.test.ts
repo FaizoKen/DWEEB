@@ -127,6 +127,18 @@ describe("planStore", () => {
     expect(usePlanStore.getState()).toMatchObject({ status: "ready", plan: null, error: null });
   });
 
+  it("a signed-out answer is not a warm cache: the next plain load reads again", async () => {
+    const unauthorized = Object.assign(new Error("Sign in with Discord to load server data."), {
+      status: 401,
+    });
+    fetchGuildPlanMock.mockRejectedValueOnce(unauthorized).mockResolvedValueOnce(PLAN);
+    await usePlanStore.getState().load(G1);
+    // Signed in again, then reopened the pricing modal (`openPricing` → load).
+    await usePlanStore.getState().load(G1);
+    expect(fetchGuildPlanMock).toHaveBeenCalledTimes(2);
+    expect(usePlanStore.getState().plan).toEqual(PLAN);
+  });
+
   it("openPricing(guild) opens the modal and kicks off a load", async () => {
     fetchGuildPlanMock.mockResolvedValue(PLAN);
     usePlanStore.getState().openPricing(G1);

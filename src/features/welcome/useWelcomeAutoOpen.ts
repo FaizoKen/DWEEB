@@ -53,17 +53,22 @@ function isDeepLinkedLoad(): boolean {
  */
 export function useWelcomeAutoOpen(suppress = false, ready = true): void {
   // Decided once per load, during first render — before App's mount effects
-  // run (in particular before the gallery auto-open stamps its own record,
-  // which the gate reads as "evidence of prior use").
-  const [decision] = useState(() => welcomeAutoDecision(suppress));
+  // run: in particular before the gallery auto-open stamps its own record
+  // (which the gate reads as "evidence of prior use"), and before the link
+  // hooks strip their markers. Checked later, a share link, short link or
+  // template link already read as an organic visit by the time the editor came
+  // up, so its recipient got the offer and spent the one-time record.
+  const [decision] = useState(() => (isDeepLinkedLoad() ? "no" : welcomeAutoDecision(suppress)));
 
   useEffect(() => {
-    if (suppress || !ready || decision === "no" || isDeepLinkedLoad()) return;
+    if (suppress || !ready || decision === "no") return;
 
     const t = setTimeout(() => {
       // Written only now, with the editor (and its More menu) actually on
       // screen — the record means "the offer was made", not "a timer fired".
-      writeWelcomeRecord("announced");
+      // A record that doesn't stick would bring the offer back on every load,
+      // so no record, no offer.
+      if (!writeWelcomeRecord("announced")) return;
       pushToast("New here? A one-minute intro shows how DWEEB works.", "info", {
         // One tap plays it; the More menu's "Watch the intro" covers replays.
         action: {

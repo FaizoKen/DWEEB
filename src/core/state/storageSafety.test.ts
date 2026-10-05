@@ -6,6 +6,7 @@ import {
   hasGalleryEverAutoOpened,
   shouldAutoOpenGallery,
 } from "@/features/templates/galleryAutoOpen";
+import { welcomeAutoDecision } from "@/features/welcome/welcomeGate";
 import { loadDraft } from "./draftStorage";
 import { loadHistory } from "./historyStorage";
 
@@ -30,5 +31,9 @@ describe("boot storage safety", () => {
     // for a crawler whose storage is blocked rather than merely empty.
     expect(hasGalleryEverAutoOpened()).toBe(false);
     expect(shouldAutoOpenGallery()).toBe(true);
+    // Read in the same render (useWelcomeAutoOpen's initializer). Unreadable
+    // storage can't keep the one-time record, so the offer stands down rather
+    // than recurring on every load.
+    expect(welcomeAutoDecision()).toBe("no");
   });
 });
