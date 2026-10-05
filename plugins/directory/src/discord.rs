@@ -41,7 +41,16 @@ pub const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
 pub const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 
 /// Components V2 caps the total text across a message at this many characters.
+/// Counted in UTF-16 code units, like every Discord text limit DWEEB enforces.
 pub const MAX_V2_TEXT: usize = 4000;
+/// Discord's caps on a button label and a select placeholder.
+const MAX_LABEL: usize = 80;
+const MAX_PLACEHOLDER: usize = 150;
+
+/// Length of `s` as Discord counts it: UTF-16 code units.
+pub fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
 
 /// Discord's epoch (2015-01-01) in unix ms — the base for snowflake timestamps.
 const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
@@ -145,7 +154,8 @@ pub struct Interaction {
     #[serde(default)]
     pub user: Option<User>,
     /// The message the component was clicked on. Needed only by `"message"`
-    /// output, to preserve its flags and legacy `content` across the edit.
+    /// output, to preserve its flags and legacy `content` across the edit, and
+    /// to keep its live component bindings (see [`restamp_components`]).
     #[serde(default)]
     pub message: Option<MessageRef>,
 }
@@ -169,6 +179,11 @@ pub struct Member {
     /// Role ids the member currently has. Present on guild component clicks.
     #[serde(default)]
     pub roles: Vec<String>,
+    /// The member's permission bits in the channel they clicked in, as Discord
+    /// computed them. Only the administrator bit is read — an administrator
+    /// (and the owner, whose bits are all set) sees every channel.
+    #[serde(default)]
+    pub permissions: Option<String>,
 }
 
 /// Only the id is read: the gate needs it for the account-age check, and the
@@ -201,6 +216,23 @@ impl Interaction {
             .as_ref()
             .map(|m| m.roles.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Who a private answer to this click is for: enough to list exactly the
+    /// channels that member can see.
+    pub fn viewer(&self) -> Option<crate::rest::Viewer> {
+        let user_id = self.actor_id()?.to_string();
+        let admin = self
+            .member
+            .as_ref()
+            .and_then(|m| m.permissions.as_deref())
+            .and_then(|p| p.parse::<u64>().ok())
+            .is_some_and(|bits| bits & crate::rest::PERM_ADMINISTRATOR != 0);
+        Some(crate::rest::Viewer {
+            user_id,
+            role_ids: self.actor_roles().to_vec(),
+            admin,
+        })
     }
 
     /// The single section key a select submitted, if any. A directory select is
@@ -414,6 +446,11 @@ pub fn has_own_token(text: &str) -> bool {
 ///
 /// Bot-facing fields (`custom_id`, ids) are never touched — substituting into a
 /// `custom_id` would break the binding the click arrived on.
+///
+/// A label or placeholder comes out on one line and inside Discord's cap
+/// (80 / 150): saving refuses `{directory}` there, but a template stored before
+/// that check could still put a multi-line list into a button, and Discord would
+/// refuse the whole edit over it.
 pub fn substitute_tree(v: &mut Value, vars: &RenderVars) {
     match v {
         Value::Array(a) => {
@@ -422,13 +459,21 @@ pub fn substitute_tree(v: &mut Value, vars: &RenderVars) {
             }
         }
         Value::Object(o) => {
-            for field in ["content", "label", "placeholder"] {
+            for (field, cap) in [
+                ("content", None),
+                ("label", Some(MAX_LABEL)),
+                ("placeholder", Some(MAX_PLACEHOLDER)),
+            ] {
                 // Compute first (ending the immutable borrow), then write.
-                if let Some(rendered) = o
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .map(|s| substitute(s, vars))
-                {
+                if let Some(rendered) = o.get(field).and_then(Value::as_str).map(|s| {
+                    let out = substitute(s, vars);
+                    match cap {
+                        Some(max) if out != s => {
+                            clamp(&out.split_whitespace().collect::<Vec<_>>().join(" "), max)
+                        }
+                        _ => out,
+                    }
+                }) {
                     o.insert(field.into(), Value::String(rendered));
                 }
             }
@@ -447,6 +492,9 @@ pub struct MessageRef {
     pub flags: Option<u64>,
     #[serde(default)]
     pub content: Option<String>,
+    /// The message's live component tree — the one bindings are read from.
+    #[serde(default)]
+    pub components: Option<Value>,
 }
 
 /// Render `template` with `vars` — the components for an in-place edit.
@@ -455,6 +503,145 @@ pub fn render_template(template: &Value, vars: &RenderVars) -> Value {
     substitute_tree(&mut out, vars);
     out
 }
+
+/// The components to re-stamp the clicked message with, or `None` when the
+/// click must be answered with a reply instead.
+///
+/// The template is captured while the author is still configuring — *before*
+/// DWEEB binds this component (and whatever other plugins sit beside it), so its
+/// `custom_id`s are the editor's placeholders. Re-stamping the template as-is
+/// would rebind every button on the message to a placeholder that routes
+/// nowhere, so the first refresh would be the last. The live message the click
+/// arrived on carries the real bindings, so they are copied over node by node
+/// (`custom_id`, a menu's options and bounds, a link's `url`).
+///
+/// That copy is only trustworthy while the two trees still have the same shape.
+/// If the author changed the message after configuring this (a node added,
+/// removed or swapped), positions no longer line up and a copy could hand one
+/// button another's binding — so then, and whenever the result wouldn't carry
+/// the very component that was clicked, this declines and the caller replies
+/// with the list instead. A reply leaves the message exactly as it is.
+pub fn restamp_components(
+    template: &Value,
+    vars: &RenderVars,
+    live: Option<&Value>,
+    clicked: &str,
+) -> Option<Value> {
+    let mut out = render_template(template, vars);
+    let live = live?;
+    if !overlay_live_bindings(&mut out, live) {
+        return None;
+    }
+    tree_has_custom_id(&out, clicked).then_some(out)
+}
+
+/// Copy the live message's bindings onto the rendered template, in place.
+/// Returns false when the two trees don't line up.
+fn overlay_live_bindings(rendered: &mut Value, live: &Value) -> bool {
+    match (rendered, live) {
+        (Value::Array(r), Value::Array(l)) => {
+            r.len() == l.len()
+                && r.iter_mut()
+                    .zip(l.iter())
+                    .all(|(r, l)| overlay_live_bindings(r, l))
+        }
+        (Value::Object(r), Value::Object(l)) => {
+            // A button whose style changed (a link turned into an action) is a
+            // different component: its binding must not be grafted across.
+            if r.get("type") != l.get("type") || r.get("style") != l.get("style") {
+                return false;
+            }
+            // A link or premium button carries its target in `url`/`sku_id` —
+            // a link plugin's binding, which DWEEB also writes after capture.
+            for field in ["custom_id", "url", "sku_id"] {
+                if let Some(v) = l.get(field).filter(|v| v.is_string()) {
+                    r.insert(field.into(), v.clone());
+                }
+            }
+            // A menu another plugin manages (Quick Replies' topics, a poll's
+            // options) had its options and bounds wired after capture too.
+            if l.contains_key("custom_id") {
+                for field in ["options", "min_values", "max_values"] {
+                    if let Some(v) = l.get(field) {
+                        r.insert(field.into(), v.clone());
+                    }
+                }
+            }
+            for nested in ["components", "accessory"] {
+                match (r.get_mut(nested), l.get(nested)) {
+                    (None, None) => {}
+                    (Some(rn), Some(ln)) => {
+                        if !overlay_live_bindings(rn, ln) {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+/// Whether any component in `tree` is bound to `custom_id`.
+fn tree_has_custom_id(tree: &Value, custom_id: &str) -> bool {
+    match tree {
+        Value::Array(a) => a.iter().any(|v| tree_has_custom_id(v, custom_id)),
+        Value::Object(o) => {
+            o.get("custom_id").and_then(Value::as_str) == Some(custom_id)
+                || o.values().any(|v| tree_has_custom_id(v, custom_id))
+        }
+        _ => false,
+    }
+}
+
+/// How much of the message's 4000-unit text budget the template spends on its
+/// own, and how many `{directory}` slots share what's left.
+pub struct TemplateText {
+    /// UTF-16 units of every text field with our scalar tokens at their widest
+    /// and the list token removed.
+    pub fixed_units: usize,
+    /// How many times `{directory}` appears.
+    pub list_slots: usize,
+}
+
+/// Measure `template` the way Discord totals a Components V2 message: every
+/// `content`, `label`, `description` and `placeholder`, menu options included.
+pub fn template_text(template: &Value) -> TemplateText {
+    // The widest each scalar token can render: a six-digit count, and a
+    // `<t:…:R>` timestamp (ten digits for the next few centuries).
+    let widest = RenderVars {
+        list: String::new(),
+        count: 999_999,
+        updated_unix: 9_999_999_999,
+    };
+    let mut out = TemplateText {
+        fixed_units: 0,
+        list_slots: 0,
+    };
+    measure(template, &widest, &mut out);
+    out
+}
+
+fn measure(v: &Value, widest: &RenderVars, out: &mut TemplateText) {
+    match v {
+        Value::Array(a) => a.iter().for_each(|x| measure(x, widest, out)),
+        Value::Object(o) => {
+            for field in ["content", "label", "description", "placeholder"] {
+                if let Some(s) = o.get(field).and_then(Value::as_str) {
+                    out.list_slots += s.matches(LIST_TOKEN).count();
+                    out.fixed_units += utf16_len(&substitute(s, widest));
+                }
+            }
+            o.values().for_each(|x| measure(x, widest, out));
+        }
+        _ => {}
+    }
+}
+
+/// The literal `{directory}` token.
+const LIST_TOKEN: &str = "{directory}";
 
 /// An immediate `UPDATE_MESSAGE`: re-stamp the clicked message in place.
 pub fn update_message(message: &MessageRef, components: Value) -> Value {
@@ -494,8 +681,15 @@ fn message_data(components: Vec<Value>, public: bool) -> Value {
     })
 }
 
-fn clamp(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
+/// Truncate to at most `max` UTF-16 units, on a character boundary.
+pub fn clamp(s: &str, max: usize) -> String {
+    let mut used = 0;
+    s.chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= max
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -585,6 +779,7 @@ mod tests {
         let msg = MessageRef {
             flags: Some(FLAG_IS_COMPONENTS_V2),
             content: None,
+            components: None,
         };
         let body = vec![json!({"type": COMPONENT_TEXT_DISPLAY, "content": "x"})];
         for response in [
@@ -639,6 +834,7 @@ mod tests {
         let msg = MessageRef {
             flags: Some(FLAG_IS_COMPONENTS_V2),
             content: None,
+            components: None,
         };
         for body in [
             message_reply(block.clone(), true)["data"].clone(),
@@ -824,6 +1020,7 @@ mod tests {
         let v2 = MessageRef {
             flags: Some(FLAG_IS_COMPONENTS_V2),
             content: Some("ignored".into()),
+            components: None,
         };
         let data = update_message(&v2, components.clone())["data"].clone();
         assert_eq!(data["flags"], json!(FLAG_IS_COMPONENTS_V2));
@@ -832,6 +1029,7 @@ mod tests {
         let legacy = MessageRef {
             flags: Some(0),
             content: Some("keep me".into()),
+            components: None,
         };
         let data = update_message(&legacy, components.clone())["data"].clone();
         assert_eq!(data["content"], json!("keep me"));
@@ -851,6 +1049,7 @@ mod tests {
         let msg = MessageRef {
             flags: Some(FLAG_IS_COMPONENTS_V2),
             content: None,
+            components: None,
         };
         assert_eq!(
             update_message(&msg, components)["data"]["allowed_mentions"]["parse"],
@@ -921,5 +1120,210 @@ mod tests {
         assert_eq!(attested_key(&headers, Some("wrong")), None);
         // No secret configured ⇒ the header is ignored entirely.
         assert_eq!(attested_key(&headers, None), None);
+    }
+
+    // ── Re-stamping keeps the message's live bindings ───────────────────────
+
+    const CLICKED: &str = "directory:0123456789abcdef0123456789abcdef";
+    const GUIDE: &str = "directory:fedcba9876543210fedcba9876543210";
+
+    /// The "Staff directory" template exactly as the `message` resource hands it
+    /// over on a fresh attach: its plugin buttons still carry the template's
+    /// placeholder ids, because DWEEB binds them only after the plugin's save.
+    fn staff_directory_template() -> Value {
+        json!([{
+            "type": 17,
+            "components": [
+                { "type": 10, "content": "# Meet the team" },
+                { "type": 10, "content": "{directory}" },
+                { "type": 10, "content": "-# {directory_count} roles · updated {directory_updated}" },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 2, "label": "Refresh", "custom_id": "dir_staff_inline" }
+                ]},
+                { "type": 1, "components": [
+                    { "type": 2, "style": 1, "label": "Channel guide", "custom_id": "dir_channel_guide" }
+                ]}
+            ]
+        }])
+    }
+
+    /// The same message as Discord delivers it with a click: bound, with the
+    /// component ids Discord adds, and the list text from an earlier render.
+    fn live_message() -> Value {
+        json!([{
+            "type": 17, "id": 1,
+            "components": [
+                { "type": 10, "id": 2, "content": "# Meet the team" },
+                { "type": 10, "id": 3, "content": "<@&1> `Admin`" },
+                { "type": 10, "id": 4, "content": "-# 1 roles · updated <t:1:R>" },
+                { "type": 1, "id": 5, "components": [
+                    { "type": 2, "id": 6, "style": 2, "label": "Refresh", "custom_id": CLICKED }
+                ]},
+                { "type": 1, "id": 7, "components": [
+                    { "type": 2, "id": 8, "style": 1, "label": "Channel guide", "custom_id": GUIDE }
+                ]}
+            ]
+        }])
+    }
+
+    fn custom_ids(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| custom_ids(x, out)),
+            Value::Object(o) => {
+                if let Some(id) = o.get("custom_id").and_then(Value::as_str) {
+                    out.push(id.to_string());
+                }
+                o.values().for_each(|x| custom_ids(x, out));
+            }
+            _ => {}
+        }
+    }
+
+    /// The first refresh used to re-stamp the template's placeholder ids, so the
+    /// clicked button and its Channel-guide sibling routed nowhere afterwards
+    /// ("This component isn't wired to any installed plugin.").
+    #[test]
+    fn a_refresh_keeps_every_live_binding_on_the_message() {
+        let components = restamp_components(
+            &staff_directory_template(),
+            &vars(),
+            Some(&live_message()),
+            CLICKED,
+        )
+        .expect("an unchanged message re-stamps");
+        let mut ids = Vec::new();
+        custom_ids(&components, &mut ids);
+        assert_eq!(ids, vec![CLICKED.to_string(), GUIDE.to_string()]);
+        // And the list itself was rendered from the template's raw token.
+        assert_eq!(
+            components[0]["components"][1]["content"],
+            json!("<@&1> `Admin`")
+        );
+        let response = update_message(
+            &MessageRef {
+                flags: Some(FLAG_IS_COMPONENTS_V2),
+                content: None,
+                components: Some(live_message()),
+            },
+            components,
+        );
+        assert_eq!(response["type"], json!(RESPONSE_UPDATE_MESSAGE));
+    }
+
+    /// A menu another plugin manages beside the button had its options wired
+    /// after capture too — the live ones are kept, as is a link's target.
+    #[test]
+    fn a_refresh_keeps_a_sibling_menus_options_and_a_links_url() {
+        let template = json!([
+            { "type": 10, "content": "{directory}" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Refresh", "custom_id": "btn_action" },
+                { "type": 2, "style": 5, "label": "Verify", "url": "https://example.com/{old}" }
+            ]},
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": "string_select", "options": [{ "label": "Option 1", "value": "option_1" }] }
+            ]}
+        ]);
+        let live = json!([
+            { "type": 10, "id": 1, "content": "old list" },
+            { "type": 1, "id": 2, "components": [
+                { "type": 2, "id": 3, "style": 2, "label": "Refresh", "custom_id": CLICKED },
+                { "type": 2, "id": 4, "style": 5, "label": "Verify", "url": "https://example.com/real" }
+            ]},
+            { "type": 1, "id": 5, "components": [
+                { "type": 3, "id": 6, "custom_id": "quickreplies:abc", "min_values": 1, "max_values": 1,
+                  "options": [{ "label": "Rules", "value": "k1" }, { "label": "Roles", "value": "k2" }] }
+            ]}
+        ]);
+        let out = restamp_components(&template, &vars(), Some(&live), CLICKED).unwrap();
+        assert_eq!(
+            out[1]["components"][1]["url"],
+            json!("https://example.com/real")
+        );
+        let menu = &out[2]["components"][0];
+        assert_eq!(menu["custom_id"], json!("quickreplies:abc"));
+        assert_eq!(menu["options"].as_array().unwrap().len(), 2);
+        assert_eq!(menu["max_values"], json!(1));
+    }
+
+    /// Once the message's shape no longer matches the template (the author
+    /// added or swapped something after configuring), positions don't line up
+    /// and copying bindings could cross them — so the click must be answered
+    /// with a reply, leaving the message alone.
+    #[test]
+    fn a_message_that_changed_shape_is_never_restamped() {
+        let template = staff_directory_template();
+        // A component added after the template was captured.
+        let mut added = live_message();
+        added[0]["components"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "type": 14, "id": 9 }));
+        assert!(restamp_components(&template, &vars(), Some(&added), CLICKED).is_none());
+
+        // A button that became a link: same type, different component.
+        let mut restyled = live_message();
+        restyled[0]["components"][4]["components"][0] =
+            json!({ "type": 2, "id": 8, "style": 5, "label": "Guide", "url": "https://x.test" });
+        assert!(restamp_components(&template, &vars(), Some(&restyled), CLICKED).is_none());
+
+        // No live message to read bindings from at all.
+        assert!(restamp_components(&template, &vars(), None, CLICKED).is_none());
+
+        // A result that wouldn't carry the clicked component.
+        assert!(
+            restamp_components(&template, &vars(), Some(&live_message()), "directory:gone")
+                .is_none()
+        );
+    }
+
+    /// A template stored before `{directory}` was refused in a label must not
+    /// put a multi-line list into a button: Discord caps a label at 80 on one
+    /// line and would refuse the whole edit.
+    #[test]
+    fn a_substituted_label_stays_one_short_line() {
+        let template = json!([
+            { "type": 10, "content": "Staff" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "{directory}", "custom_id": "directory:x" }
+            ]}
+        ]);
+        let long = RenderVars {
+            list: "<@&1> `Admin`\n<@&2> `Bans`\n<@&3> `Timeouts`\n<@&4> `Roles`\n<@&5> `Messages`\n<@&6> `Server`".into(),
+            count: 6,
+            updated_unix: 0,
+        };
+        let rendered = render_template(&template, &long);
+        let label = rendered[1]["components"][0]["label"].as_str().unwrap();
+        assert!(utf16_len(label) <= MAX_LABEL, "{label:?}");
+        assert!(!label.contains('\n'), "{label:?}");
+        // A label with no token is left exactly as written.
+        let plain = json!([{ "type": 2, "label": "Refresh  now", "custom_id": "directory:x" }]);
+        assert_eq!(
+            render_template(&plain, &long)[0]["label"],
+            json!("Refresh  now")
+        );
+    }
+
+    /// The template's own text is measured the way Discord totals a message,
+    /// with the scalar tokens at their widest and the list token removed.
+    #[test]
+    fn template_text_measures_what_the_author_wrote() {
+        let t = template_text(&json!([
+            { "type": 10, "content": "ab{directory}cd" },
+            { "type": 2, "label": "{directory_count}", "custom_id": "directory:x" },
+            { "type": 10, "content": "🛡️ {directory}" }
+        ]));
+        assert_eq!(t.list_slots, 2);
+        // "abcd" (4) + "999999" (6) + "🛡️ " (3 UTF-16 units + 1 space).
+        assert_eq!(t.fixed_units, 4 + 6 + 4);
+    }
+
+    #[test]
+    fn clamp_counts_utf16_units_and_never_splits_a_character() {
+        assert_eq!(clamp("abc", 2), "ab");
+        // An astral emoji is two units: it fits whole or not at all.
+        assert_eq!(clamp("a😀b", 2), "a");
+        assert_eq!(clamp("a😀b", 3), "a😀");
     }
 }

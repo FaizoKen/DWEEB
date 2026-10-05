@@ -25,13 +25,26 @@
 //! of the block. Every value that didn't come from our own config UI goes through
 //! [`escape_markdown`]. Host-written copy (group names, notes) is deliberately
 //! left as markdown, because writing `**bold**` there is the point.
+//!
+//! ## Hidden channels
+//!
+//! The bot can read every channel in a server — staff rooms, ticket channels,
+//! anything — so a channel *sweep* ("every channel", "everything in these
+//! categories") would print a private room's name and topic to whoever reads the
+//! list. A sweep therefore lists only what its readers can see: in a reply only
+//! the clicker sees, exactly the channels that clicker can see; in anything
+//! everyone reads (a public reply, the author's own message), only the channels
+//! `@everyone` can see. A channel the author picked by hand is their choice and is
+//! always listed.
 
 use serde_json::{json, Value};
 
 use crate::discord::{
-    COMPONENT_CONTAINER, COMPONENT_SEPARATOR, COMPONENT_TEXT_DISPLAY, MAX_V2_TEXT,
+    utf16_len, COMPONENT_CONTAINER, COMPONENT_SEPARATOR, COMPONENT_TEXT_DISPLAY, MAX_V2_TEXT,
 };
-use crate::rest::{ChannelView, GuildStructure, RoleView, CHANNEL_CATEGORY, DEFAULT_CHANNEL_KINDS};
+use crate::rest::{
+    ChannelView, GuildStructure, RoleView, Viewer, CHANNEL_CATEGORY, DEFAULT_CHANNEL_KINDS,
+};
 use crate::store::{
     InstanceConfig, CHANNEL_SOURCE_CATEGORIES, CHANNEL_SOURCE_PICKED, ROLE_SOURCE_HOISTED,
     ROLE_SOURCE_PICKED, ROLE_SOURCE_STAFF,
@@ -49,9 +62,20 @@ const MAX_TOPIC: usize = 140;
 /// Well under [`MAX_V2_TEXT`] on purpose: in `"message"` output the list shares
 /// the message's single 4000-character allowance with everything the author
 /// wrote, and a message over that limit is rejected by Discord *entirely* — so an
-/// unbounded list wouldn't just look bad, it would make the refresh fail. Half
-/// leaves the author generous room for their own copy.
-const MAX_INLINE_TEXT: usize = 2000;
+/// unbounded list wouldn't just look bad, it would make the refresh fail. This is
+/// the ceiling; [`inline_budget`] shrinks it to what the author's own text leaves.
+pub const MAX_INLINE_TEXT: usize = 2000;
+
+/// The note a cut inline list ends with.
+const INLINE_TRUNCATED: &str = "\n-# (list truncated)";
+
+/// How much of the message's text allowance the inline list may use, given what
+/// the template spends on its own (`fixed_units`) and how many `{directory}`
+/// slots share the rest. Never above [`MAX_INLINE_TEXT`].
+pub fn inline_budget(fixed_units: usize, list_slots: usize) -> usize {
+    let room = MAX_V2_TEXT.saturating_sub(fixed_units) / list_slots.max(1);
+    room.min(MAX_INLINE_TEXT)
+}
 
 /// Select-option value meaning "show the whole directory".
 pub const SECTION_ALL: &str = "all";
@@ -68,6 +92,9 @@ pub struct RenderInput<'a> {
     /// The section a select pick narrowed to, if any. An unrecognised value
     /// renders everything — a read-only list fails open.
     pub section: Option<&'a str>,
+    /// Who a private reply is for, so a channel sweep lists exactly what they
+    /// can see. Ignored for anything everyone reads (see the module note).
+    pub viewer: Option<&'a Viewer>,
 }
 
 /// Build the Components V2 `components` array for a directory reply.
@@ -147,11 +174,22 @@ pub struct ListText {
 /// Components V2 allowance with their own prose, so it gets [`MAX_INLINE_TEXT`]
 /// rather than the whole thing. Header and footnotes are omitted — the author
 /// writes their own heading around the token.
+#[cfg(test)]
 pub fn render_text(input: &RenderInput<'_>) -> ListText {
-    let mut budget = Budget::new(MAX_INLINE_TEXT);
-    // `Budget::new` reserves room for footnotes this view doesn't emit; hand it
-    // back so the inline cap is the real one.
-    budget.remaining = MAX_INLINE_TEXT;
+    render_text_within(input, MAX_INLINE_TEXT)
+}
+
+/// [`render_text`] inside an explicit allowance of `cap` UTF-16 units — the
+/// room the author's own text leaves (see [`inline_budget`]). The list, its
+/// "truncated" note included, never exceeds it.
+pub fn render_text_within(input: &RenderInput<'_>, cap: usize) -> ListText {
+    let cap = cap.min(MAX_INLINE_TEXT);
+    let mut budget = Budget::new(cap);
+    // `Budget::new` reserves room for the reply's footnotes, which this view
+    // doesn't emit; it only ever adds the one-line "truncated" note, so reserve
+    // exactly that. Each line is charged one unit for the newline joining it to
+    // the next, and the last line has none, which leaves one unit spare.
+    budget.remaining = cap.saturating_sub(utf16_len(INLINE_TRUNCATED));
 
     let sections = if input.cfg.is_roles() {
         role_sections(input, &mut budget)
@@ -163,18 +201,18 @@ pub fn render_text(input: &RenderInput<'_>) -> ListText {
     let count = if input.cfg.is_roles() {
         roster_roles(input.cfg, input.structure).len()
     } else {
-        index_channels(input.cfg, input.structure).len()
+        index_channels(input).len()
     };
 
     if sections.is_empty() {
         return ListText {
-            list: empty_notice(input.cfg),
+            list: crate::discord::clamp(&empty_notice(input.cfg), cap),
             count: 0,
         };
     }
     let mut list = sections.join("\n");
     if budget.exhausted {
-        list.push_str("\n-# (list truncated)");
+        list.push_str(INLINE_TRUNCATED);
     }
     ListText { list, count }
 }
@@ -256,7 +294,14 @@ fn empty_notice(cfg: &InstanceConfig) -> String {
 fn roster_roles<'a>(cfg: &InstanceConfig, structure: &'a GuildStructure) -> Vec<&'a RoleView> {
     match cfg.role_source.as_str() {
         ROLE_SOURCE_HOISTED => structure.roles.iter().filter(|r| r.hoist).collect(),
-        ROLE_SOURCE_STAFF => structure.roles.iter().filter(|r| r.staff).collect(),
+        // A bot's integration role is managed by Discord and usually carries
+        // moderation bits (DWEEB's own has Manage Roles/Channels), but no person
+        // holds it — it isn't staff anyone can ask for help.
+        ROLE_SOURCE_STAFF => structure
+            .roles
+            .iter()
+            .filter(|r| r.staff && !r.managed)
+            .collect(),
         // ROLE_SOURCE_PICKED (normalize() guarantees no other value).
         _ => cfg
             .picked_role_ids()
@@ -386,8 +431,19 @@ fn kind_included(cfg: &InstanceConfig, kind: u8) -> bool {
 
 /// The channels this index lists, before grouping — in the host's order for a
 /// hand-picked list, otherwise in Discord's own display order.
-fn index_channels<'a>(cfg: &InstanceConfig, structure: &'a GuildStructure) -> Vec<&'a ChannelView> {
+fn index_channels<'a>(input: &RenderInput<'a>) -> Vec<&'a ChannelView> {
+    let cfg = input.cfg;
+    let structure = input.structure;
+    // Who reads a sweep decides what it may name (see the module note): the
+    // whole channel, or the author's own message, sees `@everyone`'s view; a
+    // private reply sees the clicker's own.
+    let shared = cfg.public || cfg.writes_to_message();
+    let readable = |c: &ChannelView| match input.viewer {
+        Some(viewer) if !shared => structure.viewer_can_view(c, viewer),
+        _ => c.everyone_can_view,
+    };
     let base: Vec<&ChannelView> = match cfg.channel_source.as_str() {
+        // Hand-picked: the author chose each one, so each one is listed.
         CHANNEL_SOURCE_PICKED => cfg
             .channels
             .iter()
@@ -399,10 +455,11 @@ fn index_channels<'a>(cfg: &InstanceConfig, structure: &'a GuildStructure) -> Ve
                 .channels
                 .iter()
                 .filter(|c| c.parent_id.as_deref().is_some_and(|p| wanted.contains(&p)))
+                .filter(|c| readable(c))
                 .collect()
         }
         // CHANNEL_SOURCE_ALL (normalize() guarantees no other value).
-        _ => structure.channels.iter().collect(),
+        _ => structure.channels.iter().filter(|c| readable(c)).collect(),
     };
     base.into_iter()
         .filter(|c| kind_included(cfg, c.kind))
@@ -420,7 +477,7 @@ fn index_channels<'a>(cfg: &InstanceConfig, structure: &'a GuildStructure) -> Ve
 
 fn channel_sections(input: &RenderInput<'_>, budget: &mut Budget) -> Vec<String> {
     let cfg = input.cfg;
-    let channels = index_channels(cfg, input.structure);
+    let channels = index_channels(input);
     if channels.is_empty() {
         return Vec::new();
     }
@@ -458,6 +515,18 @@ fn channel_sections(input: &RenderInput<'_>, budget: &mut Budget) -> Vec<String>
                 }
             }
         }
+    }
+    // A sweep shows categories in the server's own order, which is each
+    // category's *own* position — not where its first channel happens to fall:
+    // channel positions restart inside every category, so ordering by a child
+    // put "Chat" above "Info" on any server whose channels were rearranged. A
+    // hand-picked list keeps the author's order. A parent the read didn't
+    // return sorts last.
+    if cfg.channel_source != CHANNEL_SOURCE_PICKED {
+        buckets.sort_by_key(|(cat, _)| match cat {
+            Some(c) => (0, c.position, c.id.parse::<u64>().unwrap_or(u64::MAX)),
+            None => (1, 0, 0),
+        });
     }
     if !loose.is_empty() {
         buckets.insert(0, (None, loose));
@@ -636,12 +705,14 @@ impl Budget {
 
     /// Spend unconditionally (the header, which always renders).
     fn charge(&mut self, s: &str) {
-        self.remaining = self.remaining.saturating_sub(s.chars().count() + 1);
+        self.remaining = self.remaining.saturating_sub(utf16_len(s) + 1);
     }
 
     /// Spend if it fits. Returns false — and latches `exhausted` — if not.
+    /// Costs are UTF-16 units, the way Discord counts its limit, so a list
+    /// dense with emoji can't slip past it.
     fn take(&mut self, s: &str) -> bool {
-        let cost = s.chars().count() + 1; // + the joining newline
+        let cost = utf16_len(s) + 1; // + the joining newline
         if cost > self.remaining {
             self.exhausted = true;
             return false;
@@ -668,6 +739,7 @@ mod tests {
             staff: perms != 0,
             badges: permission_badges(perms),
             unicode_emoji: None,
+            permissions: perms,
         }
     }
 
@@ -686,6 +758,8 @@ mod tests {
             position: 0,
             topic: topic.map(|s| s.to_string()),
             nsfw: false,
+            everyone_can_view: true,
+            overwrites: vec![],
         }
     }
 
@@ -697,6 +771,7 @@ mod tests {
             channels,
             member_count: None,
             online_count: None,
+            everyone_permissions: 0,
         }
     }
 
@@ -767,6 +842,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         let text = text_of(&out);
         // Role *mentions*, so Discord paints its own colour pill and a rename
@@ -800,6 +876,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(!text.contains("Deleted Role"), "{text}");
         assert!(!text.contains("<@&gone>"), "{text}");
@@ -821,6 +898,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("no longer exist"), "{text}");
     }
@@ -880,6 +958,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         let text = text_of(&out);
         assert!(text.contains("### 👑 Leadership"), "{text}");
@@ -908,6 +987,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(!text.contains("### Leadership"), "{text}");
         assert!(text.contains("<@&r1>"), "{text}");
@@ -938,6 +1018,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("1,204 members · 87 online"), "{text}");
         // The roster itself is unaffected.
@@ -955,6 +1036,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(!text.contains("1,204"), "{text}");
         assert!(!text.contains("online"), "{text}");
@@ -971,6 +1053,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(!text.contains("0 members"), "{text}");
         assert!(!text.contains("online"), "{text}");
@@ -982,6 +1065,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("12 members"), "{text}");
         assert!(!text.contains("online"), "{text}");
@@ -995,6 +1079,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("1 member"), "{text}");
         assert!(!text.contains("1 members"), "{text}");
@@ -1024,6 +1109,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("### Information"), "{text}");
         assert!(text.contains("<#c1> — Read before posting"), "{text}");
@@ -1048,10 +1134,15 @@ mod tests {
                 channel("c", "real", 0, Some("cat"), Some("a channel")),
             ],
         );
-        let listed: Vec<&str> = index_channels(&cfg, &st)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let listed: Vec<&str> = index_channels(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        })
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
         assert_eq!(listed, vec!["c"]);
     }
 
@@ -1067,10 +1158,15 @@ mod tests {
                 channel("c2", "no-topic", 0, None, None),
             ],
         );
-        let listed: Vec<&str> = index_channels(&cfg, &st)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let listed: Vec<&str> = index_channels(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        })
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
         assert_eq!(listed, vec!["c1"]);
 
         // A host note counts as a topic — it's a caption they wrote on purpose.
@@ -1078,10 +1174,15 @@ mod tests {
             id: "c2".into(),
             text: "Quiet corner".into(),
         }];
-        let listed: Vec<&str> = index_channels(&cfg, &st)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let listed: Vec<&str> = index_channels(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        })
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
         assert_eq!(listed, vec!["c1", "c2"]);
 
         // Hand-picked channels are listed regardless: the host chose them.
@@ -1092,10 +1193,15 @@ mod tests {
             name: "no-topic".into(),
             kind: 0,
         }];
-        let listed: Vec<&str> = index_channels(&cfg, &st)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let listed: Vec<&str> = index_channels(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        })
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
         assert_eq!(listed, vec!["c2"]);
     }
 
@@ -1115,6 +1221,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(
             text.contains("**Start here**"),
@@ -1134,6 +1241,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("`18+`"), "{text}");
     }
@@ -1155,6 +1263,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains("look \\*here"), "{text}");
         // A topic can't smuggle a heading in either.
@@ -1163,6 +1272,7 @@ mod tests {
             cfg: &cfg,
             structure: &st2,
             section: None,
+            viewer: None,
         }));
         assert!(text2.contains("\\# Huge"), "{text2}");
     }
@@ -1187,6 +1297,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         let block = out[0]["components"].as_array().unwrap().last().unwrap()["content"]
             .as_str()
@@ -1205,6 +1316,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         }));
         assert!(text.contains('…'), "{text}");
         assert!(
@@ -1245,6 +1357,7 @@ mod tests {
                 cfg: &cfg,
                 structure: &st,
                 section,
+                viewer: None,
             }))
         };
         let one = pick(Some("g:g2"));
@@ -1290,10 +1403,15 @@ mod tests {
                 channel("c1", "rules", 0, Some("cat"), Some("t")),
             ],
         );
-        let listed: Vec<&str> = index_channels(&cfg, &st)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let listed: Vec<&str> = index_channels(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        })
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
         assert_eq!(listed, vec!["c1"]);
     }
 
@@ -1314,6 +1432,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: Some("c:cat2"),
+            viewer: None,
         }));
         assert!(text.contains("<#c2>"), "{text}");
         assert!(!text.contains("<#c1>"), "{text}");
@@ -1351,6 +1470,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         let total = char_total(&out);
         assert!(total <= MAX_V2_TEXT, "over the V2 budget: {total}");
@@ -1385,6 +1505,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert!(char_total(&out) <= MAX_V2_TEXT, "{}", char_total(&out));
         // The component count stays bounded no matter how many categories exist.
@@ -1436,6 +1557,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         };
         let text = render_text(&input);
         assert_eq!(text.count, 2);
@@ -1475,6 +1597,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         let len = text.list.chars().count();
         assert!(
@@ -1509,6 +1632,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert!(text.list.contains("<@&r1>"), "{}", text.list);
         for chatter in ["available", "Couldn't", "member", "online"] {
@@ -1531,6 +1655,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert_eq!(text.count, 0);
         assert!(!text.list.trim().is_empty());
@@ -1564,6 +1689,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert_eq!(text.count, 2, "a deleted role must not be counted");
         assert!(text.list.contains("<@&r1>"), "{}", text.list);
@@ -1598,6 +1724,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: Some("g:g2"),
+            viewer: None,
         });
         assert!(text.list.contains("Mods"), "{}", text.list);
         assert!(!text.list.contains("Leads"), "{}", text.list);
@@ -1616,6 +1743,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert!(rendered[0]["accent_color"].is_null());
 
@@ -1626,6 +1754,7 @@ mod tests {
             cfg: &cfg,
             structure: &st,
             section: None,
+            viewer: None,
         });
         assert_eq!(rendered[0]["accent_color"], json!(0x12_34_56));
     }
@@ -1655,5 +1784,261 @@ mod tests {
             truncate(&"x".repeat(30), 10),
             format!("{}…", "x".repeat(10))
         );
+    }
+
+    // ── Hidden channels ─────────────────────────────────────────────────────
+
+    fn hidden(mut c: ChannelView) -> ChannelView {
+        c.everyone_can_view = false;
+        c
+    }
+
+    fn channel_index_cfg() -> InstanceConfig {
+        let mut cfg = base_config();
+        cfg.mode = crate::store::MODE_CHANNELS.into();
+        cfg
+    }
+
+    /// The bot reads every channel, staff rooms included. A sweep everyone
+    /// reads — a public reply, or the author's own message — must not print a
+    /// private room's name or topic.
+    #[test]
+    fn a_shared_channel_sweep_lists_only_what_everyone_can_see() {
+        let st = structure(
+            vec![],
+            vec![
+                channel("c1", "general", 0, None, Some("Anything goes")),
+                hidden(channel("c2", "mod-logs", 0, None, Some("ban appeals"))),
+            ],
+        );
+        for (public, output) in [(true, "reply"), (false, "message")] {
+            let mut cfg = channel_index_cfg();
+            cfg.public = public;
+            cfg.output = output.into();
+            let input = RenderInput {
+                cfg: &cfg,
+                structure: &st,
+                section: None,
+                viewer: None,
+            };
+            let text = if output == "message" {
+                render_text(&input).list
+            } else {
+                text_of(&render(&input))
+            };
+            assert!(text.contains("<#c1>"), "{text}");
+            assert!(!text.contains("<#c2>"), "{output}: {text}");
+            assert!(!text.contains("ban appeals"), "{output}: {text}");
+        }
+    }
+
+    /// A reply only the clicker sees lists exactly what that clicker can see:
+    /// the staff room for a moderator, not for a member.
+    #[test]
+    fn a_private_sweep_lists_what_the_clicker_can_see() {
+        const VIEW: u64 = 1 << 10;
+        // Exactly what `fetch_structure` builds for a staff room: @everyone
+        // denied View, the mod role allowed it.
+        let mut room = hidden(channel("c2", "mod-logs", 0, None, Some("t")));
+        room.overwrites = vec![
+            crate::rest::Overwrite {
+                id: "1".into(), // the guild id: @everyone
+                member: false,
+                allow: 0,
+                deny: VIEW,
+            },
+            crate::rest::Overwrite {
+                id: "mod".into(),
+                member: false,
+                allow: VIEW,
+                deny: 0,
+            },
+        ];
+        let mut st = structure(
+            vec![],
+            vec![channel("c1", "general", 0, None, Some("t")), room],
+        );
+        st.everyone_permissions = VIEW;
+        let cfg = channel_index_cfg();
+        let render_for = |roles: &[&str]| {
+            let viewer = Viewer {
+                user_id: "9".into(),
+                role_ids: roles.iter().map(|r| r.to_string()).collect(),
+                admin: false,
+            };
+            text_of(&render(&RenderInput {
+                cfg: &cfg,
+                structure: &st,
+                section: None,
+                viewer: Some(&viewer),
+            }))
+        };
+        assert!(render_for(&["mod"]).contains("<#c2>"));
+        let member = render_for(&["member"]);
+        assert!(
+            member.contains("<#c1>") && !member.contains("<#c2>"),
+            "{member}"
+        );
+    }
+
+    /// A channel the author picked by hand is their choice and is listed even
+    /// when hidden — only sweeps filter.
+    #[test]
+    fn a_hand_picked_hidden_channel_is_still_listed() {
+        let mut cfg = channel_index_cfg();
+        cfg.public = true;
+        cfg.channel_source = CHANNEL_SOURCE_PICKED.into();
+        cfg.channels = vec![ChannelRef {
+            id: "c2".into(),
+            name: "vip".into(),
+            kind: 0,
+        }];
+        let st = structure(
+            vec![],
+            vec![hidden(channel("c2", "vip", 0, None, Some("t")))],
+        );
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        }));
+        assert!(text.contains("<#c2>"), "{text}");
+    }
+
+    // ── The inline list's share of the message ──────────────────────────────
+
+    /// The inline list shares the message's single 4000-unit allowance with the
+    /// author's own text, so it is fitted into what that text leaves — a long
+    /// message plus a full list used to send 4390 characters, and Discord refused
+    /// every refresh.
+    #[test]
+    fn an_inline_list_fits_in_what_the_authors_text_leaves() {
+        let mut cfg = base_config();
+        cfg.roles = (0..25)
+            .map(|i| RoleRef {
+                id: format!("{:018}", i + 1),
+                name: format!("R{i}"),
+                color: 0,
+            })
+            .collect();
+        cfg.notes = (0..25)
+            .map(|i| Note {
+                id: format!("{:018}", i + 1),
+                text: "n".repeat(150),
+            })
+            .collect();
+        let st = structure(
+            (0..25)
+                .map(|i| role(&format!("{:018}", i + 1), &format!("R{i}"), true, 1 << 2))
+                .collect(),
+            vec![],
+        );
+        let prose = "a".repeat(2500);
+        let template = json!([{ "type": 10, "content": format!("{prose}\n{{directory}}") }]);
+        let measured = crate::discord::template_text(&template);
+        let cap = inline_budget(measured.fixed_units, measured.list_slots);
+        let text = render_text_within(
+            &RenderInput {
+                cfg: &cfg,
+                structure: &st,
+                section: None,
+                viewer: None,
+            },
+            cap,
+        );
+        assert!(
+            utf16_len(&text.list) <= cap,
+            "{} > {cap}",
+            utf16_len(&text.list)
+        );
+        let rendered = crate::discord::render_template(
+            &template,
+            &crate::discord::RenderVars {
+                list: text.list,
+                count: text.count,
+                updated_unix: 0,
+            },
+        );
+        let total = utf16_len(rendered[0]["content"].as_str().unwrap());
+        assert!(total <= MAX_V2_TEXT, "the refresh would send {total} units");
+        assert!(rendered[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("truncated"));
+    }
+
+    #[test]
+    fn the_inline_budget_is_shared_by_every_slot_and_capped() {
+        assert_eq!(inline_budget(0, 1), MAX_INLINE_TEXT);
+        assert_eq!(inline_budget(3000, 1), 1000);
+        assert_eq!(inline_budget(3000, 2), 500);
+        assert_eq!(inline_budget(5000, 1), 0);
+    }
+
+    // ── Roster sources and ordering ─────────────────────────────────────────
+
+    /// A bot's integration role is managed by Discord and often carries
+    /// moderation bits (DWEEB's own has Manage Roles/Channels), but nobody holds
+    /// it — it isn't staff.
+    #[test]
+    fn a_staff_roster_leaves_out_bot_integration_roles() {
+        let mut cfg = base_config();
+        cfg.role_source = ROLE_SOURCE_STAFF.into();
+        let mut bot = role("bot", "DWEEB", false, (1 << 28) | (1 << 4));
+        bot.managed = true;
+        let st = structure(vec![role("mod", "Moderator", true, 1 << 2), bot], vec![]);
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        }));
+        assert!(text.contains("<@&mod>"), "{text}");
+        assert!(!text.contains("<@&bot>"), "{text}");
+    }
+
+    /// Categories follow their *own* position. Channel positions restart inside
+    /// each category, so ordering by a child put "Chat" above "Info".
+    #[test]
+    fn categories_follow_discords_own_order() {
+        let mut cfg = channel_index_cfg();
+        cfg.output = "reply".into();
+        let ch = |id: &str, name: &str, kind: u8, parent: Option<&str>, pos: i64| {
+            let mut c = channel(id, name, kind, parent, Some("t"));
+            c.position = pos;
+            c
+        };
+        // Listed in fetch_structure's global (position, id) order.
+        let st = structure(
+            vec![],
+            vec![
+                ch("100000000000000001", "Info", 4, None, 0),
+                ch(
+                    "100000000000000005",
+                    "general",
+                    0,
+                    Some("100000000000000002"),
+                    0,
+                ),
+                ch("100000000000000002", "Chat", 4, None, 1),
+                ch(
+                    "100000000000000003",
+                    "rules",
+                    0,
+                    Some("100000000000000001"),
+                    3,
+                ),
+            ],
+        );
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+            viewer: None,
+        }));
+        let info = text.find("### Info").expect("Info heading");
+        let chat = text.find("### Chat").expect("Chat heading");
+        assert!(info < chat, "Chat rendered above Info: {text}");
     }
 }

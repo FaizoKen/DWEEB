@@ -382,6 +382,9 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
+      // The custom_id of the component being configured, as the host passed it
+      // — a placeholder on a fresh attach, `directory:<id>` when reconfiguring.
+      let currentCustomId = null;
       let protocolVersion = 1;
       // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
       // saving creates a replacement instance instead of updating in place.
@@ -490,12 +493,17 @@
         const src = channelSource();
         $("pickedChannels").style.display = src === "picked" ? "" : "none";
         $("pickedCategories").style.display = src === "categories" ? "" : "none";
+        // Sweeps only name what their readers can see (see src/render.rs): a
+        // private answer lists the clicker's own channels; anything everyone
+        // reads lists only what @everyone can see. Hand-picked ones always show.
+        const hiddenNote =
+          " Channels marked <b>hidden</b> are left out of anything everyone reads, and shown in a private answer only to people who can see them.";
         $("channelSourceHint").innerHTML =
           src === "all"
-            ? "Every channel the list can see, in the server's own order."
+            ? "Every channel, in the server's own order." + hiddenNote
             : src === "categories"
-              ? "Only what sits inside the categories you tick."
-              : "A short, hand-picked shortlist — ideal for a “start here” message.";
+              ? "Only what sits inside the categories you tick." + hiddenNote
+              : "A short, hand-picked shortlist — ideal for a “start here” message. A channel you pick is always listed, even a hidden one.";
         // `require_topic` doesn't apply to a hand-picked list: the host chose
         // those channels on purpose, so they're always listed.
         $("requireTopic").closest(".checkrow").style.display = src === "picked" ? "none" : "";
@@ -607,7 +615,13 @@
           name.className = "name";
           name.textContent = (c.kind === 2 || c.kind === 13 ? "🔊 " : "# ") + c.name;
           row.append(input, name);
-          if (!c.topic) {
+          if (c.everyone_can_view === false) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = "hidden";
+            tag.title = "Not everyone can see this channel. It's listed only if you pick it, or in a private answer to someone who can see it.";
+            row.appendChild(tag);
+          } else if (!c.topic) {
             const tag = document.createElement("span");
             tag.className = "tag";
             tag.textContent = "no topic";
@@ -793,7 +807,9 @@
       function noteTargets() {
         if (mode === "roles") {
           if (roleSource() === "picked") return pickedRoles.map((id) => [id, roleById(id)]);
-          const pred = roleSource() === "hoisted" ? (r) => r.hoist : (r) => r.staff;
+          // Mirrors `roster_roles` in src/render.rs: a bot's managed integration
+          // role is never staff anyone can ask.
+          const pred = roleSource() === "hoisted" ? (r) => r.hoist : (r) => r.staff && !r.managed;
           return roles.filter(pred).map((r) => [r.id, r]);
         }
         const src = channelSource();
@@ -930,8 +946,9 @@
           box.className = "callout warn";
           box.innerHTML =
             "Put <code>{directory}</code> in your message text where the list should go — that's the spot it fills in. " +
-            "Optional extras: <code>{directory_count}</code> (how many are listed) and <code>{directory_updated}</code> (a live \"5 minutes ago\").<br><br>" +
-            "Two things to know: the list shares this message's 4000-character limit with your own text, so it's capped around 2000 characters; " +
+            "Optional extras: <code>{directory_count}</code> (how many are listed) and <code>{directory_updated}</code> (a live \"5 minutes ago\") — those two also fit in a button label.<br><br>" +
+            "Things to know: the list shares this message's 4000-character limit with your own text, so it gets what your text leaves (at most about 2000 characters); " +
+            "it shows only channels everyone can see; pictures in this message must be links (https://…), not uploads; " +
             "and Discord only lets the list refresh when someone clicks — it can't update entirely on its own. Give the button a label like <b>Refresh</b>.";
           box.style.display = "";
           $("publicHint").textContent = "";
@@ -953,11 +970,16 @@
       // A menu offers one section per option, so it needs sections to exist.
       function currentSections() {
         if (mode === "roles") {
-          return groups.map((g) => ({
-            value: "g:" + g.key,
-            label: (g.name || "Section").slice(0, 100),
-            emoji: (g.emoji || "").trim(),
-          }));
+          // Only groups with roles in them are saved (see `cleanGroups` in
+          // save()), so only they may become menu options — an empty one would
+          // answer its pick with "the roles … no longer exist".
+          return groups
+            .filter((g) => g.role_ids.length)
+            .map((g) => ({
+              value: "g:" + g.key,
+              label: (g.name || "Section").slice(0, 100),
+              emoji: (g.emoji || "").trim(),
+            }));
         }
         if (channelSource() !== "categories") return [];
         return pickedCategories.map((id) => {
@@ -1031,10 +1053,16 @@
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
+        // Only the DWEEB page embedding this frame speaks the protocol. Any
+        // other window (one that opened DWEEB, or a frame beside this one) could
+        // otherwise post an init of its own and take the session over — its
+        // origin would receive every later request, the new edit token included.
+        if (event.source !== window.parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
         if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          if (event.origin !== hostOrigin) return;
           const resolve = pendingReqs.get(msg.requestId);
           pendingReqs.delete(msg.requestId);
           resolve(msg.ok ? msg.data : null);
@@ -1042,8 +1070,12 @@
         }
 
         if (msg.type !== "dweeb:plugin:init") return;
+        // One session per frame: the host mounts a fresh frame to start over,
+        // so a second init is never legitimate and must not re-point it.
+        if (nonce != null) return;
         nonce = msg.nonce;
         hostOrigin = event.origin;
+        currentCustomId = typeof msg.customId === "string" ? msg.customId : null;
         protocolVersion = msg.apiVersion === 2 ? 2 : 1;
         managementToken =
           protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
@@ -1167,8 +1199,20 @@
       // ── Reconfigure ─────────────────────────────────────────────────────
       async function loadInstance(id) {
         try {
-          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
-          if (!res.ok) return;
+          // A list limited to certain roles only opens with its edit token (the
+          // id alone is public — it's in the posted button). Without it this
+          // starts fresh and saving creates a replacement list.
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`, {
+            headers: managementToken ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {},
+          });
+          if (!res.ok) {
+            if (res.status === 403) {
+              const box = $("error");
+              box.textContent =
+                "This list is limited to certain roles, so its settings only open in the browser that created it. Set it up again here — saving creates a replacement list.";
+            }
+            return;
+          }
           const d = await res.json();
           guildName = d.guild_name || guildName;
           if (d.guild_id && isSnowflake(d.guild_id)) $("guildId").value = d.guild_id;
@@ -1332,19 +1376,76 @@
         return found;
       }
 
-      /// True when some OTHER component on the message is already bound to this
-      /// plugin — so a `{directory}` token there might be theirs to fill, and this
-      /// (reply-mode) instance must not claim the message is misconfigured.
+      /// True when some OTHER component on the message could be the one filling
+      /// `{directory}` — so this (reply-mode) instance must not claim the message
+      /// is misconfigured. That's one already bound to this plugin, or one not
+      /// bound to any plugin yet: a template's setup configures its components
+      /// one at a time in any order, and its "Refresh" button still carries the
+      /// template's placeholder id until its own turn comes.
       function hasOtherDirectoryBinding(components) {
-        const mine = instanceId ? PREFIX + instanceId : null;
+        const mine = new Set([instanceId ? PREFIX + instanceId : null, currentCustomId].filter(Boolean));
         let found = false;
         const visit = (n) => {
           if (found || !n || typeof n !== "object") return;
           if (Array.isArray(n)) return n.forEach(visit);
           const cid = n.custom_id;
-          if (typeof cid === "string" && cid.startsWith(PREFIX) && cid !== mine) {
+          if (
+            typeof cid === "string" &&
+            !mine.has(cid) &&
+            (cid.startsWith(PREFIX) || !cid.includes(":"))
+          ) {
             found = true;
             return;
+          }
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return found;
+      }
+
+      /// Mirrors `looks_like_emoji` in src/validate.rs: Discord only accepts one
+      /// emoji as a menu option's emoji, and refuses the whole message over
+      /// `:shield:`, `<:name:123>` or a word.
+      function looksLikeEmoji(s) {
+        const t = (s || "").trim();
+        const n = Array.from(t).length;
+        return n >= 1 && n <= 10 && !/[A-Za-z\s:<>]/.test(t);
+      }
+
+      /// Mirrors `unsendable_media` in src/validate.rs: every picture or file a
+      /// refresh couldn't send. Only an http(s) link travels; a File component
+      /// never does (Discord only takes an attachment:// there).
+      function unsendableMedia(components) {
+        const out = [];
+        const nameOf = (media) => {
+          const url = media && typeof media.url === "string" ? media.url.trim() : "";
+          if (!url) return "a picture with no link";
+          const m = /^session:\/\/[^/]*\/(.+)$/.exec(url) || /^attachment:\/\/(.+)$/.exec(url);
+          return Array.from(m ? m[1] : url).slice(0, 80).join("");
+        };
+        const visit = (n) => {
+          if (!n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          if (n.type === 13) out.push(nameOf(n.file));
+          else if (n.media && !/^https?:\/\/[\s\S]/i.test((n.media.url || "").trim())) out.push(nameOf(n.media));
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return out;
+      }
+
+      /// True when `{directory}` sits in a button label or menu placeholder —
+      /// single short lines a list can't fit in.
+      function listTokenInShortField(components) {
+        let found = false;
+        const visit = (n) => {
+          if (found || !n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          for (const field of ["label", "placeholder"]) {
+            if (typeof n[field] === "string" && n[field].includes("{directory}")) {
+              found = true;
+              return;
+            }
           }
           for (const k in n) visit(n[k]);
         };
@@ -1387,6 +1488,9 @@
             return fail("Pick at least one role to list — or switch “Which roles?” to build the list from the server automatically.");
           if (grouped && groups.every((g) => !g.role_ids.length))
             return fail("Your groups are empty — add roles to them, or remove them for one flat list.");
+          const badEmoji = groups.find((g) => g.role_ids.length && (g.emoji || "").trim() && !looksLikeEmoji(g.emoji));
+          if (badEmoji)
+            return fail(`The emoji for “${(badEmoji.name || "Untitled").trim()}” isn't a single emoji. Paste one emoji, like 🛡️, or leave it empty.`);
         } else {
           if (channelSource() === "picked" && !pickedChannels.length)
             return fail("Pick at least one channel to list — or switch to “Every channel”.");
@@ -1418,6 +1522,15 @@
           if (!hasOurToken(built.components))
             return fail(
               "Add {directory} to your message text where the list should appear — otherwise clicking would change nothing.",
+            );
+          if (listTokenInShortField(built.components))
+            return fail(
+              "{directory} can only go in your message text — a button label or menu placeholder is a single short line. {directory_count} and {directory_updated} are fine there.",
+            );
+          const unsendable = unsendableMedia(built.components);
+          if (unsendable.length)
+            return fail(
+              `Your message has a picture or file the list can't keep when it refreshes (${unsendable.join(", ")}). Anything uploaded from your computer stays in your browser — paste an image link (https://…) into its Image URL field instead, or remove the file, then save this again.`,
             );
           messageTemplate = built.components;
         } else {

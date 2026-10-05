@@ -353,9 +353,11 @@ impl InstanceConfig {
         for g in &mut self.groups {
             g.role_ids.truncate(MAX_ROLES);
         }
-        // A group whose name and roles are both gone is noise, not a section.
-        self.groups
-            .retain(|g| !g.role_ids.is_empty() || !g.name.trim().is_empty());
+        // A group with no roles is a section with nothing in it: as a menu
+        // option it would answer every pick with "the roles this list points at
+        // no longer exist". The config UI already drops these at save; this
+        // keeps an older row (or a hand-made request) from reaching the menu.
+        self.groups.retain(|g| !g.role_ids.is_empty());
 
         clamp_opt(&mut self.title, MAX_TITLE);
         clamp_opt(&mut self.intro, MAX_INTRO);
@@ -738,6 +740,35 @@ pub(crate) mod tests {
         cfg.normalize();
         assert_eq!(cfg.groups.len(), 1);
         assert_eq!(cfg.groups[0].key, "g1");
+    }
+
+    /// A named group with no roles is still an empty section: on a menu its
+    /// option would answer every pick with "the roles … no longer exist".
+    #[test]
+    fn normalize_drops_a_named_group_with_no_roles() {
+        let mut cfg = base_config();
+        cfg.groups = vec![
+            Group {
+                key: "g1".into(),
+                name: "Staff".into(),
+                emoji: None,
+                role_ids: vec!["1".into()],
+            },
+            Group {
+                key: "g2".into(),
+                name: "Helpers".into(),
+                emoji: None,
+                role_ids: vec![],
+            },
+        ];
+        cfg.normalize();
+        assert_eq!(
+            cfg.groups
+                .iter()
+                .map(|g| g.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["g1"]
+        );
     }
 
     /// Grouped rosters take their role ids from the groups (deduped, in order);

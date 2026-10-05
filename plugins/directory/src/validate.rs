@@ -6,6 +6,8 @@
 //! directory (the UI renders `data.error`), which is why they name the field and
 //! say what to do rather than reporting a constraint.
 
+use serde_json::Value;
+
 use crate::store::{
     InstanceConfig, CHANNEL_SOURCE_CATEGORIES, CHANNEL_SOURCE_PICKED, MAX_CATEGORIES, MAX_CHANNELS,
     MAX_GROUPS, MAX_NOTES, MAX_ROLES, MAX_TEMPLATE_BYTES, ROLE_SOURCE_PICKED, TARGET_STRING_SELECT,
@@ -13,10 +15,30 @@ use crate::store::{
 };
 
 /// Discord snowflakes are 64-bit ints rendered in decimal; every id we accept
-/// (guild, role, channel) is one.
+/// (guild, role, channel) is one. The value must fit in 64 bits: an id Discord
+/// can't parse gets a 400 from it, and the config API answers anyone.
 pub fn is_snowflake(s: &str) -> bool {
     let s = s.trim();
-    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    (17..=20).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
+}
+
+/// The least room an in-message list may be left by the author's own text.
+/// Below this the list would be a line or two before "(list truncated)".
+const MIN_INLINE_ROOM: usize = 200;
+
+/// Whether `s` plausibly is one emoji, the only thing Discord accepts as a menu
+/// option's `emoji.name`. Can't be exact without an emoji table, but it refuses
+/// what people actually type instead — `:shield:`, `<:name:123>`, a word —
+/// each of which makes Discord refuse the whole message on Send.
+pub fn looks_like_emoji(s: &str) -> bool {
+    let s = s.trim();
+    let count = s.chars().count();
+    (1..=10).contains(&count)
+        && !s
+            .chars()
+            .any(|c| c.is_ascii_alphabetic() || c.is_whitespace() || matches!(c, ':' | '<' | '>'))
 }
 
 /// Discord's cap on options in a select menu — the ceiling on how many sections
@@ -125,7 +147,106 @@ fn validate_output(cfg: &InstanceConfig) -> Result<(), String> {
             "Put {{{TOKEN_LIST}}} in your message text where the list should appear — otherwise clicking would change nothing. You can also use {{{TOKEN_COUNT}}} and {{{TOKEN_UPDATED}}}."
         ));
     }
+    // A button label tops out at 80 characters and a menu placeholder at 150, on
+    // one line; a list is many lines long. Discord would refuse every refresh.
+    if tree_has_list_token_in_short_field(template) {
+        return Err(format!(
+            "{{{TOKEN_LIST}}} can only go in your message text — a button label or menu placeholder is a single short line. {{{TOKEN_COUNT}}} and {{{TOKEN_UPDATED}}} are fine there."
+        ));
+    }
+    // A picture uploaded from the author's computer lives only in their
+    // browser, and a refresh is sent from here. Discord refuses the whole edit
+    // over one picture it can't fetch, so every click would fail.
+    let unsendable = unsendable_media(template);
+    if !unsendable.is_empty() {
+        return Err(format!(
+            "Your message has a picture or file the list can't keep when it refreshes ({}). Anything uploaded from your computer stays in your browser — in DWEEB, paste an image link (https://…) into its Image URL field instead, or remove the file, then save this again.",
+            unsendable.join(", ")
+        ));
+    }
+    // The list shares the message's single 4000-character allowance with the
+    // author's own text; it is fitted into what's left at every refresh, but a
+    // message that leaves almost nothing would just show "(list truncated)".
+    let text = crate::discord::template_text(template);
+    if crate::render::inline_budget(text.fixed_units, text.list_slots) < MIN_INLINE_ROOM {
+        return Err(
+            "Your message's own text uses nearly all of Discord's 4000-character limit, leaving no room for the list. Shorten it, or switch this to \"in a reply\"."
+                .into(),
+        );
+    }
     Ok(())
+}
+
+/// Every picture or file in `template` a refresh couldn't send, by name: only
+/// an `http(s)://` link travels (a `session://` upload, an `attachment://`
+/// reference or a placeholder doesn't), and a File component never does —
+/// Discord only accepts an `attachment://` there, and a refresh uploads none.
+pub fn unsendable_media(template: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_media(template, &mut out);
+    out
+}
+
+fn collect_media(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Array(a) => a.iter().for_each(|x| collect_media(x, out)),
+        Value::Object(o) => {
+            let kind = o.get("type").and_then(Value::as_u64);
+            if kind == Some(13) {
+                out.push(media_name(o.get("file")));
+            } else if let Some(media) = o.get("media") {
+                if !is_web_link(media) {
+                    out.push(media_name(Some(media)));
+                }
+            }
+            o.values().for_each(|x| collect_media(x, out));
+        }
+        _ => {}
+    }
+}
+
+fn is_web_link(media: &Value) -> bool {
+    media.get("url").and_then(Value::as_str).is_some_and(|url| {
+        let lower = url.trim().to_ascii_lowercase();
+        (lower.starts_with("https://") && lower.len() > 8)
+            || (lower.starts_with("http://") && lower.len() > 7)
+    })
+}
+
+/// The uploaded file's name (`session://<id>/<name>`, `attachment://<name>`),
+/// else the reference as written.
+fn media_name(media: Option<&Value>) -> String {
+    let url = media
+        .and_then(|m| m.get("url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if url.is_empty() {
+        return "a picture with no link".into();
+    }
+    let name = url
+        .strip_prefix("session://")
+        .and_then(|rest| rest.split_once('/').map(|(_, n)| n))
+        .or_else(|| url.strip_prefix("attachment://"))
+        .filter(|n| !n.is_empty())
+        .unwrap_or(url);
+    name.chars().take(80).collect()
+}
+
+/// True when `{directory}` sits in a button label or menu placeholder.
+fn tree_has_list_token_in_short_field(v: &Value) -> bool {
+    let token = format!("{{{TOKEN_LIST}}}");
+    match v {
+        Value::Array(a) => a.iter().any(tree_has_list_token_in_short_field),
+        Value::Object(o) => {
+            ["label", "placeholder"].iter().any(|field| {
+                o.get(*field)
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| s.contains(&token))
+            }) || o.values().any(tree_has_list_token_in_short_field)
+        }
+        _ => false,
+    }
 }
 
 /// True when any user-text field in the tree carries one of our tokens. Mirrors
@@ -169,6 +290,16 @@ fn validate_roles_mode(cfg: &InstanceConfig) -> Result<(), String> {
         }
         if group.role_ids.len() > MAX_ROLES {
             return Err(format!("A group can hold at most {MAX_ROLES} roles."));
+        }
+        // A group's emoji becomes its menu option's emoji, and Discord refuses
+        // the whole message over one it doesn't recognise.
+        if let Some(emoji) = group.emoji.as_deref().filter(|e| !e.trim().is_empty()) {
+            if !looks_like_emoji(emoji) {
+                return Err(format!(
+                    "The emoji for \"{}\" isn't a single emoji. Paste one emoji, like 🛡️, or leave it empty.",
+                    display_name(&group.name, "Untitled")
+                ));
+            }
         }
     }
     // Duplicate keys would make two select options resolve to the same section.
@@ -636,5 +767,111 @@ mod tests {
             })
             .collect();
         assert!(validate_config(&cfg).unwrap_err().contains("at most"));
+    }
+
+    /// An id past 64 bits is one Discord can't parse; the config API answers
+    /// anyone, so it must be refused here rather than sent to Discord.
+    #[test]
+    fn a_snowflake_must_fit_in_64_bits() {
+        assert!(is_snowflake("18446744073709551615"));
+        assert!(!is_snowflake("18446744073709551616"));
+        assert!(!is_snowflake("99999999999999999999999"));
+        assert!(
+            !is_snowflake("1234567890123456"),
+            "16 digits is no snowflake"
+        );
+    }
+
+    /// A picture uploaded from the author's computer exists only in their
+    /// browser, and every refresh would re-send it — Discord refuses the whole
+    /// edit over one picture it can't fetch.
+    #[test]
+    fn an_in_message_template_with_a_browser_upload_is_refused() {
+        let cfg = with_message_output(serde_json::json!([{
+            "type": 17,
+            "components": [
+                { "type": 9,
+                  "components": [{ "type": 10, "content": "# Staff" }],
+                  "accessory": { "type": 11, "media": { "url": "session://365f8d9a61bd419e/banner.png" } } },
+                { "type": 10, "content": "{directory}" }
+            ]
+        }]));
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.contains("banner.png"), "{err}");
+
+        // A File component can't ride in a refresh whatever its link says.
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "{directory}" },
+            { "type": 13, "file": { "url": "https://cdn.discordapp.com/attachments/1/2/rules.pdf" } }
+        ]));
+        assert!(validate_config(&cfg).unwrap_err().contains("rules.pdf"));
+
+        // A linked picture is fine.
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "{directory}" },
+            { "type": 12, "items": [{ "media": { "url": "https://example.com/a.png" } }] }
+        ]));
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
+    }
+
+    /// `{directory}` in a button label would put a multi-line list into an
+    /// 80-character, single-line field.
+    #[test]
+    fn the_list_token_is_refused_in_a_label_or_placeholder() {
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "Staff" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "{directory}", "custom_id": "directory:x" }
+            ]}
+        ]));
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.contains("message text"), "{err}");
+
+        // The short tokens are fine there.
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "{directory}" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Refresh ({directory_count})", "custom_id": "directory:x" }
+            ]}
+        ]));
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
+    }
+
+    /// The author's own text must leave the list somewhere to go.
+    #[test]
+    fn a_message_that_leaves_no_room_for_the_list_is_refused() {
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": format!("{}\n{{directory}}", "a".repeat(3900)) }
+        ]));
+        assert!(validate_config(&cfg).unwrap_err().contains("4000"));
+        // 2500 characters of prose still leaves the list ~1500.
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": format!("{}\n{{directory}}", "a".repeat(2500)) }
+        ]));
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
+    }
+
+    /// A group's emoji is wired onto its menu option, and Discord refuses the
+    /// whole message over one it doesn't recognise.
+    #[test]
+    fn a_group_emoji_must_be_one_emoji() {
+        for (emoji, ok) in [
+            ("🛡️", true),
+            ("👨‍👩‍👧‍👦", true),
+            ("1️⃣", true),
+            (":shield:", false),
+            ("<:mod:123456789012345678>", false),
+            ("mod", false),
+            ("🛡️ 👑", false),
+        ] {
+            let mut cfg = base_config();
+            cfg.groups = vec![Group {
+                key: "g1".into(),
+                name: "Staff".into(),
+                emoji: Some(emoji.into()),
+                role_ids: vec![good_role_id()],
+            }];
+            assert_eq!(validate_config(&cfg).is_ok(), ok, "{emoji:?}");
+        }
     }
 }

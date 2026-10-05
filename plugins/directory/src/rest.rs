@@ -45,9 +45,10 @@ const API_BASE: &str = "https://discord.com/api/v10";
 
 const PERM_KICK_MEMBERS: u64 = 1 << 1;
 const PERM_BAN_MEMBERS: u64 = 1 << 2;
-const PERM_ADMINISTRATOR: u64 = 1 << 3;
+pub const PERM_ADMINISTRATOR: u64 = 1 << 3;
 const PERM_MANAGE_CHANNELS: u64 = 1 << 4;
 const PERM_MANAGE_GUILD: u64 = 1 << 5;
+const PERM_VIEW_CHANNEL: u64 = 1 << 10;
 const PERM_MANAGE_MESSAGES: u64 = 1 << 13;
 const PERM_MANAGE_ROLES: u64 = 1 << 28;
 const PERM_MODERATE_MEMBERS: u64 = 1 << 40;
@@ -118,6 +119,10 @@ pub enum ConnectError {
     /// Discord answered 5xx, or the connection dropped mid-flight. Transient,
     /// and theirs.
     Upstream,
+    /// 400 — Discord refused the id itself (one that passes a digit check but
+    /// not Discord's). These reads are bodiless GETs, so the path's ids are the
+    /// only thing a 400 can be about: the caller's.
+    InvalidId,
     /// Couldn't connect to Discord at all (DNS, refused, TLS), or its reply
     /// wasn't the shape we expect — this host's network, or our code.
     Network,
@@ -141,6 +146,9 @@ impl ConnectError {
             ConnectError::Upstream => {
                 "Discord is having trouble right now — try again in a moment.".into()
             }
+            ConnectError::InvalidId => {
+                "Discord doesn't recognise that server id — pick the server again from the list.".into()
+            }
             ConnectError::Network => {
                 "Couldn't reach Discord just now — try again in a moment.".into()
             }
@@ -162,6 +170,9 @@ impl ConnectError {
             ConnectError::BadToken => StatusCode::INTERNAL_SERVER_ERROR,
             ConnectError::BotNotInGuild => StatusCode::NOT_FOUND,
             ConnectError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            // The caller sent an id Discord can't parse — anyone can, since
+            // `/api/connect` is open, so as a 5xx it would page on demand.
+            ConnectError::InvalidId => StatusCode::BAD_REQUEST,
             // Discord took the request and ran long: theirs — logged, not paged.
             ConnectError::Timeout => StatusCode::GATEWAY_TIMEOUT,
             // Discord answered 5xx or hung up mid-flight: theirs — logged, not paged.
@@ -178,6 +189,11 @@ impl ConnectError {
         match self {
             ConnectError::BotNotInGuild => {
                 "I can't read this server's list — an admin needs to re-add the DWEEB bot."
+            }
+            // A stored id is validated at save, so this needs an admin to set
+            // the list up again rather than the member to retry.
+            ConnectError::InvalidId => {
+                "This list can't read its server — an admin needs to set it up again."
             }
             // Every transient Discord failure reads the same to a member: none
             // of them is anything they — or an admin — can act on beyond retrying.
@@ -213,6 +229,20 @@ pub struct RoleView {
     /// A role's own unicode emoji, when it has one (shown before the name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unicode_emoji: Option<String>,
+    /// The role's raw permission bits — what a clicker's channel visibility is
+    /// computed from. Server-side only: the config UI gets the badges instead.
+    #[serde(skip)]
+    pub permissions: u64,
+}
+
+/// One channel permission overwrite, parsed for visibility checks.
+#[derive(Debug, Clone)]
+pub struct Overwrite {
+    /// A role id (the guild id for @everyone) or, when `member`, a user id.
+    pub id: String,
+    pub member: bool,
+    pub allow: u64,
+    pub deny: u64,
 }
 
 /// One channel, as both the config picker and the renderer need it.
@@ -228,6 +258,26 @@ pub struct ChannelView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
     pub nsfw: bool,
+    /// Whether a member holding no role at all — `@everyone` — can see this
+    /// channel. A bot can read every channel of a server, private ones included,
+    /// so this is what keeps a staff room's name and topic out of a list that
+    /// everyone reads (see [`crate::render`]).
+    pub everyone_can_view: bool,
+    /// The channel's permission overwrites, for working out what one particular
+    /// clicker can see. Server-side only.
+    #[serde(skip)]
+    pub overwrites: Vec<Overwrite>,
+}
+
+/// Who a private (ephemeral) answer is for — enough to work out which channels
+/// that one member can see.
+#[derive(Debug, Clone, Default)]
+pub struct Viewer {
+    pub user_id: String,
+    pub role_ids: Vec<String>,
+    /// Discord says the clicker is an administrator (or the owner), who sees
+    /// every channel whatever its overwrites say.
+    pub admin: bool,
 }
 
 /// A guild's structure: everything a directory reads, in one value.
@@ -251,6 +301,10 @@ pub struct GuildStructure {
     /// Tracked separately because Discord may send one without the other.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online_count: Option<u64>,
+    /// `@everyone`'s server-wide permission bits — the base every member's
+    /// channel visibility starts from. Server-side only.
+    #[serde(skip)]
+    pub everyone_permissions: u64,
 }
 
 impl GuildStructure {
@@ -260,6 +314,62 @@ impl GuildStructure {
     pub fn channel(&self, id: &str) -> Option<&ChannelView> {
         self.channels.iter().find(|c| c.id == id)
     }
+
+    /// Whether `viewer` can see `channel`, computed the way Discord does: the
+    /// server-wide permissions of `@everyone` plus every role they hold, an
+    /// administrator seeing everything, then the channel's `@everyone`
+    /// overwrite, their roles' overwrites, and their own member overwrite.
+    pub fn viewer_can_view(&self, channel: &ChannelView, viewer: &Viewer) -> bool {
+        if viewer.admin {
+            return true;
+        }
+        let base = self
+            .roles
+            .iter()
+            .filter(|r| viewer.role_ids.contains(&r.id))
+            .fold(self.everyone_permissions, |bits, r| bits | r.permissions);
+        let perms = channel_permissions(
+            base,
+            &channel.overwrites,
+            &self.guild_id,
+            &viewer.role_ids,
+            Some(&viewer.user_id),
+        );
+        perms & PERM_VIEW_CHANNEL != 0
+    }
+}
+
+/// A member's permissions in one channel, from their server-wide `base` and the
+/// channel's overwrites (Discord's documented order: `@everyone`, then the
+/// member's roles together, then the member themselves).
+fn channel_permissions(
+    base: u64,
+    overwrites: &[Overwrite],
+    guild_id: &str,
+    role_ids: &[String],
+    user_id: Option<&str>,
+) -> u64 {
+    if base & PERM_ADMINISTRATOR != 0 {
+        return u64::MAX;
+    }
+    let mut perms = base;
+    if let Some(ow) = overwrites.iter().find(|o| !o.member && o.id == guild_id) {
+        perms &= !ow.deny;
+        perms |= ow.allow;
+    }
+    let (allow, deny) = overwrites
+        .iter()
+        .filter(|o| !o.member && o.id != guild_id && role_ids.contains(&o.id))
+        .fold((0u64, 0u64), |(a, d), o| (a | o.allow, d | o.deny));
+    perms &= !deny;
+    perms |= allow;
+    if let Some(uid) = user_id {
+        if let Some(ow) = overwrites.iter().find(|o| o.member && o.id == uid) {
+            perms &= !ow.deny;
+            perms |= ow.allow;
+        }
+    }
+    perms
 }
 
 /// Everything `POST /api/connect` returns on success.
@@ -328,6 +438,31 @@ struct RawChannel {
     topic: Option<String>,
     #[serde(default)]
     nsfw: bool,
+    #[serde(default)]
+    permission_overwrites: Vec<RawOverwrite>,
+}
+
+#[derive(Deserialize)]
+struct RawOverwrite {
+    id: String,
+    /// 0 = role, 1 = member.
+    #[serde(rename = "type", default)]
+    kind: u8,
+    #[serde(default)]
+    allow: String,
+    #[serde(default)]
+    deny: String,
+}
+
+impl RawOverwrite {
+    fn parse(self) -> Overwrite {
+        Overwrite {
+            id: self.id,
+            member: self.kind == 1,
+            allow: self.allow.parse().unwrap_or(0),
+            deny: self.deny.parse().unwrap_or(0),
+        }
+    }
 }
 
 fn auth(token: &str) -> String {
@@ -371,6 +506,7 @@ fn role_view(raw: RawRole, guild_id: &str) -> Option<RoleView> {
         staff: bits & STAFF_PERMISSIONS != 0,
         badges: permission_badges(bits),
         unicode_emoji: raw.unicode_emoji.filter(|e| !e.is_empty()),
+        permissions: bits,
     })
 }
 
@@ -396,6 +532,14 @@ pub async fn fetch_structure(
         get_json(http, token, &channels_url),
     )?;
 
+    // @everyone (its id is the guild's) never appears in a roster, but its
+    // permissions are every member's baseline — what channel visibility starts
+    // from — so read them before `role_view` drops the role.
+    let everyone_permissions: u64 = roles
+        .iter()
+        .find(|r| r.id == guild_id)
+        .and_then(|r| r.permissions.parse().ok())
+        .unwrap_or(0);
     let mut role_views: Vec<RoleView> = roles
         .into_iter()
         .filter_map(|r| role_view(r, guild_id))
@@ -410,14 +554,27 @@ pub async fn fetch_structure(
 
     let mut channel_views: Vec<ChannelView> = channels
         .into_iter()
-        .map(|c| ChannelView {
-            id: c.id,
-            name: c.name,
-            kind: c.kind,
-            parent_id: c.parent_id,
-            position: c.position,
-            topic: c.topic.filter(|t| !t.trim().is_empty()),
-            nsfw: c.nsfw,
+        .map(|c| {
+            let overwrites: Vec<Overwrite> = c
+                .permission_overwrites
+                .into_iter()
+                .map(RawOverwrite::parse)
+                .collect();
+            let everyone_can_view =
+                channel_permissions(everyone_permissions, &overwrites, guild_id, &[], None)
+                    & PERM_VIEW_CHANNEL
+                    != 0;
+            ChannelView {
+                id: c.id,
+                name: c.name,
+                kind: c.kind,
+                parent_id: c.parent_id,
+                position: c.position,
+                topic: c.topic.filter(|t| !t.trim().is_empty()),
+                nsfw: c.nsfw,
+                everyone_can_view,
+                overwrites,
+            }
         })
         .collect();
     channel_views.sort_by(|a, b| {
@@ -433,7 +590,21 @@ pub async fn fetch_structure(
         channels: channel_views,
         member_count: guild.approximate_member_count,
         online_count: guild.approximate_presence_count,
+        everyone_permissions,
     })
+}
+
+/// What `POST /api/connect` may hand to the config UI. That route answers
+/// anyone who names a server the bot is in, so a channel `@everyone` can't see
+/// keeps its name (the pickers need it, and it's tagged hidden there) but not
+/// its topic, which is the part a private room most often holds secrets in.
+pub fn redact_hidden_topics(mut structure: GuildStructure) -> GuildStructure {
+    for channel in &mut structure.channels {
+        if !channel.everyone_can_view {
+            channel.topic = None;
+        }
+    }
+    structure
 }
 
 /// Who is the bot? One call, used by the config UI to name the account a host
@@ -468,13 +639,22 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
     if status.is_success() {
         return resp.json::<T>().await.map_err(body_error);
     }
-    Err(match status.as_u16() {
+    Err(status_error(status.as_u16()))
+}
+
+/// What a non-2xx answer from Discord means for the caller.
+fn status_error(status: u16) -> ConnectError {
+    match status {
         401 => ConnectError::BadToken,
+        // A GET carries no body, so a 400 is about the id in its path — the
+        // caller's input, never a fault of ours (see `InvalidId`). The config
+        // API is unauthenticated, so an unparseable id must not be a way to page.
+        400 => ConnectError::InvalidId,
         403 | 404 => ConnectError::BotNotInGuild,
         429 => ConnectError::RateLimited,
         500..=599 => ConnectError::Upstream,
         _ => ConnectError::Network,
-    })
+    }
 }
 
 /// Classify a transport failure reaching Discord. `is_connect()` is checked
@@ -645,7 +825,12 @@ mod tests {
             ConnectError::RateLimited.status(),
             StatusCode::TOO_MANY_REQUESTS
         );
-        for e in [ConnectError::BotNotInGuild, ConnectError::RateLimited] {
+        assert_eq!(ConnectError::InvalidId.status(), StatusCode::BAD_REQUEST);
+        for e in [
+            ConnectError::BotNotInGuild,
+            ConnectError::RateLimited,
+            ConnectError::InvalidId,
+        ] {
             assert!(
                 !e.status().is_server_error(),
                 "{e:?} must not be reported as a server error"
@@ -799,6 +984,7 @@ mod tests {
             ConnectError::RateLimited,
             ConnectError::Timeout,
             ConnectError::Upstream,
+            ConnectError::InvalidId,
             ConnectError::Network,
         ] {
             assert!(!e.message().trim().is_empty(), "{e:?} has no admin message");
@@ -948,6 +1134,159 @@ mod tests {
         // Overwriting an existing key must not trigger an eviction.
         cache.put("c".into(), std::sync::Arc::new(4));
         assert_eq!(cache.get("c").map(|v| *v), Some(4));
+    }
+
+    /// An unauthenticated caller naming an id Discord can't parse gets Discord's
+    /// 400. That is the caller's mistake and must answer 4xx — a 5xx here would
+    /// let anyone page the maintainer on demand.
+    #[test]
+    fn a_400_from_discord_is_the_callers_mistake_not_a_page() {
+        let e = status_error(400);
+        assert_eq!(e, ConnectError::InvalidId);
+        assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+        // A 4xx never reaches the failure classifier, so it can never page.
+        assert!(!e.status().is_server_error());
+        assert_eq!(status_error(403), ConnectError::BotNotInGuild);
+        assert_eq!(status_error(404), ConnectError::BotNotInGuild);
+        assert_eq!(status_error(401), ConnectError::BadToken);
+        assert_eq!(status_error(503), ConnectError::Upstream);
+    }
+
+    const GUILD: &str = "100000000000000000";
+    const MOD_ROLE: &str = "200000000000000001";
+    const MEMBER_ROLE: &str = "200000000000000002";
+
+    fn ow(id: &str, member: bool, allow: u64, deny: u64) -> Overwrite {
+        Overwrite {
+            id: id.into(),
+            member,
+            allow,
+            deny,
+        }
+    }
+
+    fn view_role(id: &str, permissions: u64) -> RoleView {
+        RoleView {
+            id: id.into(),
+            name: id.into(),
+            color: 0,
+            position: 1,
+            hoist: false,
+            managed: false,
+            staff: false,
+            badges: vec![],
+            unicode_emoji: None,
+            permissions,
+        }
+    }
+
+    fn view_channel(overwrites: Vec<Overwrite>, everyone_bits: u64) -> ChannelView {
+        let everyone_can_view = channel_permissions(everyone_bits, &overwrites, GUILD, &[], None)
+            & PERM_VIEW_CHANNEL
+            != 0;
+        ChannelView {
+            id: "300000000000000001".into(),
+            name: "mod-logs".into(),
+            kind: CHANNEL_TEXT,
+            parent_id: None,
+            position: 0,
+            topic: Some("ban appeals and evidence".into()),
+            nsfw: false,
+            everyone_can_view,
+            overwrites,
+        }
+    }
+
+    fn guild_with(everyone_bits: u64, channels: Vec<ChannelView>) -> GuildStructure {
+        GuildStructure {
+            guild_id: GUILD.into(),
+            guild_name: "Test".into(),
+            roles: vec![
+                view_role(MOD_ROLE, PERM_BAN_MEMBERS),
+                view_role(MEMBER_ROLE, 0),
+            ],
+            channels,
+            member_count: None,
+            online_count: None,
+            everyone_permissions: everyone_bits,
+        }
+    }
+
+    /// A staff room — `@everyone` denied View, the mod role allowed it — is
+    /// hidden from everyone and visible to exactly the people Discord shows it
+    /// to: a moderator, an administrator, and a member granted it personally.
+    #[test]
+    fn channel_visibility_follows_discords_overwrite_order() {
+        let staff_room = view_channel(
+            vec![
+                ow(GUILD, false, 0, PERM_VIEW_CHANNEL),
+                ow(MOD_ROLE, false, PERM_VIEW_CHANNEL, 0),
+                ow("400000000000000001", true, PERM_VIEW_CHANNEL, 0),
+            ],
+            PERM_VIEW_CHANNEL,
+        );
+        assert!(!staff_room.everyone_can_view);
+        let guild = guild_with(PERM_VIEW_CHANNEL, vec![staff_room.clone()]);
+
+        let viewer = |user: &str, roles: &[&str], admin: bool| Viewer {
+            user_id: user.into(),
+            role_ids: roles.iter().map(|r| r.to_string()).collect(),
+            admin,
+        };
+        let member = viewer("400000000000000009", &[MEMBER_ROLE], false);
+        let moderator = viewer("400000000000000008", &[MOD_ROLE], false);
+        let admin = viewer("400000000000000007", &[], true);
+        let granted = viewer("400000000000000001", &[MEMBER_ROLE], false);
+        assert!(!guild.viewer_can_view(&staff_room, &member));
+        assert!(guild.viewer_can_view(&staff_room, &moderator));
+        assert!(guild.viewer_can_view(&staff_room, &admin));
+        assert!(guild.viewer_can_view(&staff_room, &granted));
+
+        // A member overwrite denying View beats a role allowing it.
+        let blocked = view_channel(
+            vec![
+                ow(MOD_ROLE, false, PERM_VIEW_CHANNEL, 0),
+                ow("400000000000000008", true, 0, PERM_VIEW_CHANNEL),
+            ],
+            0,
+        );
+        assert!(!guild_with(0, vec![]).viewer_can_view(&blocked, &moderator));
+
+        // A server where @everyone can't see channels at all (a verification
+        // gate) and the member role grants View server-wide.
+        let gated = view_channel(vec![], 0);
+        assert!(!gated.everyone_can_view);
+        let mut gated_guild = guild_with(0, vec![]);
+        gated_guild.roles[1].permissions = PERM_VIEW_CHANNEL;
+        assert!(gated_guild.viewer_can_view(&gated, &member));
+    }
+
+    /// `/api/connect` answers anyone naming a server the bot is in, so a hidden
+    /// channel's topic never leaves through it; a public channel's does.
+    #[test]
+    fn connect_never_hands_out_a_hidden_channels_topic() {
+        let hidden = view_channel(
+            vec![ow(GUILD, false, 0, PERM_VIEW_CHANNEL)],
+            PERM_VIEW_CHANNEL,
+        );
+        let mut public = view_channel(vec![], PERM_VIEW_CHANNEL);
+        public.id = "300000000000000002".into();
+        public.name = "general".into();
+        public.topic = Some("anything goes".into());
+        assert!(public.everyone_can_view && !hidden.everyone_can_view);
+        let redacted = redact_hidden_topics(guild_with(PERM_VIEW_CHANNEL, vec![hidden, public]));
+        assert_eq!(redacted.channels[0].topic, None);
+        assert_eq!(
+            redacted.channels[0].name, "mod-logs",
+            "the picker still needs the name"
+        );
+        assert!(redacted.channels[1].topic.is_some());
+        let json = serde_json::to_string(&redacted).unwrap();
+        assert!(!json.contains("ban appeals"), "{json}");
+        assert!(
+            !json.contains("overwrites"),
+            "server-side detail leaked: {json}"
+        );
     }
 
     #[test]

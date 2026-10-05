@@ -41,7 +41,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "directory",
             "name": "Directory",
-            "description": "Answer a click with a live list of the server — a grouped staff roster (roles, permission badges, who holds them) or a channel index with each channel's topic. Read-only, always current.",
+            "description": "Answer a click with a live list of the server — a grouped staff roster (roles and permission badges) or a channel index with each channel's topic. Read-only, always current.",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/directory",
@@ -141,7 +141,7 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
     state.cache.invalidate(guild_id);
 
     Json(json!(rest::ConnectResult {
-        structure,
+        structure: rest::redact_hidden_topics(structure),
         bot_id,
         bot_name,
     }))
@@ -216,15 +216,52 @@ pub async fn update_instance(
     }
 }
 
-/// Read an instance for the config UI. A directory holds no secret — the bot is
-/// the deployment's, and there is no webhook — so nothing needs masking.
-pub async fn get_instance(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    match state.store.get(&id) {
-        Ok(Some(config)) => Json(MaskedInstance { id, config }).into_response(),
-        Ok(None) => not_found(),
+/// Read an instance for the config UI.
+///
+/// The id is public — it sits in the component's `custom_id`, which every member
+/// who can see the message can read — so it can't decide who sees what. A list
+/// open to everyone holds nothing a click wouldn't show anyway. A list limited to
+/// certain roles is another matter: its notes, picks and wording are for those
+/// roles, so they're only handed to the browser holding the edit token. Anyone
+/// else gets a 403 the config UI turns into "set it up again" (saving then
+/// creates a replacement, as it already must without the token).
+pub async fn get_instance(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let config = match state.store.get(&id) {
+        Ok(Some(config)) => config,
+        Ok(None) => return not_found(),
         Err(e) => {
             tracing::error!(error = %e, "get instance");
-            storage_error()
+            return storage_error();
+        }
+    };
+    if !config.requirements.roles.is_empty() && !may_read_private(&state, &id, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "This list is limited to certain roles, so its settings only open in the browser that created it.",
+                "locked": true,
+            })),
+        )
+            .into_response();
+    }
+    Json(MaskedInstance { id, config }).into_response()
+}
+
+/// Whether this request carries the instance's edit token.
+fn may_read_private(state: &AppState, id: &str, headers: &HeaderMap) -> bool {
+    let Some(token) = edit_token_from_headers(headers) else {
+        return false;
+    };
+    match state.store.authorize_edit(id, token) {
+        Ok(EditLookup::Authorized) => true,
+        Ok(_) => false,
+        Err(e) => {
+            tracing::error!(error = %e, "read authorization lookup");
+            false
         }
     }
 }
@@ -336,16 +373,21 @@ async fn handle_component(state: &AppState, interaction: discord::Interaction) -
     //  • "message" — re-stamp the author's own message, so everyone sees the fresh
     //                list without clicking anything.
     let section = interaction.picked_section().map(|s| s.to_string());
+    let viewer = interaction.viewer();
 
     if cfg.writes_to_message() {
         return message_output(state, cfg, token, interaction, section).await;
     }
 
-    inline_reply(state, &cfg, &token, section.as_deref()).await
+    inline_reply(state, &cfg, &token, section.as_deref(), viewer.as_ref()).await
 }
 
 /// `"message"` output: re-render the author's message from its stored template, so
 /// the list everyone can already see becomes current.
+///
+/// Every way this can't be done safely answers the clicker with the list in a
+/// reply instead and leaves the message exactly as it is — never a refresh that
+/// Discord would refuse, or one that leaves the message worse than before.
 async fn message_output(
     state: &AppState,
     cfg: InstanceConfig,
@@ -353,57 +395,77 @@ async fn message_output(
     interaction: discord::Interaction,
     section: Option<String>,
 ) -> Response {
+    let viewer = interaction.viewer();
     // A normalized config can't reach here without a template (see
     // `validate::validate_output`), but a row written by an older build could.
     // Falling back to a reply keeps such a click useful instead of dead.
     let Some(template) = cfg.message_template.clone() else {
         tracing::info!("message-output directory has no template; replying instead");
-        return inline_reply(state, &cfg, &token, section.as_deref()).await;
+        return inline_reply(state, &cfg, &token, section.as_deref(), viewer.as_ref()).await;
     };
-    let message = interaction.message.unwrap_or_default();
+    // A template saved before uploads were refused can still name a picture
+    // that only ever existed in the author's browser. Discord refuses the whole
+    // edit over it, so re-stamping would just fail the click.
+    if !validate::unsendable_media(&template).is_empty() {
+        tracing::info!(
+            "message-output template holds media a refresh can't send; replying instead"
+        );
+        return inline_reply(state, &cfg, &token, section.as_deref(), viewer.as_ref()).await;
+    }
 
-    let vars = build_vars(state, &cfg, &token, section.as_deref()).await;
-    let components = discord::render_template(&template, &vars);
-    Json(discord::update_message(&message, components)).into_response()
-}
-
-/// Read the server and render the list as text for `{directory}` & co.
-async fn build_vars(
-    state: &AppState,
-    cfg: &InstanceConfig,
-    token: &str,
-    section: Option<&str>,
-) -> discord::RenderVars {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    // A failed read must not be written into the message everyone reads: the
+    // list would become an error sentence (and the count a false "0") until the
+    // next good click. Tell the clicker instead; the message keeps its last list.
     let structure = match state
         .cache
-        .structure(&state.http, token, &cfg.guild_id)
+        .structure(&state.http, &token, &cfg.guild_id)
         .await
     {
         Ok(s) => s,
         Err(e) => {
             tracing::info!(guild_id = %cfg.guild_id, error = ?e, "structure read failed");
-            // Keep the author's message readable: the token resolves to a short
-            // note rather than vanishing or decaying to a literal `{directory}`.
-            return discord::RenderVars {
-                list: e.member_message().to_string(),
-                count: 0,
-                updated_unix: now,
-            };
+            return Json(discord::ephemeral_text(e.member_message())).into_response();
         }
     };
-    let text = render::render_text(&RenderInput {
-        cfg,
-        structure: &structure,
-        section,
-    });
-    discord::RenderVars {
-        list: text.list,
-        count: text.count,
-        updated_unix: now,
+    let text = discord::template_text(&template);
+    let listed = render::render_text_within(
+        &RenderInput {
+            cfg: &cfg,
+            structure: &structure,
+            section: section.as_deref(),
+            viewer: None,
+        },
+        render::inline_budget(text.fixed_units, text.list_slots),
+    );
+    let vars = discord::RenderVars {
+        list: listed.list,
+        count: listed.count,
+        updated_unix: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+    };
+
+    let message = interaction.message.as_ref();
+    let restamped = discord::restamp_components(
+        &template,
+        &vars,
+        message.and_then(|m| m.components.as_ref()),
+        interaction.custom_id(),
+    );
+    match (restamped, message) {
+        (Some(components), Some(message)) => {
+            Json(discord::update_message(message, components)).into_response()
+        }
+        _ => {
+            // The message changed shape since this was configured, so the
+            // template no longer lines up with it — re-stamping could unbind its
+            // buttons. Saving the configuration again captures the new layout.
+            tracing::info!(
+                "message-output template no longer matches the message; replying instead"
+            );
+            inline_reply(state, &cfg, &token, section.as_deref(), viewer.as_ref()).await
+        }
     }
 }
 
@@ -412,9 +474,13 @@ async fn inline_reply(
     cfg: &InstanceConfig,
     token: &str,
     section: Option<&str>,
+    viewer: Option<&rest::Viewer>,
 ) -> Response {
-    let components = build_components(state, cfg, token, section).await;
-    Json(discord::message_reply(components, cfg.public)).into_response()
+    let components = build_components(state, cfg, token, section, viewer).await;
+    // An in-message directory falling back to a reply answers only the clicker:
+    // its list was meant for the shared message, which is untouched.
+    let public = cfg.public && !cfg.writes_to_message();
+    Json(discord::message_reply(components, public)).into_response()
 }
 
 /// Read what this directory needs and render it.
@@ -427,6 +493,7 @@ async fn build_components(
     cfg: &InstanceConfig,
     token: &str,
     section: Option<&str>,
+    viewer: Option<&rest::Viewer>,
 ) -> Vec<Value> {
     let structure = match state
         .cache
@@ -449,6 +516,7 @@ async fn build_components(
         cfg,
         structure: &structure,
         section,
+        viewer,
     })
 }
 
@@ -660,6 +728,89 @@ mod tests {
         let good = "a1b2c3d4".repeat(8);
         headers.insert(EDIT_TOKEN_HEADER, good.parse().unwrap());
         assert_eq!(edit_token_from_headers(&headers), Some(good.as_str()));
+    }
+
+    fn test_state() -> AppState {
+        const KEY: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+        let config = Config {
+            port: 0,
+            public_base_url: String::new(),
+            discord_public_key: KEY.into(),
+            dispatcher_forward_secret: None,
+            database_path: String::new(),
+            default_bot_token: None,
+            bot_invite_url: None,
+            structure_cache_secs: 0,
+            cache_max_guilds: 1,
+        };
+        AppState {
+            store: Arc::new(Store::open(":memory:").unwrap()),
+            cache: Arc::new(Cache::new(&config)),
+            http: reqwest::Client::new(),
+            config: Arc::new(config),
+            primary_key: discord::parse_verifying_key(KEY).unwrap(),
+        }
+    }
+
+    async fn read(state: &AppState, id: &str, token: Option<&str>) -> (StatusCode, String) {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = token {
+            headers.insert(EDIT_TOKEN_HEADER, token.parse().unwrap());
+        }
+        let resp = get_instance(State(state.clone()), Path(id.to_string()), headers).await;
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// The instance id is public — it's in the component's `custom_id`. A list
+    /// limited to certain roles must not hand its notes and picks to anyone who
+    /// read that id; only the browser holding the edit token gets them.
+    #[tokio::test]
+    async fn a_role_limited_list_only_opens_with_its_edit_token() {
+        use crate::store::{Note, RoleRef};
+        let state = test_state();
+        let token = "a".repeat(64);
+        let mut cfg = crate::store::tests::base_config();
+        cfg.roles = vec![RoleRef {
+            id: "123456789012345678".into(),
+            name: "Mod".into(),
+            color: 0,
+        }];
+        cfg.notes = vec![Note {
+            id: "123456789012345678".into(),
+            text: "handles ban appeals in #secret-room".into(),
+        }];
+        cfg.requirements.roles = vec![RoleRef {
+            id: "223456789012345678".into(),
+            name: "Staff".into(),
+            color: 0,
+        }];
+        state.store.create("gated", &token, &cfg).unwrap();
+
+        let (status, body) = read(&state, "gated", None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!body.contains("secret-room"), "{body}");
+        assert!(body.contains("\"locked\":true"), "{body}");
+
+        let (status, _) = read(&state, "gated", Some(&"b".repeat(64))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a wrong token reads nothing");
+
+        let (status, body) = read(&state, "gated", Some(&token)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("secret-room"), "{body}");
+
+        // A list open to everyone holds nothing a click wouldn't show.
+        let mut open = cfg.clone();
+        open.requirements.roles.clear();
+        state.store.create("open", &token, &open).unwrap();
+        let (status, body) = read(&state, "open", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("secret-room"), "{body}");
+
+        assert_eq!(read(&state, "missing", None).await.0, StatusCode::NOT_FOUND);
     }
 
     #[test]
