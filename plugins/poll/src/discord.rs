@@ -729,6 +729,32 @@ pub struct BoundPatch {
     pub label: Option<String>,
     pub placeholder: Option<String>,
     pub disabled: bool,
+    /// A select poll's options and pick bounds, written from the poll's own
+    /// config (see [`SelectWiring`]). `None` for a button.
+    pub select: Option<SelectWiring>,
+}
+
+/// The option list and pick bounds a bound select must carry — always taken
+/// from the poll's config, never from the stored template. The template is
+/// captured *before* DWEEB writes the options onto the select (one save behind,
+/// or the editor's factory `option_1`/`option_2` on a first save), so
+/// re-rendering its options would revert the posted select on the first vote:
+/// stale labels counting toward renamed options, added options gone, a
+/// multi-pick poll back to single pick, every later pick "options have changed".
+pub struct SelectWiring {
+    pub options: Vec<Value>,
+    pub max_values: u64,
+}
+
+/// The [`SelectWiring`] for a poll: one public option per poll option (the same
+/// shape DWEEB wires at save — label, the stable key as value, description,
+/// emoji), and `max_values` = the ballot's pick cap.
+pub fn select_wiring(options: &[PollOption], max_choices: u32) -> SelectWiring {
+    let max = (max_choices.max(1) as usize).min(options.len().max(1)) as u64;
+    SelectWiring {
+        options: options.iter().map(|o| panel_option(o, false)).collect(),
+        max_values: max,
+    }
 }
 
 /// The current label of the button with this `custom_id`, found anywhere in the
@@ -806,6 +832,11 @@ fn apply_patch(o: &mut Map<String, Value>, custom_id: &str, patch: &BoundPatch) 
                 json!(clamp(placeholder, MAX_PLACEHOLDER)),
             );
         }
+        if let Some(wiring) = &patch.select {
+            o.insert("options".into(), json!(wiring.options));
+            o.insert("min_values".into(), json!(1));
+            o.insert("max_values".into(), json!(wiring.max_values));
+        }
     }
     o.insert("disabled".into(), json!(patch.disabled));
 }
@@ -819,47 +850,111 @@ fn is_bindable_component(o: &Map<String, Value>) -> bool {
         && o.contains_key("custom_id")
 }
 
-/// Patch the first bindable component found (depth-first), pinning it to
-/// `custom_id`. Returns whether one was patched. Fallback for a freshly-attached
-/// template that still carries the editor's default id.
-fn patch_first_bindable(tree: &mut Value, custom_id: &str, patch: &BoundPatch) -> bool {
-    match tree {
-        Value::Array(a) => a
-            .iter_mut()
-            .any(|item| patch_first_bindable(item, custom_id, patch)),
-        Value::Object(o) => {
-            if is_bindable_component(o) {
-                apply_patch(o, custom_id, patch);
-                return true;
-            }
-            o.values_mut()
-                .any(|val| patch_first_bindable(val, custom_id, patch))
-        }
-        _ => false,
-    }
-}
-
 /// Render the bound poll message from its stored `template` (the host's own
 /// message, captured with raw `{tokens}`): substitute every Text Display
 /// content, button label and select placeholder, then restyle the bound
-/// component (patch + pin its `custom_id`). Returns the component tree for an
-/// `UPDATE_MESSAGE`. Pure — the template is cloned, never mutated.
+/// component (patch + pin its `custom_id`). `live` is the component tree of the
+/// message as Discord echoed it, used to find the bound component in a template
+/// captured before DWEEB bound it (see [`bound_pointer`]). Returns the component
+/// tree for an `UPDATE_MESSAGE`. Pure — the template is cloned, never mutated.
 pub fn render_bound_message(
     template: &Value,
     vars: &RenderVars,
     custom_id: &str,
     patch: &BoundPatch,
+    live: Option<&Value>,
 ) -> Value {
+    let target = bound_pointer(template, live, custom_id);
     let mut out = template.clone();
     substitute_tree(&mut out, vars);
     // Patch the bound component last so its computed label/placeholder (live
     // count / "closed") wins over any substitution done to it above.
+    // Substitution only rewrites strings, so a pointer resolved on the raw
+    // template still addresses the same node here.
     let mut hit = false;
     patch_matching(&mut out, custom_id, patch, &mut hit);
     if !hit {
-        patch_first_bindable(&mut out, custom_id, patch);
+        if let Some(Value::Object(o)) = target.as_deref().and_then(|p| out.pointer_mut(p)) {
+            apply_patch(o, custom_id, patch);
+        }
     }
     out
+}
+
+/// Where the poll's bound component sits in a (raw) template: the component
+/// that already carries `custom_id`; else — a template captured on first save,
+/// before DWEEB bound it — the template node at the place the bound component
+/// sits in the `live` message, when it's the same kind; else the first bindable
+/// component. Resolving by position keeps another plugin's button that happens
+/// to come first (a Rules reply beside Vote) from being taken over, relabelled
+/// and unbound.
+fn bound_pointer(template: &Value, live: Option<&Value>, custom_id: &str) -> Option<String> {
+    let has_id =
+        |o: &Map<String, Value>| o.get("custom_id").and_then(Value::as_str) == Some(custom_id);
+    if let Some(p) = find_pointer(template, &has_id) {
+        return Some(p);
+    }
+    if let Some(live) = live {
+        if let Some(p) = find_pointer(live, &has_id) {
+            let live_kind = live
+                .pointer(&p)
+                .and_then(|n| n.get("type"))
+                .and_then(Value::as_u64);
+            let same_kind_here = template
+                .pointer(&p)
+                .and_then(Value::as_object)
+                .is_some_and(|o| {
+                    is_bindable_component(o) && o.get("type").and_then(Value::as_u64) == live_kind
+                });
+            if same_kind_here {
+                return Some(p);
+            }
+        }
+    }
+    find_pointer(template, &|o| is_bindable_component(o))
+}
+
+/// RFC 6901 pointer to the first object (depth-first, in the same order the
+/// patchers walk) that satisfies `pred`.
+fn find_pointer(tree: &Value, pred: &dyn Fn(&Map<String, Value>) -> bool) -> Option<String> {
+    fn walk(v: &Value, path: &mut String, pred: &dyn Fn(&Map<String, Value>) -> bool) -> bool {
+        match v {
+            Value::Array(a) => {
+                for (i, item) in a.iter().enumerate() {
+                    let len = path.len();
+                    path.push('/');
+                    path.push_str(&i.to_string());
+                    if walk(item, path, pred) {
+                        return true;
+                    }
+                    path.truncate(len);
+                }
+                false
+            }
+            Value::Object(o) => {
+                if pred(o) {
+                    return true;
+                }
+                for (k, val) in o {
+                    let len = path.len();
+                    path.push('/');
+                    path.push_str(&escape_pointer(k));
+                    if walk(val, path, pred) {
+                        return true;
+                    }
+                    path.truncate(len);
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+    let mut path = String::new();
+    walk(tree, &mut path, pred).then_some(path)
+}
+
+fn escape_pointer(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
 }
 
 /// Walk a component tree, substituting placeholders in the user-text fields:
@@ -891,34 +986,24 @@ fn substitute_tree(v: &mut Value, vars: &RenderVars) {
     }
 }
 
-/// The label of the bound button in a (raw) template — the first bindable
-/// component when it's a button — so the live count can ride the host's own
-/// wording. None when the template's bound component isn't a button.
-pub fn template_button_label(template: &Value) -> Option<String> {
-    fn walk(v: &Value) -> Option<Option<String>> {
-        match v {
-            Value::Array(a) => a.iter().find_map(walk),
-            Value::Object(o) => {
-                if is_bindable_component(o) {
-                    let is_button =
-                        o.get("type").and_then(Value::as_u64) == Some(COMPONENT_TYPE_BUTTON as u64);
-                    return Some(if is_button {
-                        Some(
-                            o.get("label")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_string(),
-                        )
-                    } else {
-                        None
-                    });
-                }
-                o.values().find_map(walk)
-            }
-            _ => None,
-        }
-    }
-    walk(template).flatten()
+/// The label of the bound button in a (raw) template — the same component
+/// [`render_bound_message`] restyles (see [`bound_pointer`]) — so the live
+/// count rides the host's own wording for *that* button, never a neighbour's.
+/// None when the template's bound component isn't a button.
+pub fn template_button_label(
+    template: &Value,
+    live: Option<&Value>,
+    custom_id: &str,
+) -> Option<String> {
+    let pointer = bound_pointer(template, live, custom_id)?;
+    let node = template.pointer(&pointer)?;
+    let is_button = node.get("type").and_then(Value::as_u64) == Some(COMPONENT_TYPE_BUTTON as u64);
+    is_button.then(|| {
+        node.get("label")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    })
 }
 
 /// Build an `UPDATE_MESSAGE` that re-renders the live message with the bound
@@ -945,17 +1030,33 @@ pub fn update_message_from_template(
     custom_id: &str,
     patch: &BoundPatch,
 ) -> Value {
-    let components = render_bound_message(template, vars, custom_id, patch);
+    let components = render_bound_message(
+        template,
+        vars,
+        custom_id,
+        patch,
+        message.components.as_ref(),
+    );
     wrap_update(message, components)
 }
 
-fn wrap_update(message: &MessageRef, components: Value) -> Value {
+/// Wrap a re-rendered component tree as the `UPDATE_MESSAGE` for `message`,
+/// preserving its V2 flag / plain content. Every media reference is cleaned to
+/// the shape Discord accepts on the way back in (see [`sanitize_media`]), and a
+/// V2 message is kept inside the per-message text budget (see
+/// [`fit_text_budget`]) — an edit Discord refuses fails the voter's click.
+fn wrap_update(message: &MessageRef, mut components: Value) -> Value {
+    sanitize_media(&mut components);
+    let flags = message.flags.unwrap_or(0);
+    let v2 = flags & FLAG_IS_COMPONENTS_V2 != 0;
+    if v2 {
+        fit_text_budget(&mut components, MAX_V2_TEXT);
+    }
     let mut data = json!({
         "components": components,
         "allowed_mentions": { "parse": [] },
     });
-    let flags = message.flags.unwrap_or(0);
-    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+    if v2 {
         // V2 forbids `content`; the text already lives inside `components`.
         data["flags"] = json!(FLAG_IS_COMPONENTS_V2);
     } else if let Some(content) = message.content.as_deref() {
@@ -963,6 +1064,231 @@ fn wrap_update(message: &MessageRef, components: Value) -> Value {
         data["content"] = json!(content);
     }
     json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data })
+}
+
+// ── media this service can (and can't) send (pure) ────────────────────────────
+
+const COMPONENT_FILE: u64 = 13;
+
+/// The fields Discord stamps onto every media item it returns. They're
+/// output-only: the update endpoints refuse an edit that echoes any of them back
+/// (the same list DWEEB strips before re-sending a restored message —
+/// `src/core/serialization/attachments.ts`).
+const RESOLVED_MEDIA_FIELDS: &[&str] = &[
+    "proxy_url",
+    "height",
+    "width",
+    "content_type",
+    "loading_state",
+    "id",
+    "placeholder",
+    "placeholder_version",
+    "content_scan_metadata",
+    "flags",
+];
+
+/// Longest file name an error message quotes before eliding the rest.
+const MAX_MEDIA_NAME: usize = 80;
+
+/// Whether Discord can fetch this media URL itself.
+fn is_sendable_url(url: &str) -> bool {
+    ["https://", "http://"].iter().any(|scheme| {
+        url.len() > scheme.len()
+            && url.as_bytes()[..scheme.len()].eq_ignore_ascii_case(scheme.as_bytes())
+    })
+}
+
+/// Every picture or file in a stored message template that this service could
+/// never send, named the way its author would recognise it. Empty when the
+/// whole template can be re-sent.
+///
+/// The template is captured from DWEEB's editor, where a picture uploaded from
+/// the author's computer is a `session://<id>/<name>` handle to a file that
+/// lives only in that browser — DWEEB's own Send uploads the bytes, but a
+/// re-render from here can't, and Discord refuses the **whole** edit over one
+/// media URL it can't fetch, so every vote would fail. Only an `http(s)://`
+/// link is sendable, and a File component never is: it can only show an
+/// attachment uploaded *with* a message.
+pub fn unsendable_media(template: &Value) -> Vec<String> {
+    fn walk(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            Value::Object(o) => {
+                if o.get("type").and_then(Value::as_u64) == Some(COMPONENT_FILE) {
+                    out.push(describe_media(o.get("file")));
+                } else if let Some(media) = o.get("media") {
+                    let url = media.get("url").and_then(Value::as_str).unwrap_or("");
+                    if !is_sendable_url(url) {
+                        out.push(describe_media(Some(media)));
+                    }
+                }
+                o.values().for_each(|x| walk(x, out));
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(template, &mut out);
+    out
+}
+
+/// What to call an unsendable picture in a message to its author: the name of
+/// the file they uploaded (`session://<id>/<name>`, `attachment://<name>`), else
+/// the reference exactly as written.
+fn describe_media(media: Option<&Value>) -> String {
+    let url = media
+        .and_then(|m| m.get("url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if url.is_empty() {
+        return "a picture with no link".to_string();
+    }
+    let name = url
+        .strip_prefix("session://")
+        .and_then(|rest| rest.split_once('/').map(|(_, name)| name))
+        .or_else(|| url.strip_prefix("attachment://"))
+        .filter(|name| !name.is_empty())
+        .unwrap_or(url);
+    if name.chars().count() > MAX_MEDIA_NAME {
+        let mut short: String = name.chars().take(MAX_MEDIA_NAME).collect();
+        short.push('…');
+        short
+    } else {
+        name.to_string()
+    }
+}
+
+/// Clean every `media` / `file` object in an outgoing component tree to the
+/// shape Discord accepts on an edit: drop the resolved output-only fields, and
+/// keep exactly one reference — a concrete `url` (Discord re-resolves it) in
+/// preference to the `attachment_id` a fetched message carries beside it.
+fn sanitize_media(tree: &mut Value) {
+    match tree {
+        Value::Array(a) => a.iter_mut().for_each(sanitize_media),
+        Value::Object(o) => {
+            for key in ["media", "file"] {
+                if let Some(Value::Object(media)) = o.get_mut(key) {
+                    clean_media_object(media);
+                }
+            }
+            o.values_mut().for_each(sanitize_media);
+        }
+        _ => {}
+    }
+}
+
+fn clean_media_object(media: &mut Map<String, Value>) {
+    for field in RESOLVED_MEDIA_FIELDS {
+        media.remove(*field);
+    }
+    let has_url = media
+        .get("url")
+        .and_then(Value::as_str)
+        .is_some_and(|u| !u.is_empty());
+    if has_url {
+        media.remove("attachment_id");
+    } else {
+        media.remove("url");
+        let has_attachment = media
+            .get("attachment_id")
+            .and_then(Value::as_str)
+            .is_some_and(|a| !a.is_empty());
+        if !has_attachment {
+            media.remove("attachment_id");
+        }
+    }
+}
+
+// ── the V2 text budget (pure) ────────────────────────────────────────────────
+
+/// Text the V2 budget counts, in UTF-16 code units (how DWEEB counts Discord's
+/// limits): every text display `content`, button / option `label`, option
+/// `description` and select `placeholder` in the tree.
+fn text_units(v: &Value) -> usize {
+    match v {
+        Value::Array(a) => a.iter().map(text_units).sum(),
+        Value::Object(o) => o
+            .iter()
+            .map(|(k, val)| match (k.as_str(), val) {
+                ("content" | "label" | "description" | "placeholder", Value::String(s)) => {
+                    s.encode_utf16().count()
+                }
+                _ => text_units(val),
+            })
+            .sum(),
+        _ => 0,
+    }
+}
+
+/// Keep a re-rendered V2 message inside Discord's per-message text budget.
+///
+/// DWEEB validates the template against short placeholder samples, but
+/// `{results}` expands to a line per option — up to 25 of them — once votes
+/// arrive: a message near the limit then goes over it, Discord refuses the
+/// edit, and every vote fails. Trimming the longest text display (where the
+/// expansion almost always landed) keeps the poll working.
+fn fit_text_budget(tree: &mut Value, budget: usize) {
+    let total = text_units(tree);
+    if total <= budget {
+        return;
+    }
+    let mut excess = total - budget;
+    let mut contents = Vec::new();
+    content_pointers(tree, &mut String::new(), &mut contents);
+    contents.sort_by_key(|c| std::cmp::Reverse(c.1));
+    for (pointer, len) in contents {
+        if excess == 0 {
+            break;
+        }
+        let Some(Value::String(text)) = tree.pointer_mut(&pointer) else {
+            continue;
+        };
+        // Keep `keep` units plus a one-unit ellipsis, removing at least `excess`.
+        let keep = len.saturating_sub(excess + 1);
+        let mut kept = String::new();
+        let mut units = 0;
+        for c in text.chars() {
+            if units + c.len_utf16() > keep {
+                break;
+            }
+            units += c.len_utf16();
+            kept.push(c);
+        }
+        kept.push('…');
+        excess = excess.saturating_sub(len.saturating_sub(units + 1));
+        *text = kept;
+    }
+}
+
+/// RFC 6901 pointers to every text display `content` string, with its length in
+/// UTF-16 units.
+fn content_pointers(v: &Value, path: &mut String, out: &mut Vec<(String, usize)>) {
+    match v {
+        Value::Array(a) => {
+            for (i, item) in a.iter().enumerate() {
+                let len = path.len();
+                path.push('/');
+                path.push_str(&i.to_string());
+                content_pointers(item, path, out);
+                path.truncate(len);
+            }
+        }
+        Value::Object(o) => {
+            for (k, val) in o {
+                let len = path.len();
+                path.push('/');
+                path.push_str(&escape_pointer(k));
+                if let ("content", Value::String(s)) = (k.as_str(), val) {
+                    out.push((path.clone(), s.encode_utf16().count()));
+                } else {
+                    content_pointers(val, path, out);
+                }
+                path.truncate(len);
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── live count suffixes (pure) ───────────────────────────────────────────────
@@ -1187,6 +1513,28 @@ pub fn vote_confirmation(
             button(BUTTON_DANGER, "Retract my vote", control_id("retract", id)),
         ]));
     }
+    if let Some(status) = host_status {
+        content.push_str("\n\u{1F6E0}\u{FE0F} You manage this poll:");
+        rows.push(host_controls_row(id, status));
+    }
+    ephemeral_with_rows(&content, rows)
+}
+
+/// The reply when a locked-ballot poll refuses a second ballot: what they already
+/// voted for — plus, for a host (`host_status`), their control row. On a select
+/// poll a host's pick *is* their way in to the controls, and on a locked poll
+/// every pick after the first lands here, so without the row a host-role host
+/// (no Manage Server, so no Message Info door) would lose Close and Post results
+/// for the rest of the poll.
+pub fn locked_notice(id: &str, existing_labels: &[String], host_status: Option<Status>) -> Value {
+    let list = existing_labels
+        .iter()
+        .map(|l| format!("**{l}**"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut content =
+        format!("\u{1F512} Ballots are locked on this poll \u{2014} you already voted for {list}.");
+    let mut rows = Vec::new();
     if let Some(status) = host_status {
         content.push_str("\n\u{1F6E0}\u{FE0F} You manage this poll:");
         rows.push(host_controls_row(id, status));
@@ -1727,6 +2075,7 @@ mod tests {
             label: Some("Vote (3)".into()),
             placeholder: Some("Cast your vote \u{B7} 3 votes".into()),
             disabled: false,
+            select: None,
         };
         let b = restyle_bound(&button_tree("x"), "poll:x", &patch);
         let btn = &b[0]["components"][1]["components"][0];
@@ -1753,8 +2102,9 @@ mod tests {
             label: None,
             placeholder: None,
             disabled: false,
+            select: None,
         };
-        let out = render_bound_message(&select_tree("abc"), &v, "poll:abc", &patch);
+        let out = render_bound_message(&select_tree("abc"), &v, "poll:abc", &patch, None);
         let content = out[0]["components"][0]["content"].as_str().unwrap();
         assert!(content.contains("**A**"), "{content}");
         assert!(content.contains("100% (2)"), "{content}");
@@ -1778,8 +2128,9 @@ mod tests {
             label: None,
             placeholder: Some("Cast your vote \u{B7} 0 votes".into()),
             disabled: false,
+            select: None,
         };
-        let out = render_bound_message(&tree, &v, "poll:xyz", &patch);
+        let out = render_bound_message(&tree, &v, "poll:xyz", &patch, None);
         let sel = &out[0]["components"][0];
         assert_eq!(sel["custom_id"], "poll:xyz");
         assert_eq!(sel["placeholder"], "Cast your vote \u{B7} 0 votes");
@@ -1788,10 +2139,114 @@ mod tests {
     #[test]
     fn template_button_label_only_reads_buttons() {
         assert_eq!(
-            template_button_label(&button_tree("x")).as_deref(),
+            template_button_label(&button_tree("x"), None, "poll:x").as_deref(),
             Some("\u{1F5F3}\u{FE0F} Vote")
         );
-        assert_eq!(template_button_label(&select_tree("x")), None);
+        assert_eq!(
+            template_button_label(&select_tree("x"), None, "poll:x"),
+            None
+        );
+    }
+
+    /// A first-save template: the editor's default id, the factory options, and
+    /// another plugin's button before the select. The re-render binds the select
+    /// at the live select's place, writes the poll's own options and pick cap,
+    /// and leaves the neighbour alone.
+    #[test]
+    fn a_stale_template_binds_at_the_live_place_and_wires_the_config_options() {
+        let template = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" }
+            ]},
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": "select_option", "placeholder": "Choose", "options": [
+                    { "label": "Option 1", "value": "option_1" }
+                ]}
+            ]}
+        ]);
+        let live = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" }
+            ]},
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": "poll:xyz", "options": [{ "label": "A", "value": "a" }] }
+            ]}
+        ]);
+        let options = vec![opt("a", "Alpha"), opt("b", "Beta"), opt("c", "Gamma")];
+        let v = vars(
+            options.iter().map(|o| (o.clone(), 0)).collect(),
+            Status::Open,
+            false,
+        );
+        let patch = BoundPatch {
+            label: None,
+            placeholder: None,
+            disabled: false,
+            select: Some(select_wiring(&options, 2)),
+        };
+        let out = render_bound_message(&template, &v, "poll:xyz", &patch, Some(&live));
+        assert_eq!(out[0]["components"][0]["custom_id"], "quickreplies:zzz");
+        let sel = &out[1]["components"][0];
+        assert_eq!(sel["custom_id"], "poll:xyz");
+        let values: Vec<&str> = sel["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["value"].as_str().unwrap())
+            .collect();
+        assert_eq!(values, vec!["a", "b", "c"]);
+        assert_eq!(sel["min_values"], 1);
+        assert_eq!(sel["max_values"], 2);
+        assert!(sel["options"][0].get("default").is_none());
+    }
+
+    #[test]
+    fn the_button_label_comes_from_the_bound_button_not_a_neighbour() {
+        let template = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 1, "label": "Vote", "custom_id": "poll:xyz" }
+            ]}
+        ]);
+        assert_eq!(
+            template_button_label(&template, None, "poll:xyz").as_deref(),
+            Some("Vote")
+        );
+    }
+
+    #[test]
+    fn unsendable_media_names_uploads_and_every_file() {
+        let template = json!([
+            { "type": 12, "items": [
+                { "media": { "url": "https://cdn.example/ok.png" } },
+                { "media": { "url": "session://abc/banner.png" } }
+            ]},
+            { "type": 13, "file": { "url": "attachment://rules.pdf" } }
+        ]);
+        assert_eq!(unsendable_media(&template), vec!["banner.png", "rules.pdf"]);
+        let fine = json!([{ "type": 11, "media": { "url": "https://cdn.example/a.png" } }]);
+        assert!(unsendable_media(&fine).is_empty());
+    }
+
+    #[test]
+    fn a_re_render_stays_inside_the_v2_text_budget() {
+        let mut tree = json!([
+            { "type": 10, "content": "r".repeat(4100) },
+            { "type": 10, "content": "footer" }
+        ]);
+        fit_text_budget(&mut tree, MAX_V2_TEXT);
+        assert!(text_units(&tree) <= MAX_V2_TEXT, "{}", text_units(&tree));
+        assert_eq!(tree[1]["content"], "footer");
+    }
+
+    #[test]
+    fn a_hosts_locked_notice_keeps_the_controls() {
+        let host = locked_notice("xyz", &["A".into()], Some(Status::Open));
+        let s = host.to_string();
+        assert!(s.contains("poll:close:xyz"), "{s}");
+        assert!(s.contains("**A**"), "{s}");
+        let member = locked_notice("xyz", &["A".into()], None);
+        assert!(!member.to_string().contains("poll:close:xyz"));
     }
 
     #[test]
@@ -1805,6 +2260,7 @@ mod tests {
             label: Some("Vote (1)".into()),
             placeholder: None,
             disabled: false,
+            select: None,
         };
         let v = update_component_response(&msg, "poll:xyz", &patch).unwrap();
         assert_eq!(v["type"], RESPONSE_UPDATE_MESSAGE);
@@ -1827,6 +2283,7 @@ mod tests {
             label: None,
             placeholder: None,
             disabled: true,
+            select: None,
         };
         assert!(update_component_response(&msg, "poll:xyz", &patch).is_none());
     }

@@ -78,6 +78,33 @@ percentages + counts, with a 🏆 on the closed winner), `{votes}`, `{leader}`,
 `{status}`, `{closes}`. `hide_results` polls render a lock note while open and
 reveal on close.
 
+A re-render stays one Discord accepts, and stays the poll the host configured:
+
+- **A select poll's options come from the config, every time.** The template is
+  captured *before* DWEEB writes the options onto the select — one save behind,
+  or the editor's factory options on a first save — so every re-render writes
+  the poll's own options and pick cap (`min_values`/`max_values`) onto the bound
+  select instead of the template's.
+- **The bound component is found by its binding, then by position** — the
+  component sitting where the live message's bound one sits — never simply the
+  first button, which in a `[Rules] [Vote]` row would take over the other
+  plugin's button.
+- **Pictures must be links.** A browser-only upload (`session://…`) makes Discord
+  refuse the whole edit, so saving refuses a placeholder template naming one (or
+  any File component), and a template stored before that check falls back to
+  restyling the live component. Echoed media is cleaned of Discord's output-only
+  fields.
+- **The text stays inside the 4000-character budget**: `{results}` grows a line per
+  option as votes arrive, so an over-budget render trims its longest text display.
+
+## Host controls
+
+A host's Close posts the public results **and** hands that host the closed panel
+(Post results / Reopen) as a private followup — the public component is disabled
+from then on. A Close that lands just past the deadline still announces (that
+click closed the poll). On a locked-ballot select poll a host's every pick — not
+just the first — carries the control row.
+
 ## Endpoints
 
 | Route | What |

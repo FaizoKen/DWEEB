@@ -40,6 +40,10 @@ pub enum ConnectError {
     /// Discord answered 5xx, or the connection dropped mid-flight. Transient,
     /// and theirs.
     Upstream,
+    /// 400 — Discord refused the id itself (one past what a snowflake can hold
+    /// passes a digit check but not Discord's). These reads are bodiless GETs,
+    /// so the path's ids are the only thing a 400 can be about: the caller's.
+    InvalidId,
     /// Couldn't connect to Discord at all (DNS, refused, TLS), or its reply
     /// wasn't the shape we expect — this host's network, or our code.
     Network,
@@ -63,6 +67,9 @@ impl ConnectError {
             ConnectError::Upstream => {
                 "Discord is having trouble right now — try again in a moment.".into()
             }
+            ConnectError::InvalidId => {
+                "Discord doesn't recognise that server id — pick the server again in DWEEB.".into()
+            }
             ConnectError::Network => "Couldn't reach Discord just now — try again in a moment.".into(),
         }
     }
@@ -82,6 +89,9 @@ impl ConnectError {
             ConnectError::BadToken => StatusCode::INTERNAL_SERVER_ERROR,
             ConnectError::BotNotInGuild => StatusCode::NOT_FOUND,
             ConnectError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            // The caller sent an id Discord can't parse — anyone can, since
+            // `/api/connect` is open, so as a 5xx it would page on demand.
+            ConnectError::InvalidId => StatusCode::BAD_REQUEST,
             // Discord took the request and ran long: theirs — logged, not paged.
             ConnectError::Timeout => StatusCode::GATEWAY_TIMEOUT,
             // Discord answered 5xx or hung up mid-flight: theirs — logged, not paged.
@@ -209,6 +219,9 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
     }
     Err(match status.as_u16() {
         401 => ConnectError::BadToken,
+        // A GET carries no body, so a 400 is about the id in its path — the
+        // caller's input, never a fault of ours (see `InvalidId`).
+        400 => ConnectError::InvalidId,
         403 | 404 => ConnectError::BotNotInGuild,
         429 => ConnectError::RateLimited,
         500..=599 => ConnectError::Upstream,
@@ -314,7 +327,12 @@ mod tests {
             ConnectError::RateLimited.status(),
             StatusCode::TOO_MANY_REQUESTS
         );
-        for e in [ConnectError::BotNotInGuild, ConnectError::RateLimited] {
+        assert_eq!(ConnectError::InvalidId.status(), StatusCode::BAD_REQUEST);
+        for e in [
+            ConnectError::BotNotInGuild,
+            ConnectError::RateLimited,
+            ConnectError::InvalidId,
+        ] {
             assert!(
                 !e.status().is_server_error(),
                 "{e:?} must not be reported as a server error"
@@ -467,9 +485,59 @@ mod tests {
             ConnectError::RateLimited,
             ConnectError::Timeout,
             ConnectError::Upstream,
+            ConnectError::InvalidId,
             ConnectError::Network,
         ] {
             assert!(!e.message().trim().is_empty(), "{e:?} has no message");
         }
+    }
+
+    /// `/api/connect` is open to anyone, so an id Discord can't parse is
+    /// something anyone can send — it must answer 4xx, never a paging 502. (The
+    /// snowflake check refuses such an id first; this pins the second line,
+    /// should anything ever let one through.)
+    #[tokio::test]
+    async fn an_id_discord_cannot_parse_never_pages() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = server.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut sock, _) = server.accept().unwrap();
+            // Consume the request first: closing with unread bytes sends an RST
+            // and the client discards the response (Windows, notably).
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            while !buf.ends_with(b"\r\n\r\n") {
+                if sock.read(&mut byte).unwrap() == 0 {
+                    break;
+                }
+                buf.push(byte[0]);
+            }
+            let body = r#"{"code":50035,"message":"Invalid Form Body"}"#;
+            write!(
+                sock,
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let e = get_json::<Value>(
+            &client,
+            "tok",
+            &format!("http://{addr}/guilds/99999999999999999999"),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(matches!(e, ConnectError::InvalidId), "{e:?}");
+        // A 4xx never reaches `trace::on_failure` at all, so it can't page.
+        assert!(!e.status().is_server_error());
     }
 }

@@ -324,6 +324,12 @@
       let selectedHost = new Set(); // host role ids
       let savedStatus = null; // when reconfiguring: open/closed
       let savedVotes = 0;
+      // The deadline as saved (unix seconds, or null), kept verbatim unless the
+      // user edits the deadline fields — re-deriving it from "closes in N" would
+      // silently DROP a deadline that already passed (reopening voting) and
+      // re-anchor a future one to "now + rounded remaining" on every save.
+      let loadedEndsAt = null;
+      let deadlineEdited = false;
       // Poll options. Each row keeps a STABLE key once created — the key is
       // what ballots and tallies are stored under, so editing a label must
       // never re-key the option (that would orphan its votes).
@@ -331,7 +337,7 @@
       let nextKey = 1;
 
       const $ = (id) => document.getElementById(id);
-      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const isSnowflake = (s) => /^\d{17,20}$/.test((s || "").trim());
       const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
       const escapeHtml = (s) =>
         String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -550,18 +556,33 @@
       $("minAge").addEventListener("change", updateCounts);
 
       // ── Deadline preview ─────────────────────────────────────────────────
-      for (const el of [$("durValue"), $("durUnit")]) el.addEventListener("input", renderDeadlinePreview);
+      const onDeadlineEdit = () => {
+        deadlineEdited = true;
+        renderDeadlinePreview();
+      };
+      for (const el of [$("durValue"), $("durUnit")]) {
+        el.addEventListener("input", onDeadlineEdit);
+        el.addEventListener("change", onDeadlineEdit);
+      }
       function computeEndsAt() {
         const v = parseFloat($("durValue").value);
         if (!v || v <= 0) return null;
         const mult = { minutes: 60, hours: 3600, days: 86400 }[$("durUnit").value] || 3600;
         return Math.floor(Date.now() / 1000 + v * mult);
       }
+      // The deadline to save: the stored one, untouched, unless the user edited
+      // the deadline fields of this poll (a new poll always computes).
+      function chosenEndsAt() {
+        return instanceId && !deadlineEdited ? loadedEndsAt : computeEndsAt();
+      }
       function renderDeadlinePreview() {
-        const ends = computeEndsAt();
-        $("endsAtPreview").textContent = ends
-          ? `Voting closes ${new Date(ends * 1000).toLocaleString()}.`
-          : "No deadline — voting stays open until a host closes it.";
+        const ends = chosenEndsAt();
+        const passed = ends && ends * 1000 <= Date.now();
+        $("endsAtPreview").textContent = !ends
+          ? "No deadline — voting stays open until a host closes it."
+          : passed
+            ? `Voting closed ${new Date(ends * 1000).toLocaleString()}. Set a new deadline above to change it.`
+            : `Voting closes ${new Date(ends * 1000).toLocaleString()}.`;
         renderAdvSummary();
         sendResize();
       }
@@ -572,7 +593,7 @@
       // invisible behind it.
       function renderAdvSummary() {
         const bits = [];
-        if (computeEndsAt()) bits.push("deadline");
+        if (chosenEndsAt()) bits.push("deadline");
         if (selectedReq.size) bits.push(`gate: ${selectedReq.size} role${selectedReq.size === 1 ? "" : "s"}`);
         if (+$("minAge").value) bits.push("account age");
         if ($("closeAnnouncement").value.trim()) bits.push("custom close");
@@ -777,6 +798,7 @@
           const seed = [...(reqs.roles || []), ...(d.host_roles || [])];
           const byId = new Map(roles.map((r) => [r.id, r]));
           for (const r of seed) if (!byId.has(r.id)) { roles.push({ id: r.id, name: r.name || r.id, color: r.color || 0 }); byId.set(r.id, r); }
+          loadedEndsAt = typeof d.ends_at === "number" && d.ends_at > 0 ? d.ends_at : null;
           if (d.ends_at) {
             const secs = d.ends_at - Math.floor(Date.now() / 1000);
             if (secs > 0) {
@@ -823,6 +845,46 @@
         return found;
       }
 
+      // Pictures and files in the captured template this service could never
+      // re-send — mirrors `unsendable_media` in src/discord.rs (keep the two in
+      // step). Live placeholders re-send the whole message on every vote, and
+      // Discord refuses the entire edit over one picture it can't fetch: only an
+      // http(s) link is sendable, and a File component never is.
+      const SENDABLE_URL = /^https?:\/\/./i;
+      function unsendableMedia(components) {
+        const out = [];
+        const visit = (n) => {
+          if (!n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          if (n.type === 13) out.push(mediaName(n.file));
+          else if (n.media && typeof n.media === "object") {
+            const url = typeof n.media.url === "string" ? n.media.url : "";
+            if (!SENDABLE_URL.test(url)) out.push(mediaName(n.media));
+          }
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return out;
+      }
+      function mediaName(media) {
+        const url = media && typeof media.url === "string" ? media.url.trim() : "";
+        if (!url) return "a picture with no link";
+        let name = url;
+        if (url.startsWith("session://")) {
+          const rest = url.slice("session://".length);
+          const slash = rest.indexOf("/");
+          if (slash >= 0 && slash < rest.length - 1) name = rest.slice(slash + 1);
+        } else if (url.startsWith("attachment://") && url.length > "attachment://".length) {
+          name = url.slice("attachment://".length);
+        }
+        const chars = Array.from(name);
+        return chars.length > 80 ? chars.slice(0, 80).join("") + "…" : name;
+      }
+      function unsendableMessage(names) {
+        const quoted = names.slice(0, 3).map((n) => `“${n}”`).join(", ") + (names.length > 3 ? ", …" : "");
+        return `Your message uses live placeholders, so this service re-sends it on every vote — and it can't send ${quoted}. A picture uploaded from your computer stays in your browser: paste an image link (https://…) into its URL field instead, and take out any File component (a re-sent message can't carry one). Or remove the poll placeholders from the message.`;
+      }
+
       async function save() {
         $("error").textContent = "";
         const guildId = $("guildId").value.trim();
@@ -854,8 +916,12 @@
           builtMessage && Array.isArray(builtMessage.components) && hasPlaceholders(builtMessage.components)
             ? builtMessage.components
             : null;
+        if (messageTemplate) {
+          const unsendable = unsendableMedia(messageTemplate);
+          if (unsendable.length) return fail(unsendableMessage(unsendable));
+        }
 
-        const endsAt = computeEndsAt();
+        const endsAt = chosenEndsAt();
         const body = {
           target,
           guild_id: guildId,

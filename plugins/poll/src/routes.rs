@@ -338,6 +338,18 @@ fn load_for_click(
     interaction: &discord::Interaction,
     id: &str,
 ) -> Result<Poll, &'static str> {
+    load_for_click_tracking(state, interaction, id).map(|(p, _)| p)
+}
+
+/// [`load_for_click`], also reporting whether THIS call is the one that closed
+/// the poll on its deadline (it won the compare-and-swap) — so a host's Close
+/// that lands just past the deadline still announces the results, instead of
+/// being told the poll is "already closed" with no announcement ever posted.
+fn load_for_click_tracking(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    id: &str,
+) -> Result<(Poll, bool), &'static str> {
     let mut p = match state.store.get(id) {
         Ok(Some(p)) => p,
         Ok(None) => return Err("This poll is no longer set up. Ask an admin to recreate it."),
@@ -353,15 +365,16 @@ fn load_for_click(
         }
         None => return Err("Use this inside the server, not in DMs."),
     }
+    let mut closed_now = false;
     if p.status == Status::Open {
         if let Some(deadline) = p.config.ends_at {
             if unix_millis() / 1000 > deadline {
-                let _ = state.store.close(id);
+                closed_now = state.store.close(id).unwrap_or(false);
                 p.status = Status::Closed;
             }
         }
     }
-    Ok(p)
+    Ok((p, closed_now))
 }
 
 // ── the bound component ──────────────────────────────────────────────────────
@@ -469,10 +482,11 @@ fn handle_select_vote(
     {
         Ok(Cast::Locked { existing }) => {
             let labels = discord::labels_for(&existing, &p.config.options);
-            Json(discord::ephemeral_text(&format!(
-                "\u{1F512} Ballots are locked on this poll — you already voted for **{}**.",
-                labels.join(", ")
-            )))
+            Json(discord::locked_notice(
+                id,
+                &labels,
+                is_host.then_some(p.status),
+            ))
             .into_response()
         }
         Ok(_) => {
@@ -549,10 +563,11 @@ fn handle_pick(state: &AppState, interaction: &discord::Interaction, id: &str) -
     {
         Ok(Cast::Locked { existing }) => {
             let labels = discord::labels_for(&existing, &p.config.options);
-            Json(discord::ephemeral_text(&format!(
-                "\u{1F512} Ballots are locked on this poll — you already voted for **{}**.",
-                labels.join(", ")
-            )))
+            Json(discord::locked_notice(
+                id,
+                &labels,
+                is_host.then_some(p.status),
+            ))
             .into_response()
         }
         Ok(_) => {
@@ -677,8 +692,20 @@ fn require_host(
     interaction: &discord::Interaction,
     id: &str,
 ) -> Result<Poll, Response> {
-    let p = match load_for_click(state, interaction, id) {
-        Ok(p) => p,
+    require_host_tracking(state, interaction, id).map(|(p, _)| p)
+}
+
+/// [`require_host`], also reporting whether this very click closed the poll on
+/// its deadline (see [`load_for_click_tracking`]).
+// The Err *is* the HTTP reply — see `require_host`.
+#[allow(clippy::result_large_err)]
+fn require_host_tracking(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    id: &str,
+) -> Result<(Poll, bool), Response> {
+    let (p, closed_now) = match load_for_click_tracking(state, interaction, id) {
+        Ok(loaded) => loaded,
         Err(msg) => return Err(Json(discord::ephemeral_text(msg)).into_response()),
     };
     if !discord::is_host(
@@ -691,7 +718,7 @@ fn require_host(
         ))
         .into_response());
     }
-    Ok(p)
+    Ok((p, closed_now))
 }
 
 /// The dispatcher's "Message Info" manage button: the host panel as a fresh
@@ -709,30 +736,28 @@ fn handle_manage(state: &AppState, interaction: &discord::Interaction, id: &str)
 }
 
 fn handle_close(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
-    let p = match require_host(state, interaction, id) {
-        Ok(p) => p,
+    let (p, closed_by_this_click) = match require_host_tracking(state, interaction, id) {
+        Ok(loaded) => loaded,
         Err(resp) => return resp,
     };
-    if p.status == Status::Closed {
-        return Json(discord::ephemeral_text(
-            "This poll is already closed. Use **Post results** to announce it again, or **Reopen** to resume voting.",
-        ))
-        .into_response();
+    // A Close that lands just past the deadline finds the poll closed by its
+    // own lazy check — still THIS host's close, so it announces below. Only a
+    // poll someone else already closed gets the closed panel instead (Post
+    // results / Reopen), replacing the stale one in place.
+    if p.status == Status::Closed && !closed_by_this_click {
+        return Json(as_update(closed_host_panel(state, id))).into_response();
     }
-    match state.store.close(id) {
-        Ok(true) => {}
-        Ok(false) => {
-            return Json(discord::ephemeral_text(
-                "Another host closed this poll first.",
-            ))
-            .into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "close poll");
-            return Json(discord::ephemeral_text(
-                "Something went wrong closing the poll — try again.",
-            ))
-            .into_response();
+    if !closed_by_this_click {
+        match state.store.close(id) {
+            Ok(true) => {}
+            Ok(false) => return Json(as_update(closed_host_panel(state, id))).into_response(),
+            Err(e) => {
+                tracing::error!(error = %e, "close poll");
+                return Json(discord::ephemeral_text(
+                    "Something went wrong closing the poll — try again.",
+                ))
+                .into_response();
+            }
         }
     }
     let closed = Poll {
@@ -743,6 +768,16 @@ fn handle_close(state: &AppState, interaction: &discord::Interaction, id: &str) 
     // disabled, results revealed) — this click is on the ephemeral panel and
     // can't reach it.
     spawn_public_refresh(state, &closed, id);
+    // The public message's component is disabled from here on, and a host-role
+    // host (no Manage Server) has no Message Info door — so hand the closing
+    // host the Closed panel, with Reopen and Post results, as a private followup.
+    if let (Some(app_id), Some(token), Some(data)) = (
+        interaction.application_id.as_deref(),
+        interaction.token.as_deref(),
+        closed_host_panel(state, id).get("data"),
+    ) {
+        spawn_followup(state, app_id, token, data.clone());
+    }
     let tallies = state.store.tallies(id).unwrap_or_default();
     let vars = render_vars(&closed, &tallies);
     Json(discord::results_announcement(
@@ -751,6 +786,12 @@ fn handle_close(state: &AppState, interaction: &discord::Interaction, id: &str) 
         closed.config.close_announcement.as_deref(),
     ))
     .into_response()
+}
+
+/// The host panel for a closed poll (Post results / Reopen).
+fn closed_host_panel(state: &AppState, id: &str) -> Value {
+    let votes = state.store.tallies(id).map(|t| t.total).unwrap_or(0);
+    discord::host_panel(id, Status::Closed, votes)
 }
 
 fn handle_reopen(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -943,19 +984,22 @@ fn live_patch(
     bound: &str,
     vars: &discord::RenderVars,
 ) -> BoundPatch {
+    let template = usable_template(&p.config);
+    // A select poll always carries its options and pick bounds from the config,
+    // whatever the template (or an older post) holds — see `SelectWiring`.
+    let select = (p.config.target == "string_select")
+        .then(|| discord::select_wiring(&p.config.options, p.config.max_choices));
     match p.status {
         Status::Closed => BoundPatch {
             label: Some("\u{1F4CA} Poll closed".to_string()),
             placeholder: Some("\u{1F4CA} Poll closed".to_string()),
             disabled: true,
+            select,
         },
         Status::Open => {
             if p.config.target == "button" {
-                let base = p
-                    .config
-                    .message_template
-                    .as_ref()
-                    .and_then(discord::template_button_label)
+                let base = template
+                    .and_then(|t| discord::template_button_label(t, msg.components.as_ref(), bound))
                     .or_else(|| {
                         msg.components
                             .as_ref()
@@ -969,9 +1013,10 @@ fn live_patch(
                     )),
                     placeholder: None,
                     disabled: false,
+                    select,
                 }
             } else {
-                let placeholder = if p.config.message_template.is_some() {
+                let placeholder = if template.is_some() {
                     None
                 } else {
                     let base = msg
@@ -985,10 +1030,22 @@ fn live_patch(
                     label: None,
                     placeholder,
                     disabled: false,
+                    select,
                 }
             }
         }
     }
+}
+
+/// The stored message template, unless it names a picture or file this service
+/// can't send (see [`discord::unsendable_media`]). Saving refuses such a
+/// template now, but one stored before that check would make every vote fail —
+/// Discord refuses the whole edit — so those polls fall back to restyling the
+/// live message's component instead, which keeps them working.
+fn usable_template(cfg: &InstanceConfig) -> Option<&Value> {
+    cfg.message_template
+        .as_ref()
+        .filter(|t| discord::unsendable_media(t).is_empty())
 }
 
 /// The message-edit `data` that brings the bound poll message up to its current
@@ -1006,7 +1063,7 @@ fn live_message_data(
     let bound = discord::bound_id(id);
     let vars = render_vars(p, tallies);
     let patch = live_patch(p, msg, &bound, &vars);
-    let resp = match p.config.message_template.as_ref() {
+    let resp = match usable_template(&p.config) {
         Some(template) => {
             discord::update_message_from_template(msg, template, &vars, &bound, &patch)
         }
@@ -1861,6 +1918,251 @@ mod tests {
         assert_eq!(v["type"], 4);
         assert!(v.to_string().contains("This poll has closed"), "{v}");
         assert!(state.refreshers.lock().unwrap().entries.is_empty());
+    }
+
+    fn find_select(v: &Value) -> Option<Value> {
+        match v {
+            Value::Array(a) => a.iter().find_map(find_select),
+            Value::Object(o) => {
+                if o.get("type").and_then(Value::as_u64) == Some(3) {
+                    return Some(v.clone());
+                }
+                o.values().find_map(find_select)
+            }
+            _ => None,
+        }
+    }
+
+    /// A select poll configured for the first time with `{results}` in the
+    /// text: the template is captured BEFORE DWEEB wires the poll options onto
+    /// the select. The first vote's UPDATE must carry the poll's own options and
+    /// pick cap — never the editor's factory ones — so the next voter's pick is
+    /// still accepted.
+    #[test]
+    fn the_first_vote_never_reverts_the_select_to_pre_save_options() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "{question}\n{results}" },
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": "select_option", "placeholder": "Choose an option", "options": [
+                    { "label": "Option 1", "value": "option_1" },
+                    { "label": "Option 2", "value": "option_2" }
+                ]}
+            ]}
+        ]);
+        let posted = json!([
+            { "type": 10, "content": "What next?\n..." },
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": format!("poll:{id}"), "min_values": 1, "max_values": 2, "options": [
+                    { "label": "Movie night", "value": "o1" },
+                    { "label": "Game night", "value": "o2" },
+                    { "label": "Karaoke", "value": "o3" }
+                ]}
+            ]}
+        ]);
+        let mut cfg = config_with("string_select", Some(template));
+        cfg.options = vec![
+            opt("o1", "Movie night"),
+            opt("o2", "Game night"),
+            opt("o3", "Karaoke"),
+        ];
+        cfg.max_choices = 2;
+        state.store.create(id, TEST_EDIT_TOKEN, &cfg).unwrap();
+
+        let first = body_json(handle_component(
+            &state,
+            &select_click(id, "100", "0", &["o1"], posted),
+        ));
+        assert_eq!(first["type"], 7);
+        let sel = find_select(&first["data"]["components"]).unwrap();
+        let values: Vec<String> = sel["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["value"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(values, vec!["o1", "o2", "o3"], "{sel}");
+        assert_eq!(sel["max_values"], 2, "{sel}");
+        assert_eq!(sel["custom_id"], format!("poll:{id}"), "{sel}");
+
+        // The next voter sees exactly what that UPDATE put on the message.
+        let second = body_json(handle_component(
+            &state,
+            &select_click(id, "200", "0", &["o3"], first["data"]["components"].clone()),
+        ));
+        assert!(
+            !second.to_string().contains("options have changed"),
+            "{second}"
+        );
+        assert_eq!(state.store.tallies(id).unwrap().total, 2);
+    }
+
+    /// A button poll whose message has another plugin's button first: the vote
+    /// button's live label is built from the vote button's own wording.
+    #[test]
+    fn the_vote_button_label_comes_from_the_bound_button() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "{question} - {votes}" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 2, "label": "Rules", "custom_id": "quickreplies:zzz" },
+                { "type": 2, "style": 1, "label": "Vote", "custom_id": format!("poll:{id}") }
+            ]}
+        ]);
+        state
+            .store
+            .create(
+                id,
+                TEST_EDIT_TOKEN,
+                &config_with("button", Some(template.clone())),
+            )
+            .unwrap();
+        let click: discord::Interaction = serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "1",
+            "application_id": "999000",
+            "token": "tok",
+            "data": { "custom_id": format!("poll:{id}") },
+            "member": { "user": { "id": "555" }, "roles": [], "permissions": "0" },
+            "message": { "content": "", "components": template, "flags": 32768 }
+        }))
+        .unwrap();
+        let v = body_json(handle_component(&state, &click));
+        assert_eq!(v["type"], 7);
+        let row = &v["data"]["components"][1]["components"];
+        assert_eq!(row[0]["label"], "Rules", "{row}");
+        assert_eq!(row[0]["custom_id"], "quickreplies:zzz", "{row}");
+        assert_eq!(row[1]["label"], "Vote (0)", "{row}");
+    }
+
+    /// A host-ROLE host (no Manage Server, so no Message Info door) on a
+    /// locked-ballot select poll keeps the controls on every pick, not just the
+    /// first.
+    #[test]
+    fn a_host_role_host_keeps_the_controls_on_a_locked_select_poll() {
+        let state = test_state();
+        let id = "abc";
+        let mut cfg = config_with("string_select", None);
+        cfg.allow_change = false;
+        cfg.host_roles = vec![RoleRef {
+            id: "777777777777777777".into(),
+            name: "Host".into(),
+            color: 0,
+        }];
+        state.store.create(id, TEST_EDIT_TOKEN, &cfg).unwrap();
+        // No editable components on the message, so the first pick's
+        // confirmation (host controls included) is the direct reply rather than
+        // a followup this test executor can't post.
+        let pick = |v: &str| -> discord::Interaction {
+            serde_json::from_value(json!({
+                "type": 3, "guild_id": "1",
+                "data": { "custom_id": format!("poll:{id}"), "values": [v] },
+                "member": { "user": { "id": "42" }, "roles": ["777777777777777777"], "permissions": "0" },
+                "message": { "content": "", "flags": 32768 }
+            }))
+            .unwrap()
+        };
+        let first = body_json(handle_component(&state, &pick("a")));
+        assert!(
+            first.to_string().contains(&format!("poll:close:{id}")),
+            "{first}"
+        );
+        let again = body_json(handle_component(&state, &pick("a")));
+        assert!(
+            again.to_string().contains(&format!("poll:close:{id}")),
+            "second pick by a host lost the controls: {again}"
+        );
+        assert!(again.to_string().contains("locked"), "{again}");
+    }
+
+    /// A host's Close that lands just past the deadline: the lazy deadline check
+    /// inside the host gate closes the poll — and it's still this host's close,
+    /// so the results are announced rather than "already closed".
+    #[test]
+    fn a_close_just_past_the_deadline_still_announces_the_results() {
+        let state = test_state();
+        let id = "abc";
+        let mut cfg = config_with("string_select", None);
+        cfg.ends_at = Some(unix_millis() / 1000 - 60);
+        state.store.create(id, TEST_EDIT_TOKEN, &cfg).unwrap();
+        state
+            .store
+            .cast_ballot(id, "100", &["a".to_string()], true)
+            .unwrap();
+
+        let v = body_json(handle_component(
+            &state,
+            &panel_click(id, "close", "1", MANAGE_GUILD, &[]),
+        ));
+        assert_eq!(v["type"], 4, "{v}");
+        let s = v["data"]["content"].as_str().unwrap();
+        assert!(s.contains("Poll closed"), "{s}");
+        assert!(s.contains("**Movie night**"), "{s}");
+
+        // A second Close finds it closed by someone else: the closed panel, in place.
+        let again = body_json(handle_component(
+            &state,
+            &panel_click(id, "close", "1", MANAGE_GUILD, &[]),
+        ));
+        assert_eq!(again["type"], 7, "{again}");
+        assert!(
+            again.to_string().contains(&format!("poll:reopen:{id}")),
+            "{again}"
+        );
+    }
+
+    /// A template stored before saving refused browser-only uploads would make
+    /// every vote fail (Discord refuses the whole edit). Such a poll falls back
+    /// to restyling the live select — still wired from the config.
+    #[test]
+    fn a_stored_template_naming_an_upload_falls_back_to_the_live_component() {
+        let state = test_state();
+        let id = "abc";
+        let template = json!([
+            { "type": 10, "content": "{question}\n{results}" },
+            { "type": 12, "items": [{ "media": { "url": "session://k1/chart.png" } }] },
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": format!("poll:{id}"), "options": [
+                    { "label": "Movie night", "value": "a" }, { "label": "Game night", "value": "b" }
+                ]}
+            ]}
+        ]);
+        state
+            .store
+            .create(
+                id,
+                TEST_EDIT_TOKEN,
+                &config_with("string_select", Some(template)),
+            )
+            .unwrap();
+        let live = json!([
+            { "type": 10, "content": "What next?" },
+            { "type": 12, "items": [{ "media": {
+                "url": "https://cdn.discordapp.com/attachments/1/2/chart.png",
+                "proxy_url": "https://media.discordapp.net/chart.png", "attachment_id": "2"
+            }}]},
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": format!("poll:{id}"), "placeholder": "Cast your vote", "options": [
+                    { "label": "Movie night", "value": "a" }, { "label": "Game night", "value": "b" }
+                ]}
+            ]}
+        ]);
+        let v = body_json(handle_component(
+            &state,
+            &select_click(id, "555", "0", &["a"], live),
+        ));
+        assert_eq!(v["type"], 7, "{v}");
+        let s = v.to_string();
+        assert!(!s.contains("session://"), "{s}");
+        assert!(
+            s.contains("cdn.discordapp.com/attachments/1/2/chart.png"),
+            "{s}"
+        );
+        assert!(!s.contains("proxy_url"), "{s}");
+        assert!(s.contains("Cast your vote \u{B7} 1 vote"), "{s}");
+        assert_eq!(state.store.tallies(id).unwrap().total, 1);
     }
 
     #[test]
