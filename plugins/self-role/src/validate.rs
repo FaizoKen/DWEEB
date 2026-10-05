@@ -156,6 +156,103 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     Ok(())
 }
 
+// ── Roles a self-role menu may never hand out ───────────────────────────────
+
+/// Permission bits that make a role a *staff* role: moderation, server
+/// administration, or reach into members' privacy. A self-role menu may never
+/// hand one out.
+///
+/// Why this exists: creating a menu needs no Discord identity (instance
+/// creation is anonymous, like every DWEEB plugin), and a click is judged only
+/// by the menu's own config — so anyone able to post a DWEEB message carrying a
+/// `selfrole:` button (a member with Manage Webhooks in one channel, or anyone
+/// holding a leaked webhook URL) could otherwise save a menu listing the
+/// server's Moderator role and give it to themselves with the shared bot.
+/// Discord only checks the bot's role hierarchy, which says nothing about who
+/// configured the menu.
+pub const STAFF_PERMISSIONS: u64 = (1 << 1) // KICK_MEMBERS
+    | (1 << 2) // BAN_MEMBERS
+    | (1 << 3) // ADMINISTRATOR
+    | (1 << 4) // MANAGE_CHANNELS
+    | (1 << 5) // MANAGE_GUILD
+    | (1 << 7) // VIEW_AUDIT_LOG
+    | (1 << 13) // MANAGE_MESSAGES
+    | (1 << 17) // MENTION_EVERYONE
+    | (1 << 19) // VIEW_GUILD_INSIGHTS
+    | (1 << 22) // MUTE_MEMBERS
+    | (1 << 23) // DEAFEN_MEMBERS
+    | (1 << 24) // MOVE_MEMBERS
+    | (1 << 27) // MANAGE_NICKNAMES
+    | (1 << 28) // MANAGE_ROLES
+    | (1 << 29) // MANAGE_WEBHOOKS
+    | (1 << 30) // MANAGE_GUILD_EXPRESSIONS
+    | (1 << 33) // MANAGE_EVENTS
+    | (1 << 34) // MANAGE_THREADS
+    | (1 << 40) // MODERATE_MEMBERS
+    | (1 << 41); // VIEW_CREATOR_MONETIZATION_ANALYTICS
+
+/// Why a role can't be part of a self-role menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleBlock {
+    /// `@everyone` (its id is the guild id) — every member already has it.
+    Everyone,
+    /// An integration's own role or the booster role — Discord manages it.
+    Managed,
+    /// It carries a [`STAFF_PERMISSIONS`] bit.
+    Staff,
+    /// Not one of this server's roles (deleted, or from another server).
+    Missing,
+}
+
+impl RoleBlock {
+    /// The reason, phrased to follow a role name ("**Moderator** — …").
+    pub fn reason(self) -> &'static str {
+        match self {
+            RoleBlock::Everyone => "every member already has @everyone",
+            RoleBlock::Managed => "Discord manages it (a bot's own role or the booster role)",
+            RoleBlock::Staff => "it carries moderator or admin permissions",
+            RoleBlock::Missing => "it isn't one of this server's roles any more",
+        }
+    }
+}
+
+/// Whether `role_id` may be handed out by a self-role menu in `guild_id`, judged
+/// against the guild's live role list. `None` = fine.
+pub fn role_block(
+    role_id: &str,
+    guild_id: &str,
+    roles: &[crate::rest::RoleInfo],
+) -> Option<RoleBlock> {
+    if role_id == guild_id {
+        return Some(RoleBlock::Everyone);
+    }
+    let Some(role) = roles.iter().find(|r| r.id == role_id) else {
+        return Some(RoleBlock::Missing);
+    };
+    if role.managed {
+        return Some(RoleBlock::Managed);
+    }
+    if role.permissions & STAFF_PERMISSIONS != 0 {
+        return Some(RoleBlock::Staff);
+    }
+    None
+}
+
+/// The save-time refusal for a menu listing roles it may never hand out,
+/// naming each with its reason so the admin knows what to change.
+pub fn blocked_roles_message(blocked: &[(String, RoleBlock)]) -> String {
+    let list = blocked
+        .iter()
+        .take(5)
+        .map(|(name, why)| format!("**{name}** ({})", why.reason()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if blocked.len() > 5 { ", …" } else { "" };
+    format!(
+        "A self-role menu can't hand out {list}{more}. Pick roles without moderator or admin permissions — give staff powers through a separate role members can't pick."
+    )
+}
+
 /// SSRF guard: only accept genuine Discord incoming-webhook URLs as the
 /// audit-log destination. Without this, a stored config could make the service
 /// POST to an arbitrary host.
@@ -172,9 +269,14 @@ pub fn validate_webhook(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Discord snowflakes are 17–20 digits today; accept a little slack.
+/// A Discord snowflake: 17–20 digits that fit the u64 Discord stores them in.
+/// The old 15–25-digit slack let through ids past u64 that Discord answers
+/// with a 400 — reachable by anyone through the open config API, and mapped to
+/// a paging 502 before `ConnectError::InvalidId` existed.
 pub fn is_snowflake(s: &str) -> bool {
-    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    (17..=20).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
 }
 
 #[cfg(test)]
@@ -187,6 +289,62 @@ mod tests {
         assert!(validate_webhook("https://evil.example.com/api/webhooks/1/x").is_err());
         assert!(validate_webhook("https://discord.com/users/@me").is_err());
         assert!(validate_webhook("not a url").is_err());
+    }
+
+    fn role(id: &str, managed: bool, permissions: u64) -> crate::rest::RoleInfo {
+        crate::rest::RoleInfo {
+            id: id.into(),
+            name: format!("Role {id}"),
+            managed,
+            permissions,
+        }
+    }
+
+    #[test]
+    fn staff_managed_everyone_and_foreign_roles_are_never_handed_out() {
+        let guild = "100000000000000000";
+        let roles = vec![
+            role(guild, false, 0),                      // @everyone
+            role("200000000000000001", false, 1 << 10), // VIEW_CHANNEL only
+            role("200000000000000002", false, 1 << 3),  // Administrator
+            role("200000000000000003", false, 1 << 2),  // Ban Members
+            role("200000000000000004", false, 1 << 40), // Timeout members
+            role("200000000000000005", true, 0),        // a bot's own role
+            role("200000000000000006", false, 1 << 26), // Change own nickname
+        ];
+        assert_eq!(role_block("200000000000000001", guild, &roles), None);
+        assert_eq!(role_block("200000000000000006", guild, &roles), None);
+        assert_eq!(role_block(guild, guild, &roles), Some(RoleBlock::Everyone));
+        for staff in [
+            "200000000000000002",
+            "200000000000000003",
+            "200000000000000004",
+        ] {
+            assert_eq!(role_block(staff, guild, &roles), Some(RoleBlock::Staff));
+        }
+        assert_eq!(
+            role_block("200000000000000005", guild, &roles),
+            Some(RoleBlock::Managed)
+        );
+        assert_eq!(
+            role_block("999999999999999999", guild, &roles),
+            Some(RoleBlock::Missing)
+        );
+        let msg = blocked_roles_message(&[("Moderator".into(), RoleBlock::Staff)]);
+        assert!(msg.contains("**Moderator**"), "{msg}");
+        assert!(msg.contains("moderator or admin"), "{msg}");
+    }
+
+    #[test]
+    fn a_snowflake_is_17_to_20_digits_that_fit_a_u64() {
+        assert!(is_snowflake("80351110224678912")); // 17 digits
+        assert!(is_snowflake("123456789012345678"));
+        assert!(is_snowflake("18446744073709551615")); // u64::MAX
+        assert!(!is_snowflake("1234567890123456")); // 16 digits
+        assert!(!is_snowflake("99999999999999999999")); // 20 digits, past u64
+        assert!(!is_snowflake("123456789012345678901")); // 21 digits
+        assert!(!is_snowflake("12345678901234567a"));
+        assert!(!is_snowflake(""));
     }
 
     #[test]

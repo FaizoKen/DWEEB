@@ -102,6 +102,7 @@ async fn run() {
         http,
         config: Arc::new(config),
         primary_key,
+        role_cache: Default::default(),
     };
 
     // Temporary-role reaper: only worth running when a bot token is configured

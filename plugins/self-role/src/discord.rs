@@ -424,24 +424,42 @@ fn role_label(roles: &[ManagedRole], id: &str) -> String {
         .unwrap_or_else(|| format!("<@&{id}>"))
 }
 
-/// Build the ephemeral confirmation after a (possibly partial) change.
-///
-/// `added`/`removed` are the role ids that actually changed. `denied` are ones
-/// Discord refused (almost always role hierarchy), `busy` are ones a transient
-/// error (rate-limit / 5xx / network) stopped, and `blocked` are adds a `max`
-/// cap refused — each gets its own plain-language line, because "nothing
+/// What one click actually did, for [`build_reply`]. Every field is a list of
+/// role ids.
+#[derive(Default)]
+pub struct ReplyOutcome<'a> {
+    /// Roles that were actually given.
+    pub added: &'a [String],
+    /// Roles that were actually taken away.
+    pub removed: &'a [String],
+    /// Discord refused the change (almost always role hierarchy).
+    pub denied: &'a [String],
+    /// A transient error (rate-limit / 5xx / network) stopped the change.
+    pub busy: &'a [String],
+    /// Adds a `max` cap refused.
+    pub blocked: &'a [String],
+    /// Adds this service refused because the role is one a self-role menu must
+    /// never hand out (see `validate::role_block`).
+    pub refused: &'a [String],
+    /// When the menu grants temporary roles: the removal time (unix seconds),
+    /// appended to the "Added …" line.
+    pub expires_at_unix: Option<i64>,
+}
+
+/// Build the ephemeral confirmation after a (possibly partial) change. Each
+/// kind of outcome gets its own plain-language line, because "nothing
 /// happened," or the *wrong* reason for it, is the most confusing outcome for a
-/// self-role menu. When the menu grants temporary roles, `expires_at_unix` (the
-/// removal time, unix seconds) is appended to the "Added …" line.
-pub fn build_reply(
-    cfg: &InstanceConfig,
-    added: &[String],
-    removed: &[String],
-    denied: &[String],
-    busy: &[String],
-    blocked: &[String],
-    expires_at_unix: Option<i64>,
-) -> Value {
+/// self-role menu.
+pub fn build_reply(cfg: &InstanceConfig, outcome: &ReplyOutcome) -> Value {
+    let ReplyOutcome {
+        added,
+        removed,
+        denied,
+        busy,
+        blocked,
+        refused,
+        expires_at_unix,
+    } = *outcome;
     let mut lines: Vec<String> = Vec::new();
 
     // A custom message replaces the auto summary of *what* changed, but a
@@ -488,6 +506,17 @@ pub fn build_reply(
         lines.push(format!(
             "\u{26A0}\u{FE0F} You can hold at most **{cap}** role{} from this menu, so I didn't add {} — remove one first.",
             if cap == 1 { "" } else { "s" },
+            join_human(&names)
+        ));
+    }
+
+    if !refused.is_empty() {
+        let names: Vec<String> = refused
+            .iter()
+            .map(|id| role_label(&cfg.roles, id))
+            .collect();
+        lines.push(format!(
+            "\u{1F6AB} I can't hand out {} from this menu \u{2014} it carries moderator or admin permissions (or Discord manages it), and a self-role menu never grants those. Ask an admin to pick a different role.",
             join_human(&names)
         ));
     }
@@ -758,10 +787,23 @@ mod tests {
     fn reply_separates_denied_from_busy() {
         let id = "1".repeat(18);
         let cfg = cfg_with(vec![mrole(&id, "Red")], None);
+        let ids = std::slice::from_ref(&id);
         // A refusal blames hierarchy; a transient blip tells them to retry.
-        let denied = build_reply(&cfg, &[], &[], std::slice::from_ref(&id), &[], &[], None);
+        let denied = build_reply(
+            &cfg,
+            &ReplyOutcome {
+                denied: ids,
+                ..Default::default()
+            },
+        );
         assert!(reply_text(&denied).contains("above"));
-        let busy = build_reply(&cfg, &[], &[], &[], std::slice::from_ref(&id), &[], None);
+        let busy = build_reply(
+            &cfg,
+            &ReplyOutcome {
+                busy: ids,
+                ..Default::default()
+            },
+        );
         assert!(reply_text(&busy).contains("busy"));
     }
 
@@ -769,7 +811,13 @@ mod tests {
     fn reply_reports_a_cap_block() {
         let id = "1".repeat(18);
         let cfg = cfg_with(vec![mrole(&id, "Red")], Some(2));
-        let v = build_reply(&cfg, &[], &[], &[], &[], std::slice::from_ref(&id), None);
+        let v = build_reply(
+            &cfg,
+            &ReplyOutcome {
+                blocked: std::slice::from_ref(&id),
+                ..Default::default()
+            },
+        );
         let t = reply_text(&v);
         assert!(t.contains("at most"));
         assert!(t.contains("2"));
@@ -781,15 +829,30 @@ mod tests {
         let cfg = cfg_with(vec![mrole(&id, "Red")], None);
         let v = build_reply(
             &cfg,
-            std::slice::from_ref(&id),
-            &[],
-            &[],
-            &[],
-            &[],
-            Some(1_700_000_000),
+            &ReplyOutcome {
+                added: std::slice::from_ref(&id),
+                expires_at_unix: Some(1_700_000_000),
+                ..Default::default()
+            },
         );
         let t = reply_text(&v);
         assert!(t.contains("Added"));
         assert!(t.contains("<t:1700000000:R>"));
+    }
+
+    #[test]
+    fn reply_explains_a_refused_staff_role() {
+        let id = "1".repeat(18);
+        let cfg = cfg_with(vec![mrole(&id, "Moderator")], None);
+        let v = build_reply(
+            &cfg,
+            &ReplyOutcome {
+                refused: std::slice::from_ref(&id),
+                ..Default::default()
+            },
+        );
+        let t = reply_text(&v);
+        assert!(t.contains("**Moderator**"), "{t}");
+        assert!(t.contains("never grants"), "{t}");
     }
 }

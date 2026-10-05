@@ -445,7 +445,7 @@
       let logWebhookSet = false; // a webhook is already stored (reconfigure)
 
       const $ = (id) => document.getElementById(id);
-      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const isSnowflake = (s) => /^\d{17,20}$/.test((s || "").trim());
       const isSelect = () => target === "string_select";
       const addsRoles = () => mode === "toggle" || mode === "add";
       const hexColor = (n) =>
@@ -646,11 +646,15 @@
         }
         for (const r of shown) {
           const row = document.createElement("label");
-          row.className = "role" + (r.assignable === false ? " blocked" : "");
+          row.className =
+            "role" + (r.assignable === false || r.privileged === true ? " blocked" : "");
           const input = document.createElement("input");
           input.type = isSelect() ? "checkbox" : "radio";
           input.name = "role";
           input.checked = selected.has(r.id);
+          // A staff role can never be handed out (the service refuses to save
+          // one) — lock it, but leave an already-selected one clearable.
+          if (r.privileged === true && !input.checked) input.disabled = true;
           input.addEventListener("change", () => {
             if (!isSelect()) selected = new Set();
             if (input.checked) selected.add(r.id);
@@ -666,7 +670,14 @@
           name.className = "name";
           name.textContent = r.name;
           row.append(input, dot, name);
-          if (r.assignable === false) {
+          if (r.privileged === true) {
+            const tag = document.createElement("span");
+            tag.className = "warn-tag";
+            tag.textContent = "🔒 staff role";
+            tag.title =
+              "This role carries moderator or admin permissions, so a self-role menu never hands it out. Give staff powers through a separate role members can't pick.";
+            row.appendChild(tag);
+          } else if (r.assignable === false) {
             const tag = document.createElement("span");
             tag.className = "warn-tag";
             tag.textContent = r.managed ? "⚠ managed" : "⚠ above bot";
@@ -1376,6 +1387,11 @@
         if (selected.size === 0)
           return fail(isSelect() ? "Choose at least one role." : "Choose a role for the button.");
         if (!isSelect() && selected.size !== 1) return fail("A button gives exactly one role.");
+        const staff = roles.filter((r) => selected.has(r.id) && r.privileged === true);
+        if (staff.length)
+          return fail(
+            `A self-role menu can't hand out ${staff.map((r) => r.name).join(", ")} — ${staff.length === 1 ? "it carries" : "they carry"} moderator or admin permissions. Pick roles without staff permissions.`,
+          );
 
         const replyText = $("replyText").value.trim();
         if (replyMode === "custom" && !replyText)
