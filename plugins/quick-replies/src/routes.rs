@@ -159,16 +159,42 @@ pub async fn update_instance(
     }
 }
 
-/// Read an instance for the config UI (no secrets to mask).
-pub async fn get_instance(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    match state.store.get(&id) {
-        Ok(Some(config)) => Json(MaskedInstance { id, config }).into_response(),
-        Ok(None) => not_found(),
+/// Read an instance for the config UI.
+///
+/// The id alone is public (it's in the posted component's `custom_id`), so a
+/// role-gated reply's message is only returned to a request carrying the edit
+/// token; anyone else gets the menu with that message withheld (see
+/// [`MaskedInstance::public_view`]). A wrong token reads the same as none.
+pub async fn get_instance(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let config = match state.store.get(&id) {
+        Ok(Some(config)) => config,
+        Ok(None) => return not_found(),
         Err(e) => {
             tracing::error!(error = %e, "get instance");
-            storage_error()
+            return storage_error();
         }
-    }
+    };
+    let authorized = match edit_token_from_headers(&headers) {
+        None => false,
+        Some(token) => match state.store.authorize_edit(&id, token) {
+            Ok(EditLookup::Authorized) => true,
+            Ok(_) => false,
+            Err(e) => {
+                tracing::error!(error = %e, "read authorization lookup");
+                false
+            }
+        },
+    };
+    let view = if authorized {
+        MaskedInstance::full(id, config)
+    } else {
+        MaskedInstance::public_view(id, config)
+    };
+    Json(view).into_response()
 }
 
 // ── /interactions ────────────────────────────────────────────────────────────
@@ -349,4 +375,106 @@ fn storage_error() -> Response {
         Json(json!({ "error": "Storage error." })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{QuickReply, RoleRef};
+
+    const KEY: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+    fn test_state() -> AppState {
+        AppState {
+            store: Arc::new(Store::open(":memory:").unwrap()),
+            http: reqwest::Client::new(),
+            config: Arc::new(Config {
+                port: 0,
+                public_base_url: String::new(),
+                discord_public_key: KEY.into(),
+                dispatcher_forward_secret: None,
+                database_path: String::new(),
+                default_bot_token: None,
+                bot_invite_url: None,
+            }),
+            primary_key: discord::parse_verifying_key(KEY).unwrap(),
+        }
+    }
+
+    fn reply(key: &str, body: &str, gated: bool) -> QuickReply {
+        QuickReply {
+            key: key.into(),
+            label: format!("Topic {key}"),
+            emoji: None,
+            emoji_id: None,
+            emoji_animated: None,
+            description: None,
+            title: Some(format!("Heading {key}")),
+            payload: None,
+            body: body.into(),
+            ephemeral: true,
+            allowed_roles: if gated {
+                vec![RoleRef {
+                    id: "123456789012345678".into(),
+                    name: "Subscriber".into(),
+                    color: 0,
+                }]
+            } else {
+                vec![]
+            },
+        }
+    }
+
+    async fn read(state: &AppState, token: Option<&str>) -> (StatusCode, Value) {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = token {
+            headers.insert(EDIT_TOKEN_HEADER, token.parse().unwrap());
+        }
+        let resp = get_instance(State(state.clone()), Path("abc".to_string()), headers).await;
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    /// A role-gated reply's message must not be readable by anyone who saw the
+    /// public id in the component's `custom_id` — only by the browser holding
+    /// the edit token. The open reply beside it reads as before.
+    #[tokio::test]
+    async fn a_gated_replys_content_is_not_readable_without_edit_access() {
+        let state = test_state();
+        let token = "d".repeat(64);
+        let cfg = InstanceConfig {
+            target: "string_select".into(),
+            guild_id: None,
+            guild_name: String::new(),
+            replies: vec![
+                reply("k1", "Welcome! Read the rules.", false),
+                reply(
+                    "k2",
+                    "Subscriber-only download: https://example.com/secret-build.zip",
+                    true,
+                ),
+            ],
+        };
+        state.store.create("abc", &token, &cfg).unwrap();
+
+        for presented in [None, Some("e".repeat(64))] {
+            let (status, body) = read(&state, presented.as_deref()).await;
+            assert_eq!(status, StatusCode::OK);
+            let text = body.to_string();
+            assert!(!text.contains("secret-build.zip"), "{text}");
+            assert!(!text.contains("Heading k2"), "{text}");
+            // The topic and its gate stay, so the form still shows the menu.
+            assert_eq!(body["replies"][1]["label"], "Topic k2");
+            assert_eq!(body["withheld"], serde_json::json!(["k2"]));
+            assert_eq!(body["replies"][0]["body"], "Welcome! Read the rules.");
+        }
+
+        let (status, body) = read(&state, Some(&token)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.to_string().contains("secret-build.zip"));
+        assert!(body.get("withheld").is_none(), "{body}");
+    }
 }

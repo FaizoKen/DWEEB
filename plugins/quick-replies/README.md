@@ -51,7 +51,12 @@ A reply is more than a line of text:
   uploads it with the message), and Discord refuses a whole reply that names one
   it can't fetch. The config UI flags such a message the moment it's picked and
   saving refuses it; a reply stored before that check goes out with the picture
-  left out (`src/media.rs`).
+  left out (`src/media.rs`). A **File** component can't ride in a reply at all —
+  Discord only accepts an `attachment://` there and a reply uploads nothing — so
+  it's refused (and left out) even when it carries a web link, as a restored
+  message's does. Filling `{username}`/`{server}` per click can lengthen a saved
+  message past Discord's 4000-character total, so its text is trimmed back inside
+  it (the end of the last block gets a `…`) rather than the reply being refused.
 - **Always private** — every reply is ephemeral: only the person who clicks sees
   it. That's the right default for FAQ/support/link-hub macros and keeps a busy
   channel quiet no matter how often a button is used.
@@ -107,7 +112,8 @@ are ephemeral, but the pin is kept defensively regardless.)
 | Concern | How it's handled |
 |---|---|
 | Interaction authenticity | Ed25519 signature verified on the **raw** body before parsing ([`discord.rs`](src/discord.rs)). Bad/missing signature → `401`. Custom-app signatures verified with the dispatcher-attested key (constant-time secret check). |
-| Who can reconfigure | The instance id is 128 bits of CSPRNG entropy, carried inside the Discord `custom_id` (invisible to normal users). Knowing it is the capability; there's no separate account system. |
+| Who can reconfigure | The instance id is a public binding — it rides in the Discord `custom_id`, which every member's client receives — so it is never authority. Replacing a menu needs the separate 256-bit edit token (only its SHA-256 digest is stored), returned once at creation; without it, saving creates a replacement menu. |
+| Who can read a gated reply | `GET /api/instances/:id` returns a role-gated reply's message (body, heading, saved message) only with `X-DWEEB-Plugin-Edit-Token`; anyone holding just the public id gets the menu with those messages withheld (`withheld: [keys]`), and the config UI asks for them to be written again. |
 | Option-value integrity | A select's options are wired **and locked** by DWEEB; the handler maps a picked `value` to a known reply key and ignores anything it doesn't recognise — never acting on a raw client-supplied value. |
 | Role-gating | Re-derived from the member's payload roles (intersected with the configured set), never from a client claim; fails closed outside a guild. |
 | Mention safety | Every reply sets `allowed_mentions` to ping **only** the clicker (`parse: []`), so canned text — or a member's own name — can never `@everyone` the channel. |
@@ -177,7 +183,7 @@ On the DWEEB production stack it's wired exactly like the other plugins — see
 | GET | `/api/meta` | Whether a shared bot exists (for the gate picker) + its invite URL. |
 | POST | `/api/connect` | Probe a guild with the shared bot → its roles (gate picker) and custom emoji (emoji picker). Stores nothing. |
 | POST | `/api/instances` | Create a menu → `{ id }`. |
-| GET | `/api/instances/:id` | Read a menu's config. |
+| GET | `/api/instances/:id` | Read a menu's config (role-gated replies' messages only with the edit token). |
 | PUT | `/api/instances/:id` | Replace a menu's config. |
 | POST | `/interactions` | Discord interactions (signature-verified). |
 

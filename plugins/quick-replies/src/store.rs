@@ -122,13 +122,54 @@ impl InstanceConfig {
 }
 
 /// A read view for the config UI. Carries the instance `id` (which
-/// [`InstanceConfig`] itself doesn't) and holds no secrets — a quick reply has
-/// no per-instance token to mask.
+/// [`InstanceConfig`] itself doesn't).
+///
+/// The id is public — it sits in the component's `custom_id`, which every member
+/// who can see the message can read — so it can't decide who reads a reply
+/// limited to certain roles. Without the edit token such a reply comes back with
+/// its message withheld ([`MaskedInstance::public_view`]); everything else is
+/// what any member would see by clicking anyway.
 #[derive(Debug, Serialize)]
 pub struct MaskedInstance {
     pub id: String,
     #[serde(flatten)]
     pub config: InstanceConfig,
+    /// Keys of the replies whose message was withheld from this read.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub withheld: Vec<String>,
+}
+
+impl MaskedInstance {
+    /// Everything, for the browser holding the edit token.
+    pub fn full(id: String, config: InstanceConfig) -> Self {
+        Self {
+            id,
+            config,
+            withheld: Vec::new(),
+        }
+    }
+
+    /// What anyone holding only the public id may read: a role-gated reply
+    /// keeps its topic (label, emoji, description) and its gate, but not its
+    /// message — the typed text, heading and saved message are cleared.
+    pub fn public_view(id: String, mut config: InstanceConfig) -> Self {
+        let mut withheld = Vec::new();
+        for reply in config
+            .replies
+            .iter_mut()
+            .filter(|r| !r.allowed_roles.is_empty())
+        {
+            reply.body.clear();
+            reply.title = None;
+            reply.payload = None;
+            withheld.push(reply.key.clone());
+        }
+        Self {
+            id,
+            config,
+            withheld,
+        }
+    }
 }
 
 /// Outcome of an edit-authorization check.

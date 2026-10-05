@@ -237,9 +237,13 @@ fn validate_roles(roles: &[RoleRef]) -> Result<(), String> {
     Ok(())
 }
 
-/// Discord snowflakes are 17–20 digits today; accept a little slack.
+/// A Discord snowflake: 17–20 digits that fit the u64 Discord stores them in.
+/// The old 15–25-digit slack let through ids past u64 that Discord answers with
+/// a 400 — reachable by anyone through the open `/api/connect`.
 pub fn is_snowflake(s: &str) -> bool {
-    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    (17..=20).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
 }
 
 #[cfg(test)]
@@ -400,6 +404,23 @@ mod tests {
         assert!(err.contains("(rules.pdf)"), "{err}");
     }
 
+    /// A File component only takes an `attachment://` reference and a reply
+    /// uploads nothing, so even a restored message's CDN-linked File is refused
+    /// at save rather than failing every click.
+    #[test]
+    fn refuses_a_file_component_even_with_a_web_link() {
+        let mut r = reply("k1", "");
+        r.payload = Some(serde_json::json!({
+            "components": [
+                { "type": 10, "content": "Rules attached." },
+                { "type": 13, "file": { "url": "https://cdn.discordapp.com/attachments/1/2/rules.pdf" } }
+            ]
+        }));
+        let err = validate_config(&cfg("button", vec![r])).unwrap_err();
+        assert!(err.starts_with("This reply attaches a file"), "{err}");
+        assert!(err.contains("(rules.pdf)"), "{err}");
+    }
+
     #[test]
     fn names_at_most_three_unsendable_pictures() {
         let items: Vec<_> = ["a", "b", "c", "d", "e"]
@@ -446,6 +467,20 @@ mod tests {
         assert!(validate_config(&c).is_ok());
         c.guild_id = None;
         assert!(validate_config(&c).is_ok());
+    }
+
+    /// An id past 64 bits is one Discord can't parse; refusing it here keeps it
+    /// from ever reaching Discord through the open config API.
+    #[test]
+    fn a_snowflake_must_fit_in_64_bits() {
+        assert!(is_snowflake("18446744073709551615"));
+        assert!(!is_snowflake("18446744073709551616"));
+        assert!(!is_snowflake("99999999999999999999999"));
+        assert!(
+            !is_snowflake("1234567890123456"),
+            "16 digits is no snowflake"
+        );
+        assert!(is_snowflake("123456789012345678"));
     }
 
     #[test]

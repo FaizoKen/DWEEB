@@ -345,7 +345,86 @@ fn saved_components(reply: &QuickReply, ctx: &ReplyContext) -> Option<Vec<Value>
     for component in &mut components {
         substitute_in_content(component, ctx);
     }
+    // DWEEB checked the saved message against Discord's 4000-character total
+    // when it was saved, with the variables unfilled. A long server name or a
+    // few `{username}`s can push it past that per click, and Discord refuses
+    // the whole reply — so trim the text back inside the budget instead.
+    fit_text_budget(&mut components, MAX_V2_TEXT);
     Some(components)
+}
+
+/// Every text field Discord totals against a Components V2 message's limit, in
+/// UTF-16 units: `content`, `label`, `description` and `placeholder`, menu
+/// options included (the same fields DWEEB's own count reads).
+fn text_units(value: &Value) -> usize {
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| match (k.as_str(), v) {
+                ("content" | "label" | "description" | "placeholder", Value::String(s)) => {
+                    s.encode_utf16().count()
+                }
+                _ => text_units(v),
+            })
+            .sum(),
+        Value::Array(items) => items.iter().map(text_units).sum(),
+        _ => 0,
+    }
+}
+
+/// Shorten `content` strings, last first, until the message's text fits `max`
+/// units. Only `content` is cut: it's where the substituted variables live, and
+/// a label or option is short and structural.
+fn fit_text_budget(components: &mut [Value], max: usize) {
+    let total: usize = components.iter().map(text_units).sum();
+    let mut over = total.saturating_sub(max);
+    if over == 0 {
+        return;
+    }
+    let mut contents: Vec<&mut String> = Vec::new();
+    for component in components.iter_mut() {
+        collect_contents(component, &mut contents);
+    }
+    for content in contents.into_iter().rev() {
+        if over == 0 {
+            break;
+        }
+        let len = content.encode_utf16().count();
+        if len == 0 {
+            continue;
+        }
+        // Keep what fits, plus an ellipsis (1 unit) when anything is cut.
+        let keep = len.saturating_sub(over + 1);
+        let mut cut = clamp(content, keep);
+        let removed = len - cut.encode_utf16().count();
+        if removed > 0 {
+            cut.push('…');
+        }
+        over = over.saturating_sub(len.saturating_sub(cut.encode_utf16().count()));
+        *content = cut;
+    }
+}
+
+fn collect_contents<'a>(value: &'a mut Value, out: &mut Vec<&'a mut String>) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if k == "content" && v.is_string() {
+                    if let Value::String(s) = v {
+                        out.push(s);
+                    }
+                } else {
+                    collect_contents(v, out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_contents(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// What a member sees when a saved reply held nothing but pictures this service
@@ -406,9 +485,16 @@ fn join_human(items: &[String]) -> String {
     }
 }
 
-/// Truncate to at most `max` characters (respecting char boundaries).
+/// Truncate to at most `max` UTF-16 units — the way Discord counts its text
+/// limits — on a character boundary.
 fn clamp(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
+    let mut used = 0;
+    s.chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= max
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -636,6 +722,49 @@ mod tests {
             out["data"]["components"][0]["content"].as_str(),
             Some(PICTURES_ONLY)
         );
+    }
+
+    /// DWEEB checks a saved message against the 4000-character total with its
+    /// variables unfilled; filling them per click can push it over, and Discord
+    /// refuses the whole reply. The text is trimmed back inside instead.
+    #[test]
+    fn a_saved_reply_stays_inside_the_v2_text_budget_after_substitution() {
+        let body = format!("{}{}", "x".repeat(3900), " {server}".repeat(10));
+        let mut r = reply("");
+        r.payload = Some(json!({
+            "components": [
+                { "type": COMPONENT_TEXT_DISPLAY, "content": "Header" },
+                { "type": COMPONENT_TEXT_DISPLAY, "content": body },
+            ]
+        }));
+        let long_server = ReplyContext {
+            server_name: "S".repeat(100),
+            ..ctx()
+        };
+        let out = build_reply(&r, &long_server);
+        let total = text_units(&out["data"]["components"]);
+        assert!(total <= MAX_V2_TEXT, "saved reply sends {total} units");
+        let last = out["data"]["components"][1]["content"].as_str().unwrap();
+        assert!(last.ends_with('…'), "a cut must show: {last:?}");
+        // The earlier block is kept whole; the cut lands at the end.
+        assert_eq!(out["data"]["components"][0]["content"], "Header");
+
+        // A message inside the budget is never touched.
+        let mut short = reply("");
+        short.payload = Some(json!({
+            "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": "Hi {user}" }]
+        }));
+        assert_eq!(
+            build_reply(&short, &ctx())["data"]["components"][0]["content"],
+            "Hi <@42>"
+        );
+    }
+
+    #[test]
+    fn clamp_counts_utf16_units_and_never_splits_a_character() {
+        assert_eq!(clamp("abc", 2), "ab");
+        assert_eq!(clamp("a😀b", 2), "a");
+        assert_eq!(clamp("a😀b", 3), "a😀");
     }
 
     #[test]

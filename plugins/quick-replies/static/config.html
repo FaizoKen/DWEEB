@@ -285,14 +285,16 @@
       // user's computer is a session:// handle to a file that only exists in
       // their browser: DWEEB's own Send uploads it, but a reply goes out from
       // this service, and Discord refuses the whole reply over one picture it
-      // can't fetch ("… didn't respond in time"). Only an http(s) link travels.
+      // can't fetch ("… didn't respond in time"). Only an http(s) link travels —
+      // and a File component never does, whatever its link: Discord only takes an
+      // attachment:// reference there, and a reply uploads no attachment.
       const SENDABLE_URL = /^https?:\/\/[\s\S]/i;
       const MAX_MEDIA_NAME = 80;
       function unsendableMedia(components) {
         const out = [];
         const note = (media, isFile) => {
           const url = media && typeof media.url === "string" ? media.url : "";
-          if (!SENDABLE_URL.test(url)) out.push({ name: mediaName(url), isFile });
+          if (isFile || !SENDABLE_URL.test(url)) out.push({ name: mediaName(url), isFile });
         };
         const walk = (list) => {
           for (const node of Array.isArray(list) ? list : []) {
@@ -313,8 +315,8 @@
         walk(components);
         return out;
       }
-      // The uploaded file's name (session://<id>/<name>, attachment://<name>),
-      // else the reference as written.
+      // The uploaded file's name (session://<id>/<name>, attachment://<name>,
+      // or a web link's last path segment), else the reference as written.
       function mediaName(raw) {
         const url = raw.trim();
         if (!url) return "a picture with no link";
@@ -325,6 +327,9 @@
           if (slash >= 0 && slash < rest.length - 1) name = rest.slice(slash + 1);
         } else if (url.startsWith("attachment://") && url.length > "attachment://".length) {
           name = url.slice("attachment://".length);
+        } else if (SENDABLE_URL.test(url)) {
+          const last = url.split(/[?#]/)[0].split("/").pop();
+          if (last) name = last;
         }
         const chars = Array.from(name);
         return chars.length > MAX_MEDIA_NAME ? chars.slice(0, MAX_MEDIA_NAME).join("") + "…" : name;
@@ -509,6 +514,18 @@
           cards.splice(i, 1);
           renderCards();
         });
+
+        // A role-gated reply read without this browser's edit access comes back
+        // with its message withheld — say so, rather than show a blank reply.
+        if (card.withheld) {
+          el.insertBefore(
+            callout(
+              "warn",
+              "This reply is limited to certain roles, so its message only opens in the browser that created this menu. Write it again (or pick its saved message again) — saving creates a replacement menu.",
+            ),
+            el.querySelector(".seg.src"),
+          );
+        }
 
         // Role gate.
         renderGate(card, el.querySelector(".gate-body"));
@@ -975,10 +992,16 @@
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
+        // Only the DWEEB page embedding this frame speaks the protocol. Any
+        // other window (one that opened DWEEB, or a frame beside this one) could
+        // otherwise post an init of its own and take the session over — its
+        // origin would receive every later request, the new edit token included.
+        if (event.source !== window.parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
         if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          if (event.origin !== hostOrigin) return;
           const resolve = pendingReqs.get(msg.requestId);
           pendingReqs.delete(msg.requestId);
           resolve(msg.ok ? msg.data : null);
@@ -986,6 +1009,9 @@
         }
 
         if (msg.type !== "dweeb:plugin:init") return;
+        // One session per frame: the host mounts a fresh frame to start over,
+        // so a second init is never legitimate and must not re-point it.
+        if (nonce != null) return;
         nonce = msg.nonce;
         hostOrigin = event.origin;
         protocolVersion = msg.apiVersion === 2 ? 2 : 1;
@@ -1131,16 +1157,24 @@
       // ── Reconfigure ─────────────────────────────────────────────────────
       async function loadInstance(id) {
         try {
-          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          // A reply limited to certain roles only comes back whole with the edit
+          // token (the id alone is public — it's in the posted component).
+          // Without it, such a reply's message is withheld and must be written
+          // again; saving then creates a replacement menu anyway.
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`, {
+            headers: managementToken ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {},
+          });
           if (!res.ok) return;
           const d = await res.json();
           target = d.target === "string_select" ? "string_select" : "button";
           if (d.guild_id && isSnowflake(d.guild_id)) guildId = d.guild_id;
           if (d.guild_name) guildName = d.guild_name;
+          const withheld = new Set(Array.isArray(d.withheld) ? d.withheld : []);
           cards = (d.replies || []).map((r) => {
             const card = newCard(r);
             // What members get today, so a problem with it can say so.
             card.storedPayload = card.payload;
+            card.withheld = withheld.has(r.key);
             return card;
           });
           // Seed the role list with any saved gate roles so they show by name
@@ -1185,6 +1219,10 @@
         for (const c of cards) {
           if (isSelect() && !c.label.trim())
             return fail("Every topic needs a label for its dropdown option.");
+          if (c.withheld && !usesSaved(c) && !c.body.trim()) {
+            const which = isSelect() && c.label.trim() ? `“${c.label.trim()}”` : "This reply";
+            return fail(`${which} is limited to certain roles and its message didn't open here — write it again before saving.`);
+          }
           if (c.source === "saved" && !usesSaved(c))
             return fail("Pick a saved message for every reply set to “Use a saved message”, or switch it back to writing one.");
           if (!usesSaved(c) && !c.body.trim())

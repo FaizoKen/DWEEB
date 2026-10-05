@@ -21,6 +21,11 @@
 //! reply uploads none), a `{server_icon}`-style placeholder only DWEEB's Send
 //! fills in, a bare attachment id, or no link at all.
 //!
+//! A **File** component is never sendable, whatever its link says: Discord only
+//! accepts an `attachment://<name>` reference there, and a reply uploads no
+//! attachment. A restored message's File keeps the CDN link Discord echoed, which
+//! looks fetchable but is refused just the same.
+//!
 //! `static/config.html` mirrors this walk (`unsendableMedia`) to warn on the
 //! card the moment such a message is picked; keep the two in step.
 
@@ -85,7 +90,10 @@ fn collect(components: &[Value], out: &mut Vec<Unsendable>) {
                     note(out, item.get("media"), false);
                 }
             }
-            Some(COMPONENT_FILE) => note(out, node.get("file"), true),
+            Some(COMPONENT_FILE) => out.push(Unsendable {
+                name: describe(node.get("file")),
+                is_file: true,
+            }),
             Some(COMPONENT_CONTAINER) => {
                 if let Some(children) = node.get("components").and_then(Value::as_array) {
                     collect(children, out);
@@ -112,7 +120,7 @@ pub fn strip_unsendable(components: &mut Vec<Value>) -> usize {
                 }
             }
             Some(COMPONENT_THUMBNAIL) if !sendable(node.get("media")) => removed += 1,
-            Some(COMPONENT_FILE) if !sendable(node.get("file")) => removed += 1,
+            Some(COMPONENT_FILE) => removed += 1,
             Some(COMPONENT_MEDIA_GALLERY) => {
                 if let Some(Value::Array(items)) = node.get_mut("items") {
                     let before = items.len();
@@ -178,6 +186,13 @@ fn describe(media: Option<&Value>) -> String {
         .strip_prefix("session://")
         .and_then(|rest| rest.split_once('/').map(|(_, name)| name))
         .or_else(|| url.strip_prefix("attachment://"))
+        // A File with a web link (a restored message's CDN copy): its name is
+        // the last path segment.
+        .or_else(|| {
+            is_sendable_url(url)
+                .then(|| url.split(['?', '#']).next().unwrap_or(url))
+                .and_then(|path| path.rsplit('/').next())
+        })
         .filter(|name| !name.is_empty())
         .unwrap_or(url);
     if name.chars().count() > MAX_NAME_CHARS {
@@ -368,6 +383,34 @@ mod tests {
         let mut stripped = components.clone();
         assert_eq!(strip_unsendable(&mut stripped), 0);
         assert_eq!(stripped, components);
+    }
+
+    /// Discord's File component only takes an `attachment://` reference, and a
+    /// reply uploads nothing — so a File is refused whatever its link says,
+    /// including the CDN link a restored message carries.
+    #[test]
+    fn a_file_component_never_rides_in_a_reply() {
+        let restored = json!({
+            "type": COMPONENT_FILE,
+            "file": { "url": "https://cdn.discordapp.com/attachments/1/2/rules.pdf" }
+        });
+        let found = unsendable_media(std::slice::from_ref(&restored));
+        assert_eq!(
+            found,
+            vec![Unsendable {
+                name: "rules.pdf".into(),
+                is_file: true
+            }]
+        );
+        let mut components = vec![
+            json!({ "type": 10, "content": "Rules attached." }),
+            restored,
+        ];
+        assert_eq!(strip_unsendable(&mut components), 1);
+        assert_eq!(
+            components,
+            vec![json!({ "type": 10, "content": "Rules attached." })]
+        );
     }
 
     #[test]
