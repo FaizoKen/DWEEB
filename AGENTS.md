@@ -2332,10 +2332,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   type use `componentMeta()` (unknown types render, never crash); the store mints fresh
   custom_ids for inspector switches too (`freshCustomId`) and Duplicate honours capacity; JSON
   export drops Discord's read-only media fields (`resolvedMedia.ts`) and a pasted share URL is
-  percent-decoded; the JSON panel follows the live message until edited. Activity collab: an
-  unsynced connection sends nothing, hello answers are addressed (`to`), our frames carry `seq`
-  and are reconciled in relay order, pending sync/snapshot flush on `pagehide`, and the guild
-  store is reset at Activity init unless it already holds the launching guild.
+  percent-decoded; the JSON panel follows the live message until edited. A ref callback that
+  sets state must hand back the *same* value when nothing changed: an inline `ref` runs on every
+  render, so the gallery measuring an already-cached image into a fresh `{ src, ratio }`
+  re-rendered forever and froze the first-visit page — the Lighthouse gate caught it
+  (`PROTOCOL_TIMEOUT`) and Pages never shipped it (`nextAspect`, `measuredAspect.test.ts`).
+  Activity collab: an unsynced connection sends nothing, hello answers are addressed (`to`),
+  our frames carry `seq` and are reconciled in relay order, pending sync/snapshot flush on
+  `pagehide`, and the guild store is reset at Activity init unless it already holds the
+  launching guild.
   **Plugins.** Tickets: a lock records `locked` before retiring controls, `muted_by_lock` is what
   reopen restores (NULL = pre-change row, old rule), Unknown Member (10007/10013) is nothing to
   do. Directory: an in-message refresh renders from the raw template but takes bindings from
