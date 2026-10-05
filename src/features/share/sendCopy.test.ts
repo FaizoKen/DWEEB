@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   PICK_DESTINATION_HINT,
+  cancelledAfterDispatchMessage,
+  unresolvedUrlTokensMessage,
   PICK_UPDATE_WEBHOOK_HINT,
   UNCHECKED_DESTINATION_TEXT,
   UPDATE_TARGET_GONE_TEXT,
@@ -224,5 +226,39 @@ describe("sendLeadCopy — saving into a loaded scheduled post", () => {
     });
     expect(copy).toContain("already scheduled");
     expect(copy).not.toContain("Pick a channel");
+  });
+});
+
+describe("unresolvedUrlTokensMessage", () => {
+  it("blames the missing icon only when the server is known and the icon is all that's missing", () => {
+    expect(
+      unresolvedUrlTokensMessage(["server_icon"], { serverKnown: true, action: "send" }),
+    ).toContain("this server has no icon");
+    expect(
+      unresolvedUrlTokensMessage(["server_icon"], { serverKnown: false, action: "send" }),
+    ).toContain("couldn't tell which server");
+    expect(
+      unresolvedUrlTokensMessage(["server_icon", "server_id"], {
+        serverKnown: true,
+        action: "send",
+      }),
+    ).toContain("couldn't tell which server");
+  });
+
+  it("offers picking another webhook only where there is one to pick", () => {
+    expect(
+      unresolvedUrlTokensMessage(["server_id"], { serverKnown: false, action: "schedule" }),
+    ).toMatch(/pick this webhook.*then schedule again/);
+    expect(
+      unresolvedUrlTokensMessage(["server_id"], { serverKnown: false, action: "save" }),
+    ).not.toMatch(/pick this webhook/);
+  });
+});
+
+describe("cancelledAfterDispatchMessage", () => {
+  // A cancel after the request left used to read as "nothing happened".
+  it("says the post or edit may already have landed", () => {
+    expect(cancelledAfterDispatchMessage("new")).toMatch(/may already have been posted/);
+    expect(cancelledAfterDispatchMessage("update")).toMatch(/may already have been applied/);
   });
 });

@@ -28,6 +28,7 @@ import {
 } from "@/core/guild/api";
 import { customBotInviteUrl, interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
 import { usePlanStore } from "@/core/plan/planStore";
+import { useGuildCustomBotsStore } from "@/core/guild/useGuildCustomBots";
 import { openExternalPopup } from "@/core/oauth/popupFlow";
 import { copyText } from "@/core/serialization/clipboard";
 import { Modal } from "@/ui/Modal";
@@ -56,6 +57,16 @@ type VerifyState =
   | { kind: "done"; connected: boolean }
   // Network / server hiccup re-fetching the registry; transient, offer a retry.
   | { kind: "unreachable"; message: string };
+
+/**
+ * Re-read the shared custom-bot list the Send dialog's "Post as" identity and
+ * webhook picker draw from. It's cached for a minute, so without this a bot
+ * registered here didn't appear there yet — and a removed one stayed on offer,
+ * failing when picked.
+ */
+function refreshSharedBots(guildId: string): void {
+  void useGuildCustomBotsStore.getState().load(guildId, { force: true });
+}
 
 /** Discord snowflakes are 17–20 digits today; accept a small range with slack. */
 const SNOWFLAKE_RE = /^\d{15,25}$/;
@@ -187,6 +198,7 @@ export function CustomBotDialog({
       const result = await addCustomBot(guildId, appId, publicKey, clientSecret);
       setState({ kind: "ready", bots: result.bots });
       if (result.ok) {
+        refreshSharedBots(guildId);
         const registeredId = appId.trim();
         if (editingId == null) {
           // A fresh registration still has to paste DWEEB's two URLs into the
@@ -215,6 +227,7 @@ export function CustomBotDialog({
     setActionError(null);
     try {
       setState({ kind: "ready", bots: await removeCustomBot(guildId, applicationId) });
+      refreshSharedBots(guildId);
       if (editingId === applicationId) resetForm();
       if (setupApp?.id === applicationId) closeSetup();
     } catch (e) {

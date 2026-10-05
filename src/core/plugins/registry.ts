@@ -41,6 +41,7 @@ const DEV_CONFIG_ORIGINS: Record<string, string> = {
   ).trim(),
   picker: (import.meta.env.VITE_DEV_PICKER_ORIGIN || "http://localhost:8097").trim(),
   poll: (import.meta.env.VITE_DEV_POLL_ORIGIN || "http://localhost:8098").trim(),
+  directory: (import.meta.env.VITE_DEV_DIRECTORY_ORIGIN || "http://localhost:8099").trim(),
 };
 
 /** Repoint a plugin's configUrl at its local dev origin, preserving the path. */

@@ -118,14 +118,18 @@ import {
 } from "@/core/webhook/webhookDraft";
 import { getPlugins } from "@/core/plugins/registry";
 import { pluginBoundComponents } from "@/core/plugins/targets";
-import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
+import {
+  collectMessagePlaceholders,
+  substituteMessage,
+  unresolvedUrlPlaceholders,
+  type PlaceholderContext,
+} from "@/core/plugins/placeholders";
 import { getPluginBindingGuild } from "@/core/state/pluginSummaryCache";
 import {
   addPermanentMessage,
   createCustomBotWebhook,
   fetchCustomBots,
   fetchPermanentSlots,
-  guildIconUrl,
   isAuthError,
   removePermanentMessage,
   type GuildWebhook,
@@ -181,11 +185,14 @@ import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
 import {
+  cancelledAfterDispatchMessage,
   sendDestinationCopy,
   sendDisabledHint,
   sendLeadCopy,
+  unresolvedUrlTokensMessage,
   updateFailureMessage,
 } from "./sendCopy";
+import { destinationPlaceholderContext, scheduleDestLabel } from "./destinationContext";
 import { type ShareTab } from "./tabs";
 import {
   describeUpdateTarget,
@@ -983,13 +990,15 @@ export function SendPanel({
 
   // The time the schedule field holds, as an instant (NaN while unset).
   const pickedAt = Date.parse(scheduleAt);
-  // An edit keeps its post's time unless the user moves it (compared to the
-  // minute, the input's own precision), and only a moved time is checked and
-  // sent — a paused post can sit in the past and still take a content edit.
-  const timeChanged =
-    !scheduleEditMode ||
-    Number.isNaN(pickedAt) ||
-    Math.floor(pickedAt / 60_000) !== Math.floor((scheduleOrigin?.runAt ?? 0) / 60);
+  // An edit keeps its post's time unless the user moves it, and only a moved
+  // time is checked and sent — a paused post can sit in the past and still take
+  // a content edit. "Moved" compares the field's own text with the text it was
+  // loaded with, never the parsed instants: in the repeated hour of a DST
+  // fall-back the wall clock names two instants, `Date.parse` picks the first,
+  // and a post scheduled for the second 01:30 used to read as moved — so a
+  // content-only save shifted it an hour earlier.
+  const originAtValue = scheduleOrigin ? localDateTimeValue(scheduleOrigin.runAt * 1000) : null;
+  const timeChanged = !scheduleEditMode || Number.isNaN(pickedAt) || scheduleAt !== originAtValue;
   // Refused up front, not at the click: the field's `min` keeps the picker off
   // past times, but a typed or stale value still arrives, so it's flagged under
   // the field and the primary waits for a future time.
@@ -1067,6 +1076,139 @@ export function SendPanel({
     setConfirmOpen(true);
   };
 
+  // What a post needs settled before it goes out, the same for Send now and for
+  // a new scheduled post — which used to skip all of it, storing
+  // `{server_icon}` literally, "this server's ID" in links and, for a pasted
+  // webhook, no server at all (the post then never showed in the Scheduled
+  // directory). Confirm who owns the webhook and where it posts when this
+  // browser can't say (a verify GET); apply the ownership, plugin-routing and
+  // wrong-server blocks that a fresh verify makes decidable — a block leaves
+  // things un-started, and the banner the verify unlocked says why; and build
+  // the core placeholder context from the destination this very post resolved.
+  type Preflight =
+    | {
+        kind: "ready";
+        ownerKind: WebhookOwnerKind | undefined;
+        appId: string | null;
+        /** What a verify here learned (undefined when no verify ran). */
+        resolved: { name?: string; avatar?: string | null; channelId?: string; guildId?: string };
+        guildId?: string;
+        channelId?: string;
+        context: PlaceholderContext;
+      }
+    | { kind: "cancelled" }
+    | { kind: "failed"; message: string; status?: number; body?: unknown }
+    | { kind: "blocked" };
+
+  const runPreflight = async (
+    target: NonNullable<typeof parsedUrl>,
+    signal: AbortSignal,
+  ): Promise<Preflight> => {
+    let ownerKind = knownOwnerKind;
+    let appId = knownApplicationId ?? null;
+    const resolved: Extract<Preflight, { kind: "ready" }>["resolved"] = {};
+    // True when ownership was resolved by THIS call — i.e. the user answered
+    // the confirm before any routing verdict could have been shown.
+    let freshlyVerified = false;
+    // Verify when this browser can't say who owns the webhook or which server
+    // it posts to (a pasted URL, an entry saved before those fields existed),
+    // or when the plugin-routing question is open but the saved entry predates
+    // `applicationId` — `ownerKind` alone can't answer it.
+    if (!ownerKind || !knownGuildId || (pluginBound.length > 0 && ownerKind === "bot" && !appId)) {
+      const check = await verifyWebhook(target, { signal });
+      if (!check.ok) {
+        if (check.status === 0 && check.error === "Check was cancelled.")
+          return { kind: "cancelled" };
+        return { kind: "failed", message: check.error, status: check.status, body: check.body };
+      }
+      const owner = classifyWebhookOwner(check.webhook);
+      ownerKind = owner.kind;
+      appId = owner.applicationId;
+      freshlyVerified = true;
+      resolved.name = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
+      resolved.avatar = webhookAvatarHash(check.webhook);
+      resolved.channelId = webhookChannelId(check.webhook) ?? undefined;
+      resolved.guildId = webhookGuildId(check.webhook) ?? undefined;
+      setVerified({
+        name: resolved.name ?? "",
+        owner,
+        channelId: resolved.channelId,
+        guildId: resolved.guildId,
+      });
+    }
+
+    // Setting `verified` above flips `ownershipBlocked`, so the banner (with
+    // the "Remove interactive components" action) renders on its own.
+    if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
+      return { kind: "blocked" };
+    }
+
+    // The ownership pass guarantees Discord will ACCEPT the message; it doesn't
+    // guarantee the components will work. When the webhook was verified just
+    // now and the message carries plugin-bound components owned by an app other
+    // than DWEEB, resolve the custom-bot registration first. A definitive
+    // "foreign" blocks (the verdict `setVerified` unlocked shows the banner and
+    // disables the button); "unverified" while signed out blocks too, mirroring
+    // the main gate (`mustSignInToRouteCheck`). An authed-but-failed check
+    // falls through — waiting can't learn more there.
+    if (freshlyVerified && pluginBound.length > 0 && appId && appId !== DISCORD_CLIENT_ID) {
+      const gid = resolved.guildId ?? knownGuildId;
+      let ids =
+        registeredApps != null && registeredApps.guildId === gid ? registeredApps.ids : null;
+      if (ids === null && gid && isProxyConfigured() && authStatus === "authed") {
+        try {
+          const bots = await fetchCustomBots(gid, signal);
+          ids = bots.items.map((i) => i.application_id);
+          setRegisteredApps({ guildId: gid, ids });
+        } catch {
+          if (signal.aborted) return { kind: "cancelled" };
+          setRegisteredAppsFailed(true);
+        }
+      }
+      const routing = classifyComponentRouting({
+        applicationId: appId,
+        dweebApplicationId: DISCORD_CLIENT_ID,
+        customBotIds: ids,
+      });
+      if (routing === "foreign") return { kind: "blocked" };
+      if (routing === "unverified" && authStatus === "anon" && isProxyConfigured()) {
+        return { kind: "blocked" };
+      }
+    }
+
+    // A guild-scoped binding (Self Role et al.) set up for a different server
+    // than this freshly-verified webhook posts to is provably dead there. Only
+    // checkable once the webhook's server is known — for a fresh URL, just now.
+    // Skipped for bindings whose server isn't cached — never a false positive.
+    if (freshlyVerified && pluginBound.length > 0) {
+      const gid = resolved.guildId ?? knownGuildId;
+      const mismatched =
+        gid != null &&
+        pluginBound.some((b) => {
+          const cfg = getPluginBindingGuild(b.customId);
+          return cfg != null && cfg !== gid;
+        });
+      if (mismatched) return { kind: "blocked" };
+    }
+
+    const guildId = resolved.guildId ?? knownGuildId;
+    const channelId = resolved.channelId ?? knownChannelId;
+    const entry = history.find((e) => e.id === target.id);
+    return {
+      kind: "ready",
+      ownerKind,
+      appId,
+      resolved,
+      guildId,
+      channelId,
+      context: destinationPlaceholderContext(
+        { guildId, channelId, guildName: entry?.guildName, channelName: entry?.channelName },
+        authGuilds,
+        connectedData?.channelById,
+      ),
+    };
+  };
+
   // Save the editor's message (and a moved time) into the scheduled post it was
   // loaded from — `updateSchedule`, which only rewrites what it's sent.
   const handleScheduleSaveConfirmed = async () => {
@@ -1082,15 +1224,34 @@ export function SendPanel({
     }
     const at = Date.parse(scheduleAt);
     if (Number.isNaN(at)) return;
+    // The scheduled post keeps its own (server-sealed) webhook, so there's
+    // nothing to verify: the context comes from what's known about it.
+    const savedEntry = checkWebhookId ? history.find((e) => e.id === checkWebhookId) : undefined;
     const outgoing = substituteMessage(
       message,
-      collectMessagePlaceholders(message, getPlugins(), {
-        serverId: knownGuildId,
-        serverName: knownGuildName,
-        channelId: knownChannelId,
-        channelName: knownChannelName,
-      }),
+      collectMessagePlaceholders(
+        message,
+        getPlugins(),
+        destinationPlaceholderContext(
+          {
+            guildId: knownGuildId,
+            channelId: knownChannelId,
+            guildName: savedEntry?.guildName,
+            channelName: savedEntry?.channelName,
+          },
+          authGuilds,
+          connectedData?.channelById,
+        ),
+      ),
     );
+    const unresolved = unresolvedUrlPlaceholders(outgoing);
+    if (unresolved.length > 0) {
+      setConfirmOpen(false);
+      setScheduleError(
+        unresolvedUrlTokensMessage(unresolved, { serverKnown: !!knownGuildId, action: "save" }),
+      );
+      return;
+    }
     let payload: unknown;
     try {
       payload = JSON.parse(encodeJson(outgoing));
@@ -1121,6 +1282,11 @@ export function SendPanel({
         setScheduleError(
           "This account can't edit that scheduled post. Sign in with the account that scheduled it, or schedule this message as a new post.",
         );
+      } else if (res.status === 409) {
+        // The post is going out right now, or changed while this was open (the
+        // server refuses a save that would undo what its worker just did) —
+        // the server's own sentence says which.
+        setScheduleError(res.error);
       } else {
         setScheduleError(`Couldn't save the changes: ${res.error}`);
       }
@@ -1170,32 +1336,59 @@ export function SendPanel({
     if (!parsedUrl) return;
     const at = Date.parse(scheduleAt);
     if (Number.isNaN(at)) return;
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
 
-    // Render core placeholders from the chosen destination, then encode the wire
-    // body (flags included, session refs stripped) — the same path JSON export
-    // uses, so what's stored is exactly what Discord will accept.
+    setScheduling(true);
+    // The same pre-flight a send makes — this used to post straight to the
+    // server with whatever the panel happened to know.
+    const preflight = await runPreflight(parsedUrl, ac.signal);
+    if (preflight.kind !== "ready") {
+      setScheduling(false);
+      setConfirmOpen(false);
+      if (preflight.kind === "failed") setScheduleError(preflight.message);
+      if (preflight.kind === "blocked") {
+        setScheduleError("Resolve the warning above before scheduling.");
+      }
+      return;
+    }
+    const scheduleGuildId = preflight.guildId;
+
+    // Render core placeholders from the resolved destination, then encode the
+    // wire body (flags included, session refs stripped) — the same path JSON
+    // export uses, so what's stored is exactly what Discord will accept.
     const outgoing = substituteMessage(
       message,
-      collectMessagePlaceholders(message, getPlugins(), {
-        serverId: knownGuildId,
-        serverName: knownGuildName,
-        channelId: knownChannelId,
-        channelName: knownChannelName,
-      }),
+      collectMessagePlaceholders(message, getPlugins(), preflight.context),
     );
+    const unresolved = unresolvedUrlPlaceholders(outgoing);
+    if (unresolved.length > 0) {
+      setScheduling(false);
+      setConfirmOpen(false);
+      setScheduleError(
+        unresolvedUrlTokensMessage(unresolved, {
+          serverKnown: !!scheduleGuildId,
+          action: "schedule",
+        }),
+      );
+      return;
+    }
     let payload: unknown;
     try {
       payload = JSON.parse(encodeJson(outgoing));
     } catch {
+      setScheduling(false);
+      setConfirmOpen(false);
       setScheduleError("Couldn't encode the message.");
       return;
     }
-    const destLabel =
-      knownChannelName && knownGuildName
-        ? `#${knownChannelName} · ${knownGuildName}`
-        : (knownGuildName ?? undefined);
+    const destLabel = scheduleDestLabel(
+      preflight.context.serverName,
+      preflight.context.channelName,
+    );
+    const keepsPermanent = hasInteractiveComponents && makePermanent && !!scheduleGuildId;
 
-    setScheduling(true);
     const res = await createSchedule({
       webhook_url: parsedUrl.url,
       thread_id: threadId.trim() || undefined,
@@ -1203,12 +1396,14 @@ export function SendPanel({
       tz: browserTimezone(),
       recurrence: { kind: "once" },
       start_at: Math.floor(at / 1000),
-      guild_id: knownGuildId,
+      // The server checks this against the server Discord says the webhook
+      // posts to; it's sent whenever known so the two can agree.
+      guild_id: scheduleGuildId,
       dest_label: destLabel,
       // Keep interactive components alive when the user opted in — the worker
       // spends a never-expire slot on the message once it fires. Gated on the
       // message actually having components and a known guild to spend against.
-      make_permanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
+      make_permanent: keepsPermanent,
     });
     if (!res.ok) {
       setScheduling(false);
@@ -1243,7 +1438,7 @@ export function SendPanel({
       setScheduleRecovery({
         entry: localEntry,
         nextRunAt: res.next_run_at,
-        keepsPermanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
+        keepsPermanent,
         rollbackError: access.rollbackError,
       });
       setScheduleError(
@@ -1252,10 +1447,17 @@ export function SendPanel({
       return;
     }
 
-    rememberWebhook(parsedUrl.url);
+    // Keep what the pre-flight learned, as a send would.
+    rememberWebhook(parsedUrl.url, {
+      name: preflight.resolved.name,
+      ownerKind: preflight.ownerKind,
+      applicationId: preflight.appId ?? undefined,
+      avatar: preflight.resolved.avatar,
+      channelId: preflight.resolved.channelId,
+      guildId: preflight.resolved.guildId,
+    });
     setHistory(loadHistory());
     setCommitted({ kind: "created", message, at: scheduleAt, target: scheduleTarget });
-    const keepsPermanent = hasInteractiveComponents && makePermanent && !!knownGuildId;
     setScheduleSuccess(
       scheduleSuccessText(res.next_run_at, keepsPermanent, access.kind === "persisted"),
     );
@@ -1322,157 +1524,49 @@ export function SendPanel({
     setShowRaw(false);
 
     try {
-      // Always confirm who owns the webhook before posting. When we don't yet
-      // know (no prior "Save webhook" or saved entry), GET it first so the
-      // ownership block fires here instead of letting an interactive message slip
-      // through to Discord and bounce back as a rejection. Also re-GET when the
-      // plugin-routing question is open but the saved entry predates the
-      // `applicationId` field — `ownerKind` alone can't answer it.
-      let ownerKind = knownOwnerKind;
-      // The webhook's own name + avatar + location, captured if we end up
-      // verifying here. Used to label and picture the recents entry (and to show
-      // the destination in the confirm) without asking for input.
-      let resolvedName: string | undefined;
-      let resolvedAvatar: string | null | undefined;
-      let resolvedChannelId: string | undefined;
-      let resolvedGuildId: string | undefined;
-      // Owning app id, for the plugin-routing check and the recents entry.
-      let appId = knownApplicationId ?? null;
-      // True when ownership was resolved by THIS call — i.e. the user answered
-      // the confirm before any routing verdict could have been shown.
-      let freshlyVerified = false;
-      if (!ownerKind || (pluginBound.length > 0 && ownerKind === "bot" && !appId)) {
-        const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
-        if (!check.ok) {
-          if (check.status === 0 && check.error === "Check was cancelled.") {
-            setState({ kind: "idle" });
-            return;
-          }
-          setState({ kind: "error", message: check.error, status: check.status, body: check.body });
-          return;
-        }
-        const owner = classifyWebhookOwner(check.webhook);
-        ownerKind = owner.kind;
-        appId = owner.applicationId;
-        freshlyVerified = true;
-        resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
-        resolvedAvatar = webhookAvatarHash(check.webhook);
-        resolvedChannelId = webhookChannelId(check.webhook) ?? undefined;
-        resolvedGuildId = webhookGuildId(check.webhook) ?? undefined;
-        setVerified({
-          name: resolvedName ?? "",
-          owner,
-          channelId: resolvedChannelId,
-          guildId: resolvedGuildId,
-        });
-      }
-
-      if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
-        // Setting `verified` above flips `ownershipBlocked`, so the banner (with
-        // the "Remove interactive components" action) now renders on its own —
-        // don't duplicate it as an error line. Just leave the send un-started.
+      // Who owns the webhook, where it posts, the blocks a fresh verify makes
+      // decidable, and the placeholder context — see `runPreflight`.
+      const preflight = await runPreflight(parsedUrl, ac.signal);
+      if (preflight.kind === "cancelled" || preflight.kind === "blocked") {
         setState({ kind: "idle" });
         return;
       }
-
-      // The ownership pass above guarantees Discord will ACCEPT the message; it
-      // doesn't guarantee the components will work. When the webhook was
-      // verified just now — meaning the user answered the confirm before any
-      // routing verdict existed — and the message carries plugin-bound
-      // components owned by an app other than DWEEB, resolve the custom-bot
-      // registration before posting. A definitive "foreign" leaves the send
-      // un-started, exactly like the ownership block: `setVerified` above flips
-      // the verdict, so on the next render the banner shows and the Send button
-      // is disabled (a second attempt can't slip through). "Unverified" is let
-      // through here — it's not provably dead (signed-out is handled earlier by
-      // the sign-in gate; an authed-but-failed check can't learn more by
-      // waiting).
-      if (freshlyVerified && pluginBound.length > 0 && appId && appId !== DISCORD_CLIENT_ID) {
-        const gid = resolvedGuildId ?? knownGuildId;
-        let ids =
-          registeredApps != null && registeredApps.guildId === gid ? registeredApps.ids : null;
-        if (ids === null && gid && isProxyConfigured() && authStatus === "authed") {
-          try {
-            const bots = await fetchCustomBots(gid, ac.signal);
-            ids = bots.items.map((i) => i.application_id);
-            setRegisteredApps({ guildId: gid, ids });
-          } catch {
-            if (ac.signal.aborted) {
-              setState({ kind: "idle" });
-              return;
-            }
-            setRegisteredAppsFailed(true);
-          }
-        }
-        const routing = classifyComponentRouting({
-          applicationId: appId,
-          dweebApplicationId: DISCORD_CLIENT_ID,
-          customBotIds: ids,
+      if (preflight.kind === "failed") {
+        setState({
+          kind: "error",
+          message: preflight.message,
+          status: preflight.status,
+          body: preflight.body,
         });
-        if (routing === "foreign") {
-          setState({ kind: "idle" });
-          return;
-        }
-        // Signed out → the registration fetch above was skipped, so the verdict
-        // is only "unverified" for lack of a session. Mirror the main Send gate
-        // (`mustSignInToRouteCheck`): leave the send un-started so the sign-in
-        // banner renders — `setVerified` above already flipped the owner state
-        // that drives it. (An authed-but-failed check still falls through;
-        // waiting can't learn more there.)
-        if (routing === "unverified" && authStatus === "anon" && isProxyConfigured()) {
-          setState({ kind: "idle" });
-          return;
-        }
+        return;
       }
-
-      // Block a guild-scoped binding (Self Role et al.) that targets a different
-      // server than this freshly-verified webhook posts to. The mismatch can
-      // only be checked once we know the webhook's guild, which for a fresh URL
-      // is just now — so the disabled-button block couldn't have caught it yet.
-      // Leave the send un-started: `setVerified` above resolved the guild, so on
-      // the next render the "wrong server" banner shows and the Send button is
-      // disabled (a second attempt can't slip through). Skipped for bindings
-      // whose guild isn't cached — never a false positive.
-      if (freshlyVerified && pluginBound.length > 0) {
-        const gid = resolvedGuildId ?? knownGuildId;
-        const mismatched =
-          gid != null &&
-          pluginBound.some((b) => {
-            const cfg = getPluginBindingGuild(b.customId);
-            return cfg != null && cfg !== gid;
-          });
-        if (mismatched) {
-          setState({ kind: "idle" });
-          return;
-        }
-      }
+      const { ownerKind, appId } = preflight;
+      const resolvedName = preflight.resolved.name;
+      const resolvedAvatar = preflight.resolved.avatar;
+      const resolvedChannelId = preflight.resolved.channelId;
+      const resolvedGuildId = preflight.resolved.guildId;
 
       // First paint of any placeholders: render `{token}` text in the outgoing
       // copy only (the store keeps the raw tokens so drafts/share links stay
-      // editable). Core server/channel tokens resolve from this send's verified
-      // destination; plugin tokens from their cached values. Once posted, a plugin
-      // re-renders its own template on each interaction — that's where dynamic
-      // values like `{winners}` update.
-      const sendGuildId = resolvedGuildId ?? knownGuildId;
-      const sendChannelId = resolvedChannelId ?? knownChannelId;
-      const sendGuild = sendGuildId ? authGuilds.find((g) => g.id === sendGuildId) : undefined;
-      const sendChannel = sendChannelId ? connectedData?.channelById[sendChannelId] : undefined;
-      const sendCategory = sendChannel?.parentId
-        ? connectedData?.channelById[sendChannel.parentId]?.name
-        : undefined;
+      // editable). Core server/channel tokens resolve from this send's
+      // destination; plugin tokens from their cached values. Once posted, a
+      // plugin re-renders its own template on each interaction — that's where
+      // dynamic values like `{winners}` update.
       const outgoing = substituteMessage(
         message,
-        collectMessagePlaceholders(message, getPlugins(), {
-          serverId: sendGuildId,
-          serverName: knownGuildName,
-          serverIcon: sendGuild
-            ? (guildIconUrl(sendGuild.id, sendGuild.icon) ?? undefined)
-            : undefined,
-          channelId: sendChannelId,
-          channelName: knownChannelName,
-          channelCategory: sendCategory,
-        }),
+        collectMessagePlaceholders(message, getPlugins(), preflight.context),
       );
+      const unresolved = unresolvedUrlPlaceholders(outgoing);
+      if (unresolved.length > 0) {
+        setState({
+          kind: "error",
+          message: unresolvedUrlTokensMessage(unresolved, {
+            serverKnown: !!preflight.guildId,
+            action: "send",
+          }),
+        });
+        return;
+      }
 
       const result =
         mode === "update" && parsedMessageId
@@ -1511,8 +1605,8 @@ export function SendPanel({
         // wait=true; PATCH always echoes it) so "Open in Discord" lands on the
         // exact message — falling back to the channel, or to no link when the
         // guild/channel can't be resolved.
-        const effGuildId = resolvedGuildId ?? knownGuildId;
-        const effChannelId = resolvedChannelId ?? knownChannelId ?? channelIdFromBody(result.body);
+        const effGuildId = preflight.guildId;
+        const effChannelId = preflight.channelId ?? channelIdFromBody(result.body);
         const postedMessageId =
           messageIdFromBody(result.body) ??
           (mode === "update" ? (parsedMessageId ?? undefined) : undefined);
@@ -1526,11 +1620,9 @@ export function SendPanel({
 
         // Resolved destination names (saved on the recents entry at creation, or
         // looked up live) — reused by the gallery record and the success dialog.
-        const effGuildName =
-          knownGuildName ??
-          (effGuildId ? authGuilds.find((g) => g.id === effGuildId)?.name : undefined);
+        const effGuildName = preflight.context.serverName;
         const effChannelName =
-          knownChannelName ??
+          preflight.context.channelName ??
           (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined);
 
         // Keep the action bar's destination chip honest: the message landed in
@@ -1568,6 +1660,9 @@ export function SendPanel({
               threadId: effThreadId || undefined,
               destLabel: effChannelName ? `#${effChannelName}` : undefined,
               message,
+              // Discord's echo names each upload's CDN URL — posted history must
+              // not keep this browser's `session://` handles.
+              echo: result.body,
             });
           }
         }
@@ -1646,6 +1741,15 @@ export function SendPanel({
           }
         }
 
+        if (mode === "new" && !postedMessageId) {
+          // The post landed (2xx) but Discord's reply couldn't be read, so there's
+          // no message id: no link, no "Update" next time, nothing in the posted
+          // history. Say so, or the next click would quietly post a duplicate.
+          pushToast(
+            "Posted, but Discord's reply couldn't be read — check the channel. This copy can't be updated from DWEEB.",
+            "info",
+          );
+        }
         setSuccess({
           mode,
           webhookName: resolvedName ?? knownName,
@@ -1662,8 +1766,10 @@ export function SendPanel({
         });
         trackAnalytics("message_posted", { mode });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
-        // Aborted via the dialog's Cancel — not an error worth surfacing.
-        setState({ kind: "idle" });
+        // Aborted via the dialog's Cancel. The request had already left, so
+        // Discord may have it: going back to idle silently invited a second
+        // click — and a duplicate post.
+        setState({ kind: "error", message: cancelledAfterDispatchMessage(mode) });
       } else {
         setState({
           kind: "error",
@@ -1695,7 +1801,7 @@ export function SendPanel({
   // (so dismissing mid-post doesn't leave the request running); otherwise it
   // just closes. Either way the `finally` above tidies up the busy/open state.
   const handleConfirmCancel = () => {
-    if (confirmBusy) abortRef.current?.abort();
+    if (confirmBusy || scheduling) abortRef.current?.abort();
     setConfirmOpen(false);
   };
 

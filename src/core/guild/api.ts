@@ -96,6 +96,16 @@ export function guildIconUrl(id: string, icon: string | null, size = 256): strin
   return `https://cdn.discordapp.com/icons/${id}/${icon}.${ext}?size=${size}`;
 }
 
+/**
+ * The glyph an icon-less server shows in place of its icon: the first
+ * character of its name, uppercased. Taken by code point, not UTF-16 unit — a
+ * name starting with an emoji ("🎮 Gaming") would otherwise yield half a
+ * surrogate pair and paint a replacement character.
+ */
+export function guildInitial(name: string): string {
+  return (Array.from(name)[0] ?? "").toUpperCase();
+}
+
 /** Append `?fresh=true` when a caller wants to bypass the proxy's short-TTL
  *  cache — used by the manual "Refresh" so it pulls live data straight from
  *  Discord, while every passive load keeps hitting the cache to spare Discord's
@@ -354,13 +364,24 @@ export async function addPermanentMessage(
     throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
   }
   // 409 = every slot is taken. Not an exception — the body carries the
-  // occupying messages so the UI can offer to free one.
+  // occupying messages so the UI can offer to free one. The one other 409,
+  // `slot_taken`, means another server holds this message's slot: no slot of
+  // ours would help, and only Message Info (which proves where the message
+  // lives) can move it here.
   if (res.status === 409) {
+    let body: PermanentSlots & { error?: string };
     try {
-      return { full: true, slots: (await res.json()) as PermanentSlots };
+      body = (await res.json()) as PermanentSlots & { error?: string };
     } catch {
       throw new GuildApiError("The server returned an unexpected response.", res.status);
     }
+    if (body.error === "slot_taken") {
+      throw new GuildApiError(
+        "Another server holds this message's never-expire slot. Run Message Info on the message in Discord to move the slot to this server.",
+        res.status,
+      );
+    }
+    return { full: true, slots: body };
   }
   if (!res.ok) throw await toApiError(res);
   try {

@@ -15,7 +15,7 @@
 
 import { useMemo } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
-import { guildIconUrl } from "@/core/guild/api";
+import { guildIconUrl, guildInitial } from "@/core/guild/api";
 import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
 import { cn } from "@/lib/cn";
 import styles from "./GuildIdentity.module.css";
@@ -68,7 +68,7 @@ export function GuildIdentity({
         <img className={styles.icon} src={iconUrl} alt="" width={24} height={24} loading="lazy" />
       ) : (
         <span className={cn(styles.icon, styles.iconFallback)} aria-hidden="true">
-          {name.slice(0, 1).toUpperCase()}
+          {guildInitial(name)}
         </span>
       )}
       {!compact ? (

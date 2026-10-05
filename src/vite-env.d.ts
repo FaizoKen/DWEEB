@@ -45,6 +45,7 @@ interface ImportMetaEnv {
   readonly VITE_DEV_PICKER_ORIGIN?: string;
   /** Dev only: local origin for the poll plugin's config UI (default `http://localhost:8098`). */
   readonly VITE_DEV_POLL_ORIGIN?: string;
+  readonly VITE_DEV_DIRECTORY_ORIGIN?: string;
 }
 
 interface ImportMeta {

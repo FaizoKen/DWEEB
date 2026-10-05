@@ -136,6 +136,18 @@ export const PLACEHOLDER_TOKEN_RE = /^[a-z0-9_]{1,32}$/;
 const TOKEN_IN_TEXT_RE = /\{([a-z0-9_]{1,32})\}/g;
 /** Non-global twin of {@link TOKEN_IN_TEXT_RE} for a stateless presence test. */
 const HAS_TOKEN_RE = /\{[a-z0-9_]{1,32}\}/;
+/** A field that is one token and nothing else — e.g. `avatar_url: {server_icon}`. */
+const WHOLE_TOKEN_RE = /^\{[a-z0-9_]{1,32}\}$/;
+
+/**
+ * Which tokens of a map built by {@link collectMessagePlaceholders} hold only a
+ * stand-in sample rather than a real value. Kept beside the map instead of in
+ * it, so every caller that treats the map as a plain token→string record keeps
+ * working. A URL field must never receive a sample: "this server's ID" spliced
+ * into a link's query is a broken link Discord may well refuse — see
+ * {@link substituteMessage}.
+ */
+const sampleTokens = new WeakMap<Record<string, string>, ReadonlySet<string>>();
 
 /**
  * True when `text` carries at least one well-formed `{token}` placeholder. This
@@ -253,12 +265,16 @@ export function substituteMessage(
   // non-empty. Copy on write so a message with no matching tokens keeps all of
   // its identities, letting memoized component renderers skip untouched nodes.
   const source = message as unknown as Record<string, unknown>;
+  const samples = sampleTokens.get(map);
   let out = source;
   // Webhook execution overrides — e.g. `avatar_url: {server_icon}` or a per-send
   // `username: {server}`. These post alongside the components, so substitute them
   // too, mirroring the wire fields the executor consumes.
-  out = substituteFields(source, out, ["username", "avatar_url", "thread_name"], map);
-  const components = mapWithSharing(message.components, (node) => substituteNode(node, map));
+  out = substituteFields(source, out, ["username", "thread_name"], map);
+  out = substituteUrlFields(source, out, ["avatar_url"], map, samples);
+  const components = mapWithSharing(message.components, (node) =>
+    substituteNode(node, map, samples),
+  );
   if (components !== message.components) out = setField(source, out, "components", components);
   return out as unknown as WebhookMessage;
 }
@@ -293,6 +309,46 @@ function substituteFields(
 }
 
 /**
+ * {@link substituteText} for a URL field. Only real values go in — a token with
+ * just a sample (or none) stays literal, for the send path to refuse through
+ * {@link unresolvedUrlPlaceholders} instead of posting a broken link — and a
+ * value spliced into the middle of a URL is percent-encoded, so a server named
+ * "Cats & Dogs #1" can't split a query string or start a fragment. A field that
+ * is the token alone (`{server_icon}`) takes the value verbatim: it IS the URL.
+ */
+function substituteUrl(
+  text: string,
+  map: Record<string, string>,
+  samples: ReadonlySet<string> | undefined,
+): string {
+  if (text.indexOf("{") === -1) return text;
+  const whole = WHOLE_TOKEN_RE.test(text);
+  return text.replace(TOKEN_IN_TEXT_RE, (match, token: string) => {
+    if (!Object.prototype.hasOwnProperty.call(map, token) || samples?.has(token)) return match;
+    const value = map[token]!;
+    return whole ? value : encodeURIComponent(value);
+  });
+}
+
+/** {@link substituteFields} for URL fields — see {@link substituteUrl}. */
+function substituteUrlFields(
+  source: Record<string, unknown>,
+  current: Record<string, unknown>,
+  keys: readonly string[],
+  map: Record<string, string>,
+  samples: ReadonlySet<string> | undefined,
+): Record<string, unknown> {
+  let out = current;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value !== "string") continue;
+    const substituted = substituteUrl(value, map, samples);
+    if (substituted !== value) out = setField(source, out, key, substituted);
+  }
+  return out;
+}
+
+/**
  * Recurse the (cloned) component tree, substituting each component's user-facing
  * text and URL fields. A `switch` on the component `type` handles that node's own
  * fields; the generic descent at the end reaches nested *typed* components
@@ -303,6 +359,7 @@ function substituteFields(
 function substituteNode(
   node: WebhookMessage["components"][number],
   map: Record<string, string>,
+  samples: ReadonlySet<string> | undefined,
 ): WebhookMessage["components"][number] {
   const source = node as unknown as Record<string, unknown>;
   let out = source;
@@ -316,7 +373,7 @@ function substituteNode(
       // Only a Link button carries a user-facing URL; an interactive button's
       // custom_id is bot-facing and never substituted.
       if (source.style === ButtonStyle.Link) {
-        out = substituteFields(source, out, ["url"], map);
+        out = substituteUrlFields(source, out, ["url"], map, samples);
       }
       break;
     case ComponentType.StringSelect:
@@ -340,7 +397,7 @@ function substituteNode(
       out = substituteFields(source, out, ["description"], map);
       if (source.media && typeof source.media === "object") {
         const media = source.media as Record<string, unknown>;
-        const nextMedia = substituteFields(media, media, ["url"], map);
+        const nextMedia = substituteUrlFields(media, media, ["url"], map, samples);
         if (nextMedia !== media) out = setField(source, out, "media", nextMedia);
       }
       break;
@@ -352,7 +409,7 @@ function substituteNode(
           let next = substituteFields(record, record, ["description"], map);
           if (record.media && typeof record.media === "object") {
             const media = record.media as Record<string, unknown>;
-            const nextMedia = substituteFields(media, media, ["url"], map);
+            const nextMedia = substituteUrlFields(media, media, ["url"], map, samples);
             if (nextMedia !== media) next = setField(record, next, "media", nextMedia);
           }
           return next;
@@ -367,12 +424,16 @@ function substituteNode(
 
   if (Array.isArray(source.components)) {
     const components = mapWithSharing(source.components, (child) =>
-      substituteNode(child as WebhookMessage["components"][number], map),
+      substituteNode(child as WebhookMessage["components"][number], map, samples),
     );
     if (components !== source.components) out = setField(source, out, "components", components);
   }
   if (source.accessory && typeof source.accessory === "object") {
-    const accessory = substituteNode(source.accessory as WebhookMessage["components"][number], map);
+    const accessory = substituteNode(
+      source.accessory as WebhookMessage["components"][number],
+      map,
+      samples,
+    );
     if (accessory !== source.accessory) out = setField(source, out, "accessory", accessory);
   }
 
@@ -401,6 +462,39 @@ function isEmptyMap(map: Record<string, string>): boolean {
 }
 
 /**
+ * Core tokens still sitting in a URL field of an outgoing message — a link
+ * button's URL, a thumbnail's or gallery item's media URL, the avatar URL —
+ * after {@link substituteMessage}. Those fields only ever take real values, so
+ * a token left there has none for this destination (a webhook whose server
+ * isn't known, a server without an icon): sent as it is, it's a broken link or
+ * an image URL Discord refuses. The send and schedule paths refuse the message
+ * instead, naming the tokens.
+ */
+export function unresolvedUrlPlaceholders(message: WebhookMessage): string[] {
+  const found = new Set<string>();
+  const scan = (url: unknown) => {
+    if (typeof url !== "string" || url.indexOf("{") === -1) return;
+    for (const m of url.matchAll(new RegExp(TOKEN_IN_TEXT_RE.source, "g"))) {
+      if (CORE_PLACEHOLDER_TOKENS.has(m[1]!)) found.add(m[1]!);
+    }
+  };
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown>;
+    if (n.type === ComponentType.Button && n.style === ButtonStyle.Link) scan(n.url);
+    if (n.type === ComponentType.Thumbnail) scan((n.media as { url?: unknown } | null)?.url);
+    if (n.type === ComponentType.MediaGallery && Array.isArray(n.items)) {
+      for (const item of n.items) scan((item as { media?: { url?: unknown } } | null)?.media?.url);
+    }
+    if (Array.isArray(n.components)) n.components.forEach(visit);
+    if (n.accessory) visit(n.accessory);
+  };
+  scan((message as { avatar_url?: unknown }).avatar_url);
+  message.components.forEach(visit);
+  return [...found];
+}
+
+/**
  * Build the first-paint token→string map for a message. Providers are merged in
  * a fixed order — **core (server/channel) first, then each plugin in binding
  * order** — and the *first* provider to claim a token wins, so the result is
@@ -419,17 +513,21 @@ export function collectMessagePlaceholders(
   context?: PlaceholderContext,
 ): Record<string, string> {
   const map: Record<string, string> = {};
-  const claim = (token: string, value: string | undefined) => {
+  const samples = new Set<string>();
+  sampleTokens.set(map, samples);
+  const claim = (token: string, value: string | undefined, isSample: boolean) => {
     // First provider wins — never overwrite a token an earlier provider claimed.
     if (typeof value === "string" && !Object.prototype.hasOwnProperty.call(map, token)) {
       map[token] = value;
+      if (isSample) samples.add(token);
     }
   };
 
   // Core provider first: server/channel tokens, on every message.
   const cv = coreValues(context);
   for (const p of CORE_PLACEHOLDERS) {
-    claim(p.token, Object.prototype.hasOwnProperty.call(cv, p.token) ? cv[p.token] : p.sample);
+    const known = Object.prototype.hasOwnProperty.call(cv, p.token);
+    claim(p.token, known ? cv[p.token] : p.sample, !known);
   }
 
   // An empty bundled registry is valid. Skip a full component-tree walk when
@@ -442,10 +540,8 @@ export function collectMessagePlaceholders(
     if (!declared?.length) continue;
     const values = getPluginPlaceholderValues(customId) ?? {};
     for (const p of declared) {
-      claim(
-        p.token,
-        Object.prototype.hasOwnProperty.call(values, p.token) ? values[p.token] : p.sample,
-      );
+      const known = Object.prototype.hasOwnProperty.call(values, p.token);
+      claim(p.token, known ? values[p.token] : p.sample, !known);
     }
   }
   return map;
@@ -517,9 +613,14 @@ export function bakeForeignPlaceholders(
     own.add(p.token);
   }
   const full = collectMessagePlaceholders(message, plugins, context);
+  const fullSamples = sampleTokens.get(full);
   const foreign: Record<string, string> = {};
+  const foreignSamples = new Set<string>();
   for (const token in full) {
-    if (!own.has(token)) foreign[token] = full[token]!;
+    if (own.has(token)) continue;
+    foreign[token] = full[token]!;
+    if (fullSamples?.has(token)) foreignSamples.add(token);
   }
+  sampleTokens.set(foreign, foreignSamples);
   return substituteMessage(message, foreign);
 }

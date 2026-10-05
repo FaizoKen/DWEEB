@@ -777,11 +777,20 @@ export async function modifyWebhook(
   }
 
   const body = await readBody(res);
+  if (res.ok && body && typeof body === "object") {
+    return { ok: true, status: res.status, webhook: body as Record<string, unknown> };
+  }
   if (res.ok) {
+    // A 2xx without the webhook object — the read was cut off, or a proxy on
+    // the way substituted a page. The change may well have landed, but callers
+    // write the returned name and avatar over the saved entry, so an empty
+    // stand-in would blank a stored avatar (same rule as `verifyWebhook`).
     return {
-      ok: true,
+      ok: false,
       status: res.status,
-      webhook: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+      error:
+        "Discord may have applied the change, but its reply couldn't be read. Reopen the webhook to see its current details.",
+      body,
     };
   }
   if (res.status === 429) {

@@ -135,3 +135,35 @@ function discordErrorCode(body: unknown): number | undefined {
   const code = (body as { code?: unknown }).code;
   return typeof code === "number" ? code : undefined;
 }
+
+/**
+ * Why a message with a core placeholder still in a link or image URL can't go
+ * out. URL fields only ever take real values (a prose sample spliced into a
+ * link's query is a broken link), so a token left there has no value for this
+ * destination: the webhook's server isn't known, or — for `{server_icon}` — the
+ * server has no icon. Names the tokens and the fix.
+ */
+export function unresolvedUrlTokensMessage(
+  tokens: readonly string[],
+  opts: { serverKnown: boolean; action: "send" | "schedule" | "save" },
+): string {
+  const list = tokens.map((t) => `{${t}}`).join(", ");
+  const why =
+    opts.serverKnown && tokens.every((t) => t === "server_icon")
+      ? "this server has no icon to use"
+      : "DWEEB couldn't tell which server and channel this webhook posts to";
+  // A scheduled post being edited keeps its own webhook, so the only fix there
+  // is the URL itself.
+  const fix =
+    opts.action === "save"
+      ? "Remove it from the URL, then save again."
+      : `Remove it from the URL, or pick this webhook from your server's channel list, then ${opts.action} again.`;
+  return `${list} in a link or image URL has no value here — ${why}. ${fix}`;
+}
+
+/** A post or edit cancelled after its request left: Discord may already have it. */
+export function cancelledAfterDispatchMessage(mode: SendMode): string {
+  return mode === "update"
+    ? "Cancelled — but the edit may already have been applied. Check the message before updating again."
+    : "Cancelled — but the message may already have been posted. Check the channel before sending again.";
+}

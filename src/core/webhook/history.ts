@@ -13,10 +13,18 @@
  * trying to migrate it.
  */
 
+import { DISCORD_CLIENT_ID } from "@/core/guild/config";
 import { parseWebhookUrl, type WebhookOwnerKind } from "./send";
 
 const STORAGE_KEY = "dweeb.webhook_history.v1";
+/** The most recent entries, kept whatever they are. */
 const MAX_ENTRIES = 5;
+/**
+ * Older entries kept beyond {@link MAX_ENTRIES} when this browser holds the
+ * only copy of their token — see {@link tokenOnlyHere}. Bounded so the list
+ * can't grow without limit.
+ */
+const MAX_TOKEN_ONLY_ENTRIES = 10;
 
 export interface WebhookHistoryEntry {
   /** Webhook snowflake (parsed from the URL). */
@@ -119,6 +127,36 @@ export function loadHistory(): WebhookHistoryEntry[] {
   }
 }
 
+/**
+ * A webhook whose execute URL no server list can hand back: one owned by an app
+ * other than DWEEB (a server's custom bot). Discord withholds such a webhook's
+ * token from the guild webhook list, so the Send picker can only recover it
+ * from here — and five ordinary picks of webhooks the list *does* supply used
+ * to evict it, after which every "post as <bot>" minted another OAuth duplicate
+ * (Discord caps a channel at 15 webhooks).
+ */
+function tokenOnlyHere(entry: WebhookHistoryEntry): boolean {
+  return (
+    entry.ownerKind === "bot" && !!entry.applicationId && entry.applicationId !== DISCORD_CLIENT_ID
+  );
+}
+
+/**
+ * Trim a newest-first list: the {@link MAX_ENTRIES} most recent entries, then
+ * up to {@link MAX_TOKEN_ONLY_ENTRIES} older ones whose token exists only here.
+ */
+function trimHistory(entries: WebhookHistoryEntry[]): WebhookHistoryEntry[] {
+  const kept = entries.slice(0, MAX_ENTRIES);
+  let extra = 0;
+  for (const entry of entries.slice(MAX_ENTRIES)) {
+    if (extra >= MAX_TOKEN_ONLY_ENTRIES) break;
+    if (!tokenOnlyHere(entry)) continue;
+    kept.push(entry);
+    extra++;
+  }
+  return kept;
+}
+
 function persist(entries: WebhookHistoryEntry[]): boolean {
   if (typeof localStorage === "undefined") return false;
   try {
@@ -168,7 +206,7 @@ export function rememberWebhook(
     guildName: fields.guildName ?? existing?.guildName,
   };
 
-  const next = [entry, ...all.filter((e) => e.id !== parsed.id)].slice(0, MAX_ENTRIES);
+  const next = trimHistory([entry, ...all.filter((e) => e.id !== parsed.id)]);
   return persist(next) ? entry : null;
 }
 
@@ -177,7 +215,7 @@ export function touchWebhook(id: string): boolean {
   const idx = all.findIndex((e) => e.id === id);
   if (idx < 0) return false;
   const updated = { ...all[idx]!, lastUsedAt: Date.now() };
-  const next = [updated, ...all.filter((e) => e.id !== id)].slice(0, MAX_ENTRIES);
+  const next = trimHistory([updated, ...all.filter((e) => e.id !== id)]);
   return persist(next);
 }
 

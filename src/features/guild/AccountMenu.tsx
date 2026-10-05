@@ -26,8 +26,8 @@ import {
 import { botInviteUrl } from "@/core/guild/config";
 import { botAddFlow, startBotAddPopup } from "@/core/oauth/flows";
 import { claimAddBotPrompt } from "@/core/auth/addBotPrompt";
-import { subscribePopupResult } from "@/core/oauth/popupFlow";
-import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
+import { consumeReturn, subscribePopupResult } from "@/core/oauth/popupFlow";
+import { guildIconUrl, guildInitial, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
@@ -50,13 +50,20 @@ import styles from "./AccountMenu.module.css";
 const BOT_ADD_PARAMS = ["code", "guild_id", "permissions", "scope", "state"];
 
 /**
- * The id of the guild the user just added the bot to, read from the invite's
- * redirect (`?guild_id=…`). Null when this load isn't a post-add redirect.
+ * The id of the guild the user just added the bot to, from the invite's
+ * redirect (`?guild_id=…`) — but only when this tab itself went to Discord to
+ * add it (the full-page fallback of a blocked popup). A `/?guild_id=…` link
+ * anyone can craft is not such a return: it would park a server to auto-connect
+ * to after sign-in. `consumeReturn` is destructive, so it is read once per page.
+ * Null when this load isn't a genuine post-add redirect.
  */
+let justAddedGuild: string | null | undefined;
 function readJustAddedGuildId(): string | null {
-  if (typeof window === "undefined") return null;
-  const id = new URLSearchParams(window.location.search).get("guild_id");
-  return id && isValidGuildId(id) ? id : null;
+  if (justAddedGuild === undefined) {
+    const result = typeof window === "undefined" ? null : consumeReturn(botAddFlow);
+    justAddedGuild = result && !("error" in result) ? result.guildId : null;
+  }
+  return justAddedGuild;
 }
 
 /** Strip the bot-add redirect params from the URL, preserving path and hash. */
@@ -563,7 +570,7 @@ function GuildIcon({ guild, className }: { guild: PickerGuild; className?: strin
   }
   return (
     <span className={cn(cls, styles.guildIconFallback)} aria-hidden="true">
-      {guild.name.slice(0, 1).toUpperCase()}
+      {guildInitial(guild.name)}
     </span>
   );
 }

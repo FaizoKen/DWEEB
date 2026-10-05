@@ -8,6 +8,7 @@ import {
   sanitizePlaceholderValues,
   substituteMessage,
   substituteText,
+  unresolvedUrlPlaceholders,
 } from "./placeholders";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { richMessage, simpleTextMessage } from "@/test/fixtures";
@@ -206,5 +207,62 @@ describe("collectMessagePlaceholders (core provider)", () => {
   it("exposes the reserved core token set", () => {
     expect(CORE_PLACEHOLDER_TOKENS.has("server")).toBe(true);
     expect(CORE_PLACEHOLDER_TOKENS.has("channel_mention")).toBe(true);
+  });
+});
+
+describe("core placeholders in URL fields", () => {
+  /** A link button and an avatar, both URL fields. */
+  function linkMessage(url: string, avatar?: string): WebhookMessage {
+    return {
+      ...(avatar !== undefined ? { avatar_url: avatar } : {}),
+      components: [
+        {
+          _id: "row",
+          type: ComponentType.ActionRow,
+          components: [{ _id: "b", type: ComponentType.Button, style: 5, label: "Go", url }],
+        } as unknown as WebhookMessage["components"][number],
+      ],
+    };
+  }
+  const urlOf = (m: WebhookMessage) =>
+    (m.components[0] as unknown as { components: Array<{ url: string }> }).components[0]!.url;
+
+  it("never splices a prose sample into a URL — the token stays for the send path to refuse", () => {
+    const m = linkMessage("https://x.test/verify?guild={server_id}");
+    // No server known: {server_id} would otherwise become "this server's ID".
+    const out = substituteMessage(m, collectMessagePlaceholders(m, [], {}));
+    expect(urlOf(out)).toBe("https://x.test/verify?guild={server_id}");
+    expect(unresolvedUrlPlaceholders(out)).toEqual(["server_id"]);
+  });
+
+  it("percent-encodes a real value spliced into a URL", () => {
+    const m = linkMessage("https://x.test/join?s={server}");
+    const out = substituteMessage(
+      m,
+      collectMessagePlaceholders(m, [], { serverName: "Cats & Dogs #1" }),
+    );
+    expect(new URL(urlOf(out)).searchParams.get("s")).toBe("Cats & Dogs #1");
+    expect(unresolvedUrlPlaceholders(out)).toEqual([]);
+  });
+
+  it("takes a whole-field token verbatim: it is the URL", () => {
+    const icon = "https://cdn.discordapp.com/icons/1/abc.webp?size=256";
+    const m = linkMessage("https://x.test/", "{server_icon}");
+    const out = substituteMessage(m, collectMessagePlaceholders(m, [], { serverIcon: icon }));
+    expect(out.avatar_url).toBe(icon);
+  });
+
+  it("flags an icon-less server's {server_icon} instead of sending it literally", () => {
+    const m = linkMessage("https://x.test/", "{server_icon}");
+    const out = substituteMessage(m, collectMessagePlaceholders(m, [], { serverId: "1" }));
+    expect(unresolvedUrlPlaceholders(out)).toEqual(["server_icon"]);
+  });
+
+  it("still renders samples in text, where a stand-in reads fine", () => {
+    const m: WebhookMessage = {
+      components: [{ _id: "t", type: ComponentType.TextDisplay, content: "Welcome to {server}!" }],
+    };
+    const out = substituteMessage(m, collectMessagePlaceholders(m, [], {}));
+    expect((out.components[0] as { content: string }).content).toBe("Welcome to this server!");
   });
 });

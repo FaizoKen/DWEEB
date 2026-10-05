@@ -34,6 +34,7 @@ import {
   type LibraryEntryResult,
   type LibraryEntryView,
 } from "./api";
+import { resolvePostedUploads } from "./postedUploads";
 
 /** Fields a successful send hands over to record the post server-side. */
 export interface RecordLibraryPostInput {
@@ -43,6 +44,9 @@ export interface RecordLibraryPostInput {
   threadId?: string;
   destLabel?: string;
   message: WebhookMessage;
+  /** Discord's echo of the posted message (the send's response body), which
+   *  carries the CDN URL of each upload — see {@link resolvePostedUploads}. */
+  echo?: unknown;
 }
 
 interface LibraryState {
@@ -323,7 +327,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const generation = accountGeneration;
     const res = await createLibraryEntry(guildId, {
       label: "posted",
-      payload: stripEditorFields(input.message),
+      payload: stripEditorFields(resolvePostedUploads(input.message, input.echo)),
       webhook_url: input.webhookUrl,
       message_id: input.messageId,
       channel_id: input.channelId,

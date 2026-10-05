@@ -59,10 +59,14 @@ export function JsonPanel({
     if (confirmReplace) confirmReplace(apply);
     else apply();
   };
-  // The live wire-format export. The dialog blocks editing the message behind
-  // it, so this is frozen while the panel is open — safe to seed the field once.
+  // The live wire-format export. The field shows it until the user types in it:
+  // in the Activity, peers keep editing the message behind the open dialog, and
+  // a field seeded once went stale — Copy and Download exported the old JSON,
+  // and the primary button flipped to "Replace message" because the stale text
+  // no longer matched, so one click reverted everyone's newer edits.
   const exported = useMemo(() => encodeJson(message), [message]);
-  const [text, setText] = useState(exported);
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? exported;
   const [error, setError] = useState<string | null>(null);
 
   // Live V1 detection — only meaningful when the input parses as JSON. Share
@@ -168,7 +172,7 @@ export function JsonPanel({
         invalid={!!error}
         value={text}
         onChange={(e) => {
-          setText(e.currentTarget.value);
+          setDraft(e.currentTarget.value);
           if (error) setError(null);
         }}
       />

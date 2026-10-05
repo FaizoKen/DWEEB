@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseWebhookUrl, prepareMessagePayload, verifyWebhook } from "./send";
+import { modifyWebhook, parseWebhookUrl, prepareMessagePayload, verifyWebhook } from "./send";
 import { registerAttachment } from "@/core/state/attachmentStore";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "@/core/serialization/normalize";
@@ -151,5 +151,37 @@ describe("verifyWebhook", () => {
       status: 404,
       error: "Discord could not find that webhook (404). It may have been deleted.",
     });
+  });
+});
+
+describe("modifyWebhook", () => {
+  const WEBHOOK = parseWebhookUrl("https://discord.com/api/webhooks/123456789012345678/token-abc")!;
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns the webhook Discord echoes after a rename", async () => {
+    const webhook = { id: "123456789012345678", name: "Releases", avatar: "a1b2" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(webhook), { status: 200 })),
+    );
+    await expect(modifyWebhook(WEBHOOK, { name: "Releases" })).resolves.toEqual({
+      ok: true,
+      status: 200,
+      webhook,
+    });
+  });
+
+  // The manage dialog writes the echoed name and avatar over the saved entry, so
+  // an unreadable 2xx used to arrive as an empty webhook and blank the avatar.
+  it("never answers an unreadable 2xx with an empty webhook", async () => {
+    for (const body of [null, "<html>Sign in to continue</html>"]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(body, { status: 200 })),
+      );
+      const result = await modifyWebhook(WEBHOOK, { name: "Releases" });
+      expect(result.ok).toBe(false);
+    }
   });
 });

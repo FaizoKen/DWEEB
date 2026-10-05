@@ -18,14 +18,17 @@ import { isProxyConfigured } from "./config";
 import { pushToast } from "@/ui/Toast";
 
 /**
- * True when `guildId` names a server the signed-in user belongs to and the
- * proxy is configured — i.e. its roles/channels/emojis can be loaded. Reads
- * stores via `getState()`, so callers that need to react to membership loading
- * should derive it from a subscribed `guilds` list instead.
+ * True when `guildId` names a server the signed-in user belongs to, that has
+ * DWEEB's bot, and the proxy is configured — i.e. its roles/channels/emojis can
+ * be loaded. The bot reads that data, so a server it was never added to (a
+ * message posted there through a `webhook.incoming` webhook) can't connect;
+ * trying only produced a failed load. Reads stores via `getState()`, so callers
+ * that need to react to membership loading should derive it from a subscribed
+ * `guilds` list instead.
  */
 export function canConnectGuild(guildId: string | undefined): guildId is string {
   if (!guildId || !isProxyConfigured()) return false;
-  return useAuthStore.getState().guilds.some((g) => g.id === guildId);
+  return useAuthStore.getState().guilds.some((g) => g.id === guildId && g.bot_present);
 }
 
 /**

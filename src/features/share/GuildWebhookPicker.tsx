@@ -34,6 +34,7 @@ import {
   type WebhookEdit,
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
+import { compareSnowflakes } from "@/core/webhook/snowflakeOrder";
 import { botInviteUrl } from "@/core/guild/config";
 import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
 import { startBotAddPopup, webhookFlow } from "@/core/oauth/flows";
@@ -160,7 +161,7 @@ function findDuplicates(
     if (list.length < 2) continue;
     dupGroups++;
     const sorted = [...list].sort(
-      (a, b) => keepRank(a, activeId) - keepRank(b, activeId) || a.id.localeCompare(b.id),
+      (a, b) => keepRank(a, activeId) - keepRank(b, activeId) || compareSnowflakes(a.id, b.id),
     );
     for (let i = 1; i < sorted.length; i++) toDelete.push(sorted[i]!);
   }
@@ -372,7 +373,7 @@ export function GuildWebhookPicker({
       mine.sort((a, b) => {
         const an = (a.name ?? "").trim().toLowerCase() === want ? 0 : 1;
         const bn = (b.name ?? "").trim().toLowerCase() === want ? 0 : 1;
-        return an - bn || a.id.localeCompare(b.id);
+        return an - bn || compareSnowflakes(a.id, b.id);
       });
       return mine[0]!;
     }
@@ -384,7 +385,7 @@ export function GuildWebhookPicker({
       if (aApp !== bApp) return aApp - bApp;
       const an = (a.name ?? "").trim().toLowerCase() === "dweeb" ? 0 : 1;
       const bn = (b.name ?? "").trim().toLowerCase() === "dweeb" ? 0 : 1;
-      return an - bn || a.id.localeCompare(b.id);
+      return an - bn || compareSnowflakes(a.id, b.id);
     });
     return mine[0]!;
   };

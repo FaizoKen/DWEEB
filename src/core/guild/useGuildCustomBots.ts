@@ -56,7 +56,9 @@ export const useGuildCustomBotsStore = create<GuildCustomBotsState>((set, get) =
     const force = opts.force ?? false;
     const s = get();
 
-    if (inflight && inflight.guildId === guildId) return;
+    // A forced load supersedes one already in flight: that read may have left
+    // before the registration change it's meant to pick up.
+    if (!force && inflight && inflight.guildId === guildId) return;
     if (!force && s.guildId === guildId && Date.now() - s.fetchedAt < TTL_MS) return;
 
     inflight?.controller.abort();

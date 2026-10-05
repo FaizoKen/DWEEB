@@ -508,7 +508,17 @@ function RestorePanel({
   const [history, setHistory] = useState(() => loadHistory());
 
   const saveAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => saveAbortRef.current?.abort(), []);
+  // A restore still in flight when the dialog closes must die with it: landing
+  // later, it replaced whatever the user was editing by then and closed a
+  // dialog they may have reopened since.
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      saveAbortRef.current?.abort();
+      fetchAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // The panel stays mounted across opens, so a pending origin arriving while
   // it's already mounted (an "Edit in DWEEB" link opened it) won't re-run the
@@ -619,6 +629,9 @@ function RestorePanel({
       return;
     }
 
+    fetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    fetchAbortRef.current = ac;
     setBusy(true);
     let thread = threadId.trim();
     // A thread the link only suggested (this webhook's channel isn't known
@@ -626,7 +639,8 @@ function RestorePanel({
     // own channel is never sent as a thread id. It also fills in the saved
     // entry, so the next restore through this webhook knows without asking.
     if (manualThread === null && fromLink.kind === "unknown") {
-      const check = await verifyWebhook(parsedUrl);
+      const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
+      if (ac.signal.aborted) return;
       if (!check.ok) {
         setBusy(false);
         setError(check.error);
@@ -648,7 +662,9 @@ function RestorePanel({
     }
     const result = await fetchWebhookMessage(parsedUrl, messageId, {
       threadId: thread || undefined,
+      signal: ac.signal,
     });
+    if (ac.signal.aborted) return;
     setBusy(false);
 
     if (!result.ok) {
@@ -729,10 +745,16 @@ function RestorePanel({
 
     const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
     const owner = classifyWebhookOwner(result.webhook);
+    // Everything the verify told us, as the Send panel saves it — an entry
+    // without its server and channel made the next send through this webhook
+    // render {server_id} & co. without a destination to resolve them from.
     const entry = rememberWebhook(parsedUrl.url, {
       name: remoteName,
       ownerKind: owner.kind,
+      applicationId: owner.applicationId ?? undefined,
       avatar: webhookAvatarHash(result.webhook),
+      channelId: webhookChannelId(result.webhook) ?? undefined,
+      guildId: webhookGuildId(result.webhook) ?? undefined,
     });
     if (entry) {
       setHistory(loadHistory());
