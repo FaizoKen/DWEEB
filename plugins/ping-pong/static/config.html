@@ -172,6 +172,9 @@
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
 
       window.addEventListener("message", (event) => {
+        // Only the DWEEB host embedding us speaks this protocol; any other
+        // window could otherwise re-init the page and capture its save.
+        if (event.source !== parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
         if (msg.type !== "dweeb:plugin:init") return;

@@ -20,6 +20,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Verify Discord's Ed25519 interaction signatures.
 ed25519-dalek = "2"
 hex = "0.4"
+# HMAC-SHA256 for the Message Info toggle's custom_id MAC, keyed per process
+# from the OS CSPRNG. Both are already in the graph (ed25519-dalek / ring), so
+# naming them adds no new code to the image.
+sha2 = "0.10"
+getrandom = "0.2"
 # Per-guild permanent-message slots (TTL exemptions). `bundled` compiles
 # SQLite from source, so the image needs no system libsqlite.
 rusqlite = { version = "0.31", features = ["bundled"] }

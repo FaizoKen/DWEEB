@@ -53,10 +53,12 @@ reserved: `dweeb:` belongs to the dispatcher's own components (the Message
 Info toggle button), answered inline ahead of the routing — no plugin
 manifest may claim it.
 
-Removing a plugin needs no cleanup either: a click on a component whose
-prefix matches no route is answered with an `UPDATE_MESSAGE` that disables
-it (the same mechanism the TTL below uses), so messages left behind by an
-uninstalled plugin stop generating traffic after their first click.
+A click on a component whose prefix matches no route is answered with an
+ephemeral "This component isn't wired to any installed plugin." note — not
+disabled — so whoever clicks, and the message's owner, can see the wiring is
+broken and fix it instead of staring at a silently dead button. (Messages
+left behind by an uninstalled plugin still stop for good once the TTL below
+expires them.)
 
 ## Env
 
@@ -131,7 +133,20 @@ Info** and clicking the toggle button on the reply — the same button on an
 already-permanent message releases its slot. That path is served inline here
 (the interaction carries the guild, channel + message ids, and the invoker's
 computed permissions — all the `/permanent` API needs) against the same
-SQLite store.
+SQLite store. The toggle's custom_id is `dweeb:perm:<channel>:<message>:<mac>`,
+the MAC an HMAC under a per-process random key over the guild Message Info ran
+in plus the channel and message: a custom_id is client-forgeable (anyone can
+post a `dweeb:perm:` button through a webhook), and without it a click in the
+forger's own server could spend a slot on — and so lock up — another server's
+message. A restart rotates the key, so an old reply's toggle just asks for
+Message Info again. A grant only exempts clicks from the server that holds it:
+the dashboard API can't prove where a message lives, so a slot one server
+spends on another server's message keeps nothing alive there. The API refuses
+to grant a message another server already holds (`409 slot_taken`), while
+Message Info — which does prove the message lives in its server — releases such
+a foreign grant and grants the message to its own server instead. A grant
+parked by a plan downgrade reads as expiring in Message Info (the TTL gate
+ignores it) and its toggle releases it.
 
 The authorization chain: browser → **proxy** (Discord login; the user must
 manage the guild) → **this service's `/permanent` API** (bearer
@@ -145,6 +160,7 @@ throttled activity upsert is its only, occasional, write).
 GET    /permanent/:guild_id              → { cap, used, ttl_days, items }
 POST   /permanent/:guild_id              { message_id, channel_id, added_by }
                                           → 200 state | 409 slots_full + state
+                                            | 409 slot_taken + state (another guild holds it)
 DELETE /permanent/:guild_id/:message_id  → 200 state | 404 not_permanent
 ```
 
@@ -175,9 +191,18 @@ Because plugins re-verify the raw bytes themselves, the dispatcher forwards
 key header without a valid secret, so nothing reaching a plugin directly can
 substitute a key; the signature check itself always happens in the plugin.
 
-Registration proves portal access: the app's public key is only visible to
-its owner/team in the Developer Portal. (A wrong key simply never verifies —
-re-registering the same app from the same guild updates the key in place.)
+A registered key is trusted to sign *any* interaction — guild, member, roles
+and permissions included — and the dispatcher vouches for it to every plugin,
+so it must be the key **Discord** holds the private half of. An application's
+public key is not a secret (Discord serves it to anyone as `verify_key`), so
+supplying it proves nothing, and accepting an arbitrary key would let its
+holder forge clicks into every server: the **proxy** therefore refuses any key
+that differs from the `verify_key` Discord reports for that application id.
+This service additionally refuses weak (small-order) keys, against which a
+valid-looking signature can be written with no private key at all; a weak key
+already in the database is skipped at boot. (Re-registering the same app from
+the same guild with a different key updates it in place and resets the
+"verified" proof, which vouched for the old key.)
 An application id can only be registered by one guild at a time
 (`409 app_taken`).
 

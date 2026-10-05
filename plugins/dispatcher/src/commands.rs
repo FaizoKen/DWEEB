@@ -98,8 +98,16 @@ const CMD_IDENTITY: &str = "Use as Webhook Identity";
 /// plugin prefix routing — no plugin manifest may claim this prefix.
 pub const CUSTOM_ID_PREFIX: &str = "dweeb:";
 /// The permanent-slot toggle button on a "Message Info" reply:
-/// `dweeb:perm:<channel_id>:<message_id>`.
+/// `dweeb:perm:<channel_id>:<message_id>:<mac>` — see [`toggle_mac`].
 const PERM_TOGGLE_PREFIX: &str = "dweeb:perm:";
+/// Hex characters of the toggle MAC kept in the custom_id: 64 bits, far past
+/// anything guessable through Discord clicks, and short enough that the whole
+/// id (two snowflakes included) stays well inside Discord's 100-char cap.
+const TOGGLE_MAC_HEX: usize = 16;
+/// The cap the proxy sends to mean "unlimited" (`UNLIMITED_SLOTS` in
+/// server/src/entitlement.rs, `UNLIMITED_CAP` in the web app). It must never
+/// render as a number — "3/1000000 slots used" reads as a bug.
+const UNLIMITED_SLOTS: u32 = 1_000_000;
 
 /// Plugins whose services answer a `<prefix>manage:<instance>` component with
 /// an ephemeral management panel (authority re-checked at click time): the
@@ -193,7 +201,8 @@ async fn export_json(app: &App, interaction: &Value) -> Response {
     // space breaks the run while staying invisible in the snippet.
     let mut fenced = format!("```json\n{}\n```", pretty.replace("```", "`\u{200B}``"));
     if converted {
-        fenced.push_str("-# Embeds/attachments were converted to Components V2.");
+        // Its own line: glued to the closing fence, `-#` renders literally.
+        fenced.push_str("\n-# Embeds/attachments were converted to Components V2.");
     }
     if let Some(response) = reply_sized(fenced) {
         return response;
@@ -324,7 +333,14 @@ fn message_info(app: &App, interaction: &Value) -> Response {
         lines.push(plugins_line(&plugins));
     }
 
-    let permanent = app.store.permanent_details(message_id);
+    // Another server's grant on this message reads as no grant at all: it
+    // exempts none of this server's clicks (the TTL gate honours only the
+    // clicking server's grants), so the clock is the truthful expiry, and the
+    // toggle offers "Never expire" — which takes such a grant over.
+    let permanent = app
+        .store
+        .permanent_details(message_id)
+        .filter(|d| guild_id.is_none_or(|g| d.guild_id == g));
     lines.push(expiry_line(
         app,
         message_id,
@@ -352,7 +368,7 @@ fn message_info(app: &App, interaction: &Value) -> Response {
             ));
         }
         if permissions & MANAGE_GUILD != 0 && !message_id.is_empty() && !channel_id.is_empty() {
-            let custom_id = format!("{PERM_TOGGLE_PREFIX}{channel_id}:{message_id}");
+            let custom_id = toggle_custom_id(app, guild_id, channel_id, message_id);
             if let Some(b) = toggle_button(guild_id, permanent.as_ref(), interactive, &custom_id) {
                 action_rows.push(json!({ "type": TYPE_ACTION_ROW, "components": [b] }));
             }
@@ -407,14 +423,58 @@ pub fn component(app: &App, interaction: &Value) -> Response {
         .pointer("/data/custom_id")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let target = custom_id
+    let mut parts = custom_id
         .strip_prefix(PERM_TOGGLE_PREFIX)
-        .and_then(|rest| rest.split_once(':'));
-    let Some((channel_id, message_id)) = target else {
+        .map(|rest| rest.split(':'));
+    let target = parts.as_mut().and_then(|p| {
+        let (channel_id, message_id) = (p.next()?, p.next()?);
+        // A pre-MAC toggle (two segments) carries no MAC: it fails the check
+        // below like a forged one, and is told to reopen Message Info.
+        let mac = p.next().unwrap_or_default();
+        p.next().is_none().then_some((channel_id, message_id, mac))
+    });
+    let Some((channel_id, message_id, mac)) = target else {
         tracing::warn!(custom_id, "unknown dispatcher-owned component");
         return ephemeral("This button isn't wired to anything.");
     };
-    toggle_permanent(app, interaction, channel_id, message_id)
+    toggle_permanent(app, interaction, channel_id, message_id, mac)
+}
+
+/// The MAC on a never-expire toggle: HMAC-SHA256 under the per-process
+/// [`App::toggle_key`] over the guild Message Info ran in and the target
+/// message's channel and id, truncated to [`TOGGLE_MAC_HEX`] hex chars.
+///
+/// Why it exists: a custom_id is client-forgeable — anyone can post a button
+/// carrying `dweeb:perm:<channel>:<message>` through a webhook — so without it
+/// a Manage Server holder in *their own* server could click a forged toggle
+/// naming another server's message and spend a slot on it, locking that
+/// server out of its own message's never-expire state. Message Info can only
+/// target a message in the server it runs in, so a MAC bound to that server
+/// can't be minted for anyone else's message.
+fn toggle_mac(key: &[u8; 32], guild_id: &str, channel_id: &str, message_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5cu8; 64];
+    for (i, b) in key.iter().enumerate() {
+        ipad[i] ^= b;
+        opad[i] ^= b;
+    }
+    let message = format!("perm\n{guild_id}\n{channel_id}\n{message_id}");
+    let inner = Sha256::new()
+        .chain_update(ipad)
+        .chain_update(message.as_bytes())
+        .finalize();
+    let outer = Sha256::new()
+        .chain_update(opad)
+        .chain_update(inner)
+        .finalize();
+    hex::encode(&outer[..TOGGLE_MAC_HEX / 2])
+}
+
+/// The toggle button's custom_id for a message, MAC'd to the guild it's shown in.
+fn toggle_custom_id(app: &App, guild_id: &str, channel_id: &str, message_id: &str) -> String {
+    let mac = toggle_mac(&app.toggle_key, guild_id, channel_id, message_id);
+    format!("{PERM_TOGGLE_PREFIX}{channel_id}:{message_id}:{mac}")
 }
 
 /// Spend one of the guild's TTL-exemption slots on the message — or give it
@@ -427,6 +487,7 @@ fn toggle_permanent(
     interaction: &Value,
     channel_id: &str,
     message_id: &str,
+    mac: &str,
 ) -> Response {
     let Some(guild_id) = interaction.get("guild_id").and_then(Value::as_str) else {
         return ephemeral("This only works inside a server.");
@@ -453,15 +514,42 @@ fn toggle_permanent(
     if !crate::is_snowflake(message_id) || !crate::is_snowflake(channel_id) {
         return ephemeral("This button isn't wired to anything.");
     }
+    // Only a toggle Message Info built in THIS guild for THIS message passes —
+    // a forged `dweeb:perm:` button (or one from before a restart) doesn't.
+    let expected = toggle_mac(&app.toggle_key, guild_id, channel_id, message_id);
+    if !crate::constant_time_eq(mac.as_bytes(), expected.as_bytes()) {
+        return ephemeral(
+            "This button has expired — run **Message Info** on the message again to manage it.",
+        );
+    }
 
-    if app.store.is_permanent(message_id) {
+    // Decide from the grant itself, suspended or not: a parked (over-plan-cap)
+    // grant still holds this guild's row, and `is_permanent` — which only
+    // counts active grants — would send its release click into `add`, where it
+    // could only ever answer "already".
+    match app.store.permanent_details(message_id) {
         // Guild-scoped remove: a permanent message of another guild is
-        // unreachable from here, exactly like the dashboard path.
-        return match app.store.remove(guild_id, message_id) {
-            Ok(true) => refresh_info_reply(app, interaction, guild_id, message_id),
-            Ok(false) => ephemeral("That message's never-expire slot belongs to another server."),
-            Err(err) => storage_error(err),
-        };
+        // unreachable from here, exactly like the dashboard path. A `false`
+        // means a racing click already released it — the refresh shows that.
+        Some(details) if details.guild_id == guild_id => {
+            return match app.store.remove(guild_id, message_id) {
+                Ok(_) => refresh_info_reply(app, interaction, guild_id, message_id),
+                Err(err) => storage_error(err),
+            };
+        }
+        // Another server's grant on a message that demonstrably lives HERE:
+        // Message Info ran on it in this server, and the MAC above binds the
+        // toggle to exactly this guild, channel and message. Such a grant can
+        // only have come through the dashboard API, which can't prove where a
+        // message lives; it never exempted this message's clicks (the TTL gate
+        // honours only the clicking server's grants) and would otherwise lock
+        // the message's real owner out of its slot. Release it, then grant here.
+        Some(details) => {
+            if let Err(err) = app.store.remove(&details.guild_id, message_id) {
+                return storage_error(err);
+            }
+        }
+        None => {}
     }
 
     let added_by = interaction
@@ -493,6 +581,11 @@ fn toggle_permanent(
              **Message Info** button, or from the dashboard's *Message directory → Posted* tab.",
             usage_suffix(app, guild_id)
         )),
+        // A racing grant from another guild landed between the read above
+        // and this add.
+        Ok(crate::store::Add::Taken) => {
+            ephemeral("That message's never-expire slot belongs to another server.")
+        }
         Err(err) => storage_error(err),
     }
 }
@@ -697,18 +790,34 @@ fn expiry_line(
     interactive: usize,
     permanent: Option<&PermanentDetails>,
 ) -> String {
-    match (permanent, app.component_ttl_ms) {
-        (Some(details), _) => format!(
+    match permanent {
+        Some(details) if !details.suspended => format!(
             "**Expiry:** \u{1F512} never expires — components stay clickable. \
              Slot granted by <@{}> <t:{}:R>.",
             details.added_by,
             details.added_at / 1000
         ),
-        (None, None) => "**Expiry:** components never expire on this deployment.".into(),
-        (None, Some(_)) if interactive == 0 => {
+        // A grant parked by a plan downgrade: the TTL gate ignores it
+        // (`Store::is_permanent`), so the clock is what actually applies —
+        // say that, plus why the slot isn't protecting the message.
+        Some(_) => format!(
+            "{} The never-expire slot on it is paused while this server is over its \
+             plan's cap.",
+            ttl_expiry_line(app, message_id, interactive)
+        ),
+        None => ttl_expiry_line(app, message_id, interactive),
+    }
+}
+
+/// The `**Expiry:**` line as the TTL alone decides it — the deployment
+/// setting, then the clock. [`expiry_line`] without a live permanent grant.
+fn ttl_expiry_line(app: &App, message_id: &str, interactive: usize) -> String {
+    match app.component_ttl_ms {
+        None => "**Expiry:** components never expire on this deployment.".into(),
+        Some(_) if interactive == 0 => {
             "**Expiry:** no interactive components — nothing here expires.".into()
         }
-        (None, Some(ttl_ms)) => match snowflake_ms(message_id) {
+        Some(ttl_ms) => match snowflake_ms(message_id) {
             Some(sent_ms) => {
                 // The window is sliding, so expiry anchors to the LATER of the
                 // send time and the last recorded use — the same arithmetic
@@ -739,9 +848,13 @@ fn expiry_line(
 }
 
 /// The slots-used subtext. [`refresh_info_reply`] finds this line again by
-/// its tail — keep the wording in sync with the match there.
+/// its tail — keep the wording (both variants) in sync with the match there.
 fn slots_line(used: usize, total: u32) -> String {
-    format!("-# {used}/{total} never-expire slots used in this server.")
+    if total >= UNLIMITED_SLOTS {
+        format!("-# {used} of unlimited never-expire slots used in this server.")
+    } else {
+        format!("-# {used}/{total} never-expire slots used in this server.")
+    }
 }
 
 /// Active grants only — suspended (over-plan-cap) rows don't consume quota in
@@ -971,8 +1084,10 @@ fn target_message(interaction: &Value) -> Option<&Value> {
 /// (the same shape its own Restore flow feeds `attachEditorFields`). V2
 /// components pass through untouched; everything legacy is *converted* so
 /// any message opens editable: `content` becomes a leading Text Display,
-/// rich embeds become Containers ([`embed_to_container`]), and image/video
-/// attachments become a Media Gallery. The author maps to the webhook
+/// rich embeds become Containers ([`embed_to_container`]), and a legacy
+/// message's loose image/video attachments become a Media Gallery (never a V2
+/// message's — its components already show them — nor an upload a converted
+/// embed already displays). The author maps to the webhook
 /// username/avatar fields, and the emitted `flags` are recomputed the way
 /// the editor's own exporter does — `IS_COMPONENTS_V2` plus the original
 /// `SUPPRESS_NOTIFICATIONS` bit — so the Export JSON output is postable
@@ -981,6 +1096,7 @@ fn target_message(interaction: &Value) -> Option<&Value> {
 fn message_to_share_payload(msg: &Value) -> (Value, bool) {
     let mut components = Vec::new();
     let mut converted = false;
+    let original_flags = msg.get("flags").and_then(Value::as_u64).unwrap_or(0);
 
     // Discord renders content above embeds/attachments, with the (legacy
     // action-row) components last — keep that order in the rebuilt tree.
@@ -989,6 +1105,9 @@ fn message_to_share_payload(msg: &Value) -> (Value, bool) {
             components.push(json!({ "type": TYPE_TEXT_DISPLAY, "content": content }));
         }
     }
+    // Media the converted embeds already carry (their image/thumbnail), so an
+    // upload an embed shows isn't converted a second time into the gallery.
+    let mut embed_media: Vec<&str> = Vec::new();
     for embed in msg
         .get("embeds")
         .and_then(Value::as_array)
@@ -1006,17 +1125,39 @@ fn message_to_share_payload(msg: &Value) -> (Value, bool) {
         if let Some(container) = embed_to_container(embed) {
             components.push(container);
             converted = true;
+            for ptr in [
+                "/image/url",
+                "/image/proxy_url",
+                "/thumbnail/url",
+                "/thumbnail/proxy_url",
+            ] {
+                if let Some(url) = embed.pointer(ptr).and_then(Value::as_str) {
+                    embed_media.push(without_query(url));
+                }
+            }
         }
     }
+    // A Components V2 message already renders every upload it carries through
+    // its own media components — `attachments` just lists the same files — so
+    // only a legacy message's loose attachments become a gallery.
+    let is_v2 = original_flags & FLAG_IS_COMPONENTS_V2 != 0;
     let media_items: Vec<Value> = msg
         .get("attachments")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|_| !is_v2)
         .filter(|a| {
             a.get("content_type")
                 .and_then(Value::as_str)
                 .is_some_and(|ct| ct.starts_with("image/") || ct.starts_with("video/"))
+        })
+        .filter(|a| {
+            !["url", "proxy_url"].iter().any(|key| {
+                a.get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|u| embed_media.contains(&without_query(u)))
+            })
         })
         .filter_map(|a| a.get("url").and_then(Value::as_str))
         .take(MAX_GALLERY_ITEMS)
@@ -1047,13 +1188,19 @@ fn message_to_share_payload(msg: &Value) -> (Value, bool) {
             )),
         );
     }
-    let original_flags = msg.get("flags").and_then(Value::as_u64).unwrap_or(0);
     payload.insert(
         "flags".into(),
         json!(FLAG_IS_COMPONENTS_V2 | (original_flags & FLAG_SUPPRESS_NOTIFICATIONS)),
     );
     payload.insert("components".into(), Value::Array(components));
     (Value::Object(payload), converted)
+}
+
+/// A URL without its query/fragment — Discord's CDN signs attachment links
+/// (`?ex=&is=&hm=`), and the same file can carry different signatures in the
+/// embed and in `attachments`.
+fn without_query(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or(url)
 }
 
 /// A rich embed, rebuilt as the closest Components V2 Container. Lossy by
@@ -1296,11 +1443,14 @@ async fn create_short_link(app: &App, raw_token: &str) -> Option<String> {
 
 fn usage_suffix(app: &App, guild_id: &str) -> String {
     match app.store.list(guild_id) {
-        Ok(rows) => format!(
-            " ({}/{} slots used.)",
-            active_slots(&rows),
-            app.permanent_cap_for(guild_id)
-        ),
+        Ok(rows) => {
+            let cap = app.permanent_cap_for(guild_id);
+            if cap >= UNLIMITED_SLOTS {
+                format!(" ({} slots used · unlimited.)", active_slots(&rows))
+            } else {
+                format!(" ({}/{cap} slots used.)", active_slots(&rows))
+            }
+        }
         Err(_) => String::new(),
     }
 }
@@ -1703,6 +1853,102 @@ mod tests {
         );
         assert_eq!(iso8601_unix_secs("not a timestamp"), None);
         assert_eq!(iso8601_unix_secs(""), None);
+    }
+
+    #[test]
+    fn a_v2_messages_uploads_are_not_duplicated_into_an_extra_gallery() {
+        // A Components V2 message already renders its uploads through its own
+        // components; its `attachments` array lists the same files.
+        let url = "https://cdn.discordapp.com/attachments/1/2/shot.png?ex=1&is=2&hm=3";
+        let msg = json!({
+            "id": "1",
+            "flags": 32768,
+            "components": [
+                { "type": 10, "content": "Patch notes" },
+                { "type": 12, "items": [ { "media": { "url": url, "attachment_id": "77" } } ] },
+            ],
+            "attachments": [ { "id": "77", "filename": "shot.png", "url": url, "content_type": "image/png" } ],
+        });
+        let (payload, converted) = message_to_share_payload(&msg);
+        let galleries = payload["components"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["type"] == 12)
+            .count();
+        assert_eq!(galleries, 1, "the upload appears once");
+        assert!(!converted, "nothing lossy happened to a V2 message");
+    }
+
+    #[test]
+    fn an_upload_a_converted_embed_shows_is_not_converted_twice() {
+        // A legacy embed whose image is the message's own upload: the CDN link
+        // carries a different signature in the embed than in `attachments`.
+        let msg = json!({
+            "id": "1",
+            "embeds": [{
+                "type": "rich",
+                "title": "Shot",
+                "image": { "url": "https://cdn.discordapp.com/attachments/1/2/shot.png?ex=a" },
+            }],
+            "attachments": [
+                { "url": "https://cdn.discordapp.com/attachments/1/2/shot.png?ex=b", "content_type": "image/png" },
+                { "url": "https://cdn.discordapp.com/attachments/1/3/other.png", "content_type": "image/png" },
+            ],
+        });
+        let (payload, converted) = message_to_share_payload(&msg);
+        assert!(converted);
+        let components = payload["components"].as_array().unwrap();
+        // The container (with the embed's image) plus a gallery of the one
+        // upload the embed doesn't show.
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0]["type"], 17);
+        assert_eq!(components[1]["type"], 12);
+        let items = components[1]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0]["media"]["url"],
+            "https://cdn.discordapp.com/attachments/1/3/other.png"
+        );
+    }
+
+    #[test]
+    fn the_unlimited_cap_never_renders_as_a_number() {
+        assert_eq!(
+            slots_line(3, 25),
+            "-# 3/25 never-expire slots used in this server."
+        );
+        let unlimited = slots_line(3, UNLIMITED_SLOTS);
+        assert!(!unlimited.contains("1000000"), "{unlimited}");
+        // `refresh_info_reply` finds the line again by this tail.
+        assert!(unlimited.ends_with("never-expire slots used in this server."));
+    }
+
+    #[test]
+    fn the_toggle_mac_binds_guild_channel_and_message() {
+        let key = [9u8; 32];
+        let mac = toggle_mac(&key, "1", "2", "3");
+        assert_eq!(mac.len(), TOGGLE_MAC_HEX);
+        assert!(mac.bytes().all(|b| b.is_ascii_hexdigit()));
+        // Deterministic for one key…
+        assert_eq!(mac, toggle_mac(&key, "1", "2", "3"));
+        // …and different for any other guild, channel, message, or key.
+        assert_ne!(mac, toggle_mac(&key, "9", "2", "3"));
+        assert_ne!(mac, toggle_mac(&key, "1", "9", "3"));
+        assert_ne!(mac, toggle_mac(&key, "1", "2", "9"));
+        assert_ne!(mac, toggle_mac(&[8u8; 32], "1", "2", "3"));
+        // Field boundaries are unambiguous ("12" + "3" ≠ "1" + "23").
+        assert_ne!(
+            toggle_mac(&key, "12", "3", "4"),
+            toggle_mac(&key, "1", "23", "4")
+        );
+        // Snowflake-sized ids keep the custom_id inside Discord's 100-char cap.
+        let longest = format!(
+            "{PERM_TOGGLE_PREFIX}{}:{}:{mac}",
+            "9".repeat(25),
+            "9".repeat(25)
+        );
+        assert!(longest.len() <= 100, "{}", longest.len());
     }
 
     #[test]

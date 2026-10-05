@@ -227,6 +227,10 @@
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
+        // Only the DWEEB host embedding us speaks this protocol; any other
+        // window (one that opened or framed this page) could otherwise re-init
+        // it and redirect saves and resource requests to its own origin.
+        if (event.source !== parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 

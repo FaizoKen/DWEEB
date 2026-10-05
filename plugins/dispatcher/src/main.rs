@@ -288,6 +288,14 @@ struct App {
     /// authenticated by the shared [`App::internal_token`].
     server_url: String,
     client: reqwest::Client,
+    /// Per-process random key that MACs the Message Info never-expire toggle's
+    /// custom_id over guild|channel|message (see `commands::toggle_mac`). A
+    /// custom_id is client-forgeable — anyone can post a `dweeb:perm:` button
+    /// through a webhook — and without the MAC a click in the forger's own
+    /// server could claim a slot on (and so lock up) another server's message.
+    /// Random per boot on purpose: the toggle only lives on short-lived
+    /// ephemeral replies, so a restart just asks for Message Info again.
+    toggle_key: [u8; 32],
 }
 
 fn main() {
@@ -437,6 +445,9 @@ async fn run() {
         .trim_end_matches('/')
         .to_string();
 
+    let mut toggle_key = [0u8; 32];
+    getrandom::getrandom(&mut toggle_key).expect("CSPRNG unavailable");
+
     let app = Arc::new(App {
         primary_key,
         primary_key_hex,
@@ -453,6 +464,7 @@ async fn run() {
         dashboard_url,
         shortlink_api,
         server_url,
+        toggle_key,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
             // the fallback reply if an upstream stalls. The forward hop sets
@@ -810,7 +822,8 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
                 .pointer("/message/id")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if expired_by_ttl(&app.store, message_id, sent_ms, now_ms, ttl_ms) {
+            let guild_id = interaction.get("guild_id").and_then(Value::as_str);
+            if expired_by_ttl(&app.store, guild_id, message_id, sent_ms, now_ms, ttl_ms) {
                 tracing::info!(custom_id, "component past TTL, disabling");
                 return disable_clicked(&interaction, custom_id, "This component has expired.");
             }
@@ -1044,12 +1057,14 @@ fn message_sent_ms(interaction: &Value) -> Option<u64> {
 
 /// Is a component past its expiry? The window is *sliding*: expired only when
 /// the send time AND the last recorded use are both more than `ttl_ms` ago,
-/// and no permanent slot exempts the message. The database is consulted only
+/// and no permanent slot of the clicking server exempts the message. The
+/// database is consulted only
 /// once the snowflake alone says "expired" — fresh traffic stays read-free —
 /// and a missing or unreadable activity row falls back to the fixed send-date
 /// behaviour (fail toward expiry, never toward unlimited validity).
 fn expired_by_ttl(
     store: &store::Store,
+    guild_id: Option<&str>,
     message_id: &str,
     sent_ms: u64,
     now_ms: u64,
@@ -1064,7 +1079,7 @@ fn expired_by_ttl(
     {
         return false;
     }
-    !store.is_permanent(message_id)
+    !store.is_permanent_for(guild_id, message_id)
 }
 
 /// Answer a dead click (expired or unrouted) by editing the message to disable
@@ -1078,6 +1093,7 @@ fn disable_clicked(interaction: &Value, custom_id: &str, fallback: &str) -> Resp
         return ephemeral(fallback);
     };
     disable_component(&mut components, custom_id);
+    sanitize_echoed_media(&mut components);
     Json(json!({
         "type": RESPONSE_UPDATE_MESSAGE,
         "data": { "components": components }
@@ -1104,6 +1120,95 @@ fn disable_component(node: &mut Value, custom_id: &str) {
             }
             if let Some(accessory) = map.get_mut("accessory") {
                 disable_component(accessory, custom_id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Fields Discord stamps onto every media item of a message it *returns* —
+/// output-only metadata that its message endpoints refuse to be sent back
+/// (the web app learned this the hard way: `RESOLVED_MEDIA_FIELDS` in
+/// src/core/serialization/attachments.ts, which this list mirrors).
+const RESOLVED_MEDIA_FIELDS: [&str; 10] = [
+    "proxy_url",
+    "height",
+    "width",
+    "content_type",
+    "loading_state",
+    "id",
+    "placeholder",
+    "placeholder_version",
+    "content_scan_metadata",
+    "flags",
+];
+const TYPE_THUMBNAIL: u64 = 11;
+const TYPE_MEDIA_GALLERY: u64 = 12;
+const TYPE_FILE: u64 = 13;
+
+/// Make a component tree Discord returned safe to send back as an
+/// UPDATE_MESSAGE — the same cleaning the web app applies before it re-posts or
+/// updates a restored message (`cleanMedia` in attachments.ts): every media
+/// item (a Thumbnail's `media`, a File's `file`, each gallery item's `media`)
+/// loses the resolved output-only fields, and keeps exactly one reference —
+/// the concrete `url` when there is one (Discord re-resolves it), else the
+/// `attachment_id`. Echoing the raw tree risks the whole UPDATE being refused,
+/// which leaves the expired component enabled (and firing) forever.
+fn sanitize_echoed_media(node: &mut Value) {
+    fn clean(media: &mut Value) {
+        let Value::Object(map) = media else {
+            return;
+        };
+        for field in RESOLVED_MEDIA_FIELDS {
+            map.remove(field);
+        }
+        if map
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|u| !u.is_empty())
+        {
+            map.remove("attachment_id");
+        } else {
+            map.remove("url");
+            if !map
+                .get("attachment_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty())
+            {
+                map.remove("attachment_id");
+            }
+        }
+    }
+    match node {
+        Value::Array(items) => items.iter_mut().for_each(sanitize_echoed_media),
+        Value::Object(map) => {
+            match map.get("type").and_then(Value::as_u64) {
+                Some(TYPE_FILE) => {
+                    if let Some(file) = map.get_mut("file") {
+                        clean(file);
+                    }
+                }
+                Some(TYPE_THUMBNAIL) => {
+                    if let Some(media) = map.get_mut("media") {
+                        clean(media);
+                    }
+                }
+                Some(TYPE_MEDIA_GALLERY) => {
+                    if let Some(Value::Array(items)) = map.get_mut("items") {
+                        for item in items {
+                            if let Some(media) = item.get_mut("media") {
+                                clean(media);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if let Some(children) = map.get_mut("components") {
+                sanitize_echoed_media(children);
+            }
+            if let Some(accessory) = map.get_mut("accessory") {
+                sanitize_echoed_media(accessory);
             }
         }
         _ => {}
@@ -1182,6 +1287,14 @@ async fn permanent_add(
             store::Add::Full => (
                 StatusCode::CONFLICT,
                 slots_error_json(&app, &rows, cap, "slots_full"),
+            )
+                .into_response(),
+            // Another guild already spent a slot on this message. A 409, never
+            // the 500 the primary-key violation used to produce: nothing is
+            // broken, the request just isn't this guild's to make.
+            store::Add::Taken => (
+                StatusCode::CONFLICT,
+                slots_error_json(&app, &rows, cap, "slot_taken"),
             )
                 .into_response(),
         },
@@ -1356,6 +1469,11 @@ async fn custom_apps_add(
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => match outcome {
             store::AddApp::Added => {
+                // A re-registration may have changed the key, which resets the
+                // stored "verified" proof (see `Store::custom_app_add`); drop the
+                // in-memory guard too, so the next correctly-signed interaction
+                // stamps it again instead of being skipped as already recorded.
+                app.custom_verified.write().unwrap().remove(application_id);
                 // Keep the hot-path map in lockstep with the registry — but only
                 // for an *active* registration. Re-registering a suspended
                 // (over-plan-cap) app updates its key in place without serving
@@ -1867,10 +1985,16 @@ pub(crate) fn ephemeral(message: &str) -> Response {
 }
 
 /// Decode a 64-hex-char Ed25519 public key. None on any malformed input —
-/// including a key that isn't a valid curve point.
+/// including a key that isn't a valid curve point, and a *weak* (small-order)
+/// one: `verify` against such a key accepts a signature anyone can write
+/// without a private key (e.g. the identity point with `R = identity, s = 0`
+/// validates every message), so registering one would let its holder forge
+/// interactions outright. No real Discord application key is ever weak.
 fn parse_verifying_key(public_key_hex: &str) -> Option<VerifyingKey> {
     let pk: [u8; 32] = hex::decode(public_key_hex).ok()?.try_into().ok()?;
-    VerifyingKey::from_bytes(&pk).ok()
+    VerifyingKey::from_bytes(&pk)
+        .ok()
+        .filter(|key| !key.is_weak())
 }
 
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
@@ -1903,19 +2027,26 @@ mod tests {
         let ttl = 7 * 86_400_000u64;
         let sent = 1_000_000_000_000u64;
         // Fresh by snowflake — alive (this path never reads the database).
-        assert!(!expired_by_ttl(&store, "1", sent, sent + ttl, ttl));
+        assert!(!expired_by_ttl(&store, None, "1", sent, sent + ttl, ttl));
         // Past the snowflake TTL with no recorded use — expired, exactly the
         // old fixed-date behaviour (so pre-feature messages don't change).
-        assert!(expired_by_ttl(&store, "1", sent, sent + ttl + 1, ttl));
+        assert!(expired_by_ttl(&store, None, "1", sent, sent + ttl + 1, ttl));
         // A recorded use slides the window: alive until a full TTL passes
         // since that use, then expired again.
         let used = sent + ttl;
         store.touch_activity("1", used as i64);
-        assert!(!expired_by_ttl(&store, "1", sent, used + ttl, ttl));
-        assert!(expired_by_ttl(&store, "1", sent, used + ttl + 1, ttl));
+        assert!(!expired_by_ttl(&store, None, "1", sent, used + ttl, ttl));
+        assert!(expired_by_ttl(&store, None, "1", sent, used + ttl + 1, ttl));
         // A permanent slot trumps the clock entirely.
         store.add("g", "c", "2", "u", 10).unwrap();
-        assert!(!expired_by_ttl(&store, "2", sent, sent + 10 * ttl, ttl));
+        assert!(!expired_by_ttl(
+            &store,
+            None,
+            "2",
+            sent,
+            sent + 10 * ttl,
+            ttl
+        ));
     }
 
     /// End to end through the real handler: a week-idle click on a ticket's
@@ -1952,6 +2083,7 @@ mod tests {
             shortlink_api: String::new(),
             server_url: String::new(),
             client: reqwest::Client::new(),
+            toggle_key: [0u8; 32],
         });
 
         // A message sent on 2020-01-01: years past any TTL.
@@ -2162,6 +2294,468 @@ mod tests {
         // Classified apart from a dial failure precisely so it is neither
         // retried (the plugin already has the request) nor paged for.
         assert_eq!(classify_forward_failure(&err), ForwardFailure::Timeout);
+    }
+
+    fn test_app(routes: Vec<(String, String)>) -> Arc<App> {
+        let primary = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        Arc::new(App {
+            primary_key: primary.verifying_key(),
+            primary_key_hex: hex::encode(primary.verifying_key().to_bytes()),
+            custom_keys: RwLock::new(HashMap::new()),
+            custom_verified: RwLock::new(HashSet::new()),
+            custom_apps_cap: 1,
+            forward_secret: Some("s3cret".into()),
+            routes,
+            component_ttl_ms: Some(7 * 86_400_000),
+            activity_marks: ActivityMarks::new(),
+            permanent_slots: 2,
+            store: store::Store::open(":memory:").unwrap(),
+            internal_token: Some("tok".into()),
+            dashboard_url: String::new(),
+            shortlink_api: String::new(),
+            server_url: "http://127.0.0.1:9".into(),
+            client: reqwest::Client::new(),
+            toggle_key: [5u8; 32],
+        })
+    }
+
+    fn mgmt_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer tok".parse().unwrap(),
+        );
+        headers
+    }
+
+    async fn body_json(resp: Response) -> (StatusCode, Value) {
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// The identity point: a valid curve encoding of low order.
+    const IDENTITY_KEY_HEX: &str =
+        "0100000000000000000000000000000000000000000000000000000000000000";
+
+    #[test]
+    fn a_weak_key_never_parses() {
+        // The threat is real, not theoretical: against the identity point,
+        // non-strict `verify` accepts R = identity, s = 0 for ANY message — a
+        // signature nobody needs a private key to write.
+        let identity: [u8; 32] = hex::decode(IDENTITY_KEY_HEX).unwrap().try_into().unwrap();
+        let weak = VerifyingKey::from_bytes(&identity).expect("a valid curve point");
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = identity, s = 0
+        assert!(weak
+            .verify(b"anything at all", &Signature::from_bytes(&forged))
+            .is_ok());
+        // So it must never become a verifying key here, from any path —
+        // registration, the boot-time seed, or the primary key itself.
+        assert!(parse_verifying_key(IDENTITY_KEY_HEX).is_none());
+        // A real key still parses.
+        let real = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]).verifying_key();
+        assert!(parse_verifying_key(&hex::encode(real.to_bytes())).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_weak_key_cannot_be_registered_as_a_custom_app() {
+        let app = test_app(vec![]);
+        let resp = custom_apps_add(
+            State(app.clone()),
+            Path("111111111111111111".to_string()),
+            RawQuery(Some("cap=1".into())),
+            mgmt_headers(),
+            Bytes::from(
+                json!({
+                    "application_id": "222222222222222222",
+                    "public_key": IDENTITY_KEY_HEX,
+                    "name": "",
+                    "added_by": "333333333333333333",
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(app.custom_keys.read().unwrap().is_empty());
+        assert!(app.store.custom_apps_all().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn re_registering_a_custom_app_clears_its_in_memory_verified_guard() {
+        let app = test_app(vec![]);
+        let key = |seed: u8| {
+            hex::encode(
+                ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+                    .verifying_key()
+                    .to_bytes(),
+            )
+        };
+        let register = |public_key: String| {
+            let app = app.clone();
+            async move {
+                custom_apps_add(
+                    State(app),
+                    Path("111111111111111111".to_string()),
+                    RawQuery(Some("cap=1".into())),
+                    mgmt_headers(),
+                    Bytes::from(
+                        json!({
+                            "application_id": "222222222222222222",
+                            "public_key": public_key,
+                            "added_by": "3",
+                        })
+                        .to_string(),
+                    ),
+                )
+                .await
+            }
+        };
+        assert_eq!(register(key(1)).await.status(), StatusCode::OK);
+        app.note_custom_verified("222222222222222222");
+        assert!(app
+            .custom_verified
+            .read()
+            .unwrap()
+            .contains("222222222222222222"));
+        // A corrected key: the old proof is gone in memory and on disk, so the
+        // dashboard can't show a key that never verified as "connected".
+        assert_eq!(register(key(2)).await.status(), StatusCode::OK);
+        assert!(!app
+            .custom_verified
+            .read()
+            .unwrap()
+            .contains("222222222222222222"));
+        let rows = app.store.custom_apps_list("111111111111111111").unwrap();
+        assert!(rows[0].verified_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_message_permanent_in_another_guild_answers_409_not_500() {
+        let app = test_app(vec![]);
+        let body = Bytes::from(
+            json!({ "message_id": "555555555555555555", "channel_id": "444444444444444444", "added_by": "1" })
+                .to_string(),
+        );
+        let first = permanent_add(
+            State(app.clone()),
+            Path("111111111111111111".into()),
+            RawQuery(None),
+            mgmt_headers(),
+            body.clone(),
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::OK);
+        let (status, second) = body_json(
+            permanent_add(
+                State(app.clone()),
+                Path("999999999999999999".into()),
+                RawQuery(None),
+                mgmt_headers(),
+                body,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(second["error"], "slot_taken");
+        // The owner's grant is untouched.
+        assert_eq!(
+            app.store
+                .permanent_details("555555555555555555")
+                .unwrap()
+                .guild_id,
+            "111111111111111111"
+        );
+    }
+
+    /// A Discord-signed click on a button someone posted through a webhook,
+    /// carrying a hand-written `dweeb:perm:` custom_id, in the forger's own
+    /// server where they do hold Manage Server.
+    fn forged_toggle(guild: &str, custom_id: &str) -> Value {
+        json!({
+            "type": TYPE_MESSAGE_COMPONENT,
+            "guild_id": guild,
+            "member": { "user": { "id": "1" }, "permissions": "32" },
+            "data": { "custom_id": custom_id, "component_type": 2 },
+            "message": { "id": "1", "webhook_id": "9", "components": [] },
+        })
+    }
+
+    #[test]
+    fn a_grant_only_exempts_clicks_from_the_server_that_holds_it() {
+        let app = test_app(vec![]);
+        let msg = "555555555555555555";
+        // A paid server spends a slot on a message that lives in another one.
+        app.store
+            .add("111111111111111111", "444444444444444444", msg, "1", 10)
+            .unwrap();
+        let (sent, ttl) = (1_000u64, 10u64);
+        let late = sent + 10 * ttl;
+        // The message's real server clicks it: no exemption, it expires.
+        assert!(expired_by_ttl(
+            &app.store,
+            Some("999999999999999999"),
+            msg,
+            sent,
+            late,
+            ttl
+        ));
+        // The holder's own clicks are exempt; a guild-less click keeps the
+        // guild-blind answer.
+        assert!(!expired_by_ttl(
+            &app.store,
+            Some("111111111111111111"),
+            msg,
+            sent,
+            late,
+            ttl
+        ));
+        assert!(!expired_by_ttl(&app.store, None, msg, sent, late, ttl));
+    }
+
+    #[test]
+    fn a_forged_toggle_can_neither_claim_nor_release_another_guilds_message() {
+        let app = test_app(vec![]);
+        let victim_guild = "999999999999999999";
+        let victim_msg = "555555555555555555";
+        let fresh_msg = "666666666666666666";
+        app.store
+            .add(victim_guild, "444444444444444444", victim_msg, "1", 10)
+            .unwrap();
+
+        let attacker_guild = "111111111111111111";
+        for custom_id in [
+            // The pre-MAC shape, and a MAC that's simply made up.
+            format!("dweeb:perm:444444444444444444:{victim_msg}"),
+            format!("dweeb:perm:444444444444444444:{victim_msg}:0123456789abcdef"),
+            format!("dweeb:perm:444444444444444444:{fresh_msg}"),
+            format!("dweeb:perm:444444444444444444:{fresh_msg}:0123456789abcdef"),
+        ] {
+            let _ = commands::component(&app, &forged_toggle(attacker_guild, &custom_id));
+        }
+        // The victim's slot is intact and still theirs…
+        assert!(app.store.is_permanent(victim_msg));
+        assert_eq!(
+            app.store.permanent_details(victim_msg).unwrap().guild_id,
+            victim_guild
+        );
+        // …and nobody spent a slot on a message of a server they're not in.
+        assert!(app.store.permanent_details(fresh_msg).is_none());
+        assert!(app.store.list(attacker_guild).unwrap().is_empty());
+    }
+
+    /// Message Info as Discord sends it, for a webhook message carrying one
+    /// interactive button.
+    fn message_info_interaction(guild: &str, msg_id: &str) -> Value {
+        let mut messages = serde_json::Map::new();
+        messages.insert(
+            msg_id.to_string(),
+            json!({
+                "id": msg_id, "channel_id": "444444444444444444", "webhook_id": "9",
+                "author": { "id": "9", "username": "Hook" },
+                "components": [{ "type": 1, "components": [{ "type": 2, "style": 1, "custom_id": "giveaway:g1", "label": "Enter" }] }]
+            }),
+        );
+        json!({
+            "type": 2,
+            "guild_id": guild,
+            "channel_id": "444444444444444444",
+            "member": { "user": { "id": "1" }, "permissions": "32" },
+            "data": {
+                "name": "Message Info",
+                "target_id": msg_id,
+                "resolved": { "messages": messages }
+            }
+        })
+    }
+
+    fn snowflake_days_ago(days: u64) -> String {
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - days * 86_400_000;
+        ((ms - DISCORD_EPOCH_MS) << 22).to_string()
+    }
+
+    #[tokio::test]
+    async fn the_genuine_toggle_grants_and_releases_a_slot() {
+        let app = test_app(vec![]);
+        let guild = "111111111111111111";
+        let msg_id = snowflake_days_ago(1);
+        let (_, reply) =
+            body_json(commands::respond(&app, &message_info_interaction(guild, &msg_id)).await)
+                .await;
+        let button = &reply["data"]["components"][1]["components"][0];
+        assert_eq!(button["label"], "Never expire");
+        let custom_id = button["custom_id"].as_str().unwrap().to_string();
+        let click = |custom_id: &str, components: &Value| {
+            json!({
+                "type": TYPE_MESSAGE_COMPONENT,
+                "guild_id": guild,
+                "member": { "user": { "id": "1" }, "permissions": "32" },
+                "data": { "custom_id": custom_id, "component_type": 2 },
+                "message": { "id": "1", "flags": 64, "components": components },
+            })
+        };
+        let (_, granted) = body_json(commands::component(
+            &app,
+            &click(&custom_id, &reply["data"]["components"]),
+        ))
+        .await;
+        assert_eq!(granted["type"], RESPONSE_UPDATE_MESSAGE, "{granted}");
+        assert!(app.store.is_permanent(&msg_id));
+        // The refreshed reply keeps the same (still valid) toggle, which now
+        // releases the slot.
+        let again = granted["data"]["components"][1]["components"][0]["custom_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(again, custom_id);
+        let _ = commands::component(&app, &click(&again, &granted["data"]["components"]));
+        assert!(app.store.permanent_details(&msg_id).is_none());
+    }
+
+    /// A slot another server spent on this server's message (through the
+    /// dashboard API, which can't prove where a message lives) must not lock
+    /// the message's real owner out: Message Info proves the message lives
+    /// here, so its toggle takes the grant over.
+    #[tokio::test]
+    async fn message_info_takes_over_a_grant_another_server_placed_on_its_message() {
+        let app = test_app(vec![]);
+        let owner = "111111111111111111";
+        let squatter = "999999999999999999";
+        let msg_id = snowflake_days_ago(1);
+        app.store
+            .add(squatter, "222222222222222222", &msg_id, "7", 10)
+            .unwrap();
+
+        let (_, reply) =
+            body_json(commands::respond(&app, &message_info_interaction(owner, &msg_id)).await)
+                .await;
+        let toggle = reply["data"]["components"][1]["components"][0]["custom_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let click = json!({
+            "type": TYPE_MESSAGE_COMPONENT,
+            "guild_id": owner,
+            "member": { "user": { "id": "1" }, "permissions": "32" },
+            "data": { "custom_id": toggle, "component_type": 2 },
+            "message": { "id": "1", "flags": 64, "components": reply["data"]["components"] },
+        });
+        let _ = commands::component(&app, &click);
+        assert_eq!(
+            app.store.permanent_details(&msg_id).unwrap().guild_id,
+            owner
+        );
+        assert!(app.store.list(squatter).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_suspended_grant_reads_as_expiring_and_can_be_released() {
+        let app = test_app(vec![]);
+        let guild = "111111111111111111";
+        // Sent 30 days ago — past the 7-day TTL.
+        let msg_id = snowflake_days_ago(30);
+        app.store
+            .add(guild, "444444444444444444", &msg_id, "1", 10)
+            .unwrap();
+        app.store.reconcile_permanent(guild, 0).unwrap(); // downgrade: parked
+
+        let (_, reply) =
+            body_json(commands::respond(&app, &message_info_interaction(guild, &msg_id)).await)
+                .await;
+        let text = reply["data"]["components"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // The TTL gate treats it as expiring, so Message Info must say so…
+        assert!(!text.contains("never expires"), "{text}");
+        assert!(text.contains("expired"), "{text}");
+        assert!(text.contains("paused"), "{text}");
+
+        // …and the offered toggle ("Let it expire") really releases it.
+        let button = &reply["data"]["components"][1]["components"][0];
+        assert_eq!(button["label"], "Let it expire");
+        let click = json!({
+            "type": TYPE_MESSAGE_COMPONENT,
+            "guild_id": guild,
+            "member": { "user": { "id": "1" }, "permissions": "32" },
+            "data": { "custom_id": button["custom_id"], "component_type": 2 },
+            "message": { "id": "1", "flags": 64, "components": reply["data"]["components"] },
+        });
+        let (_, refreshed) = body_json(commands::component(&app, &click)).await;
+        assert_eq!(refreshed["type"], RESPONSE_UPDATE_MESSAGE, "{refreshed}");
+        assert!(app.store.list(guild).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_expired_click_echoes_media_without_output_only_fields() {
+        let interaction = json!({
+            "message": { "components": [
+                { "type": 17, "id": 1, "components": [
+                    { "type": 9, "id": 2,
+                      "components": [{ "type": 10, "id": 3, "content": "hi" }],
+                      "accessory": { "type": 11, "id": 4, "media": {
+                          "url": "https://cdn.discordapp.com/attachments/1/2/a.png?ex=1",
+                          "proxy_url": "https://media.discordapp.net/a.png", "width": 10, "height": 10,
+                          "content_type": "image/png", "placeholder": "x", "placeholder_version": 1,
+                          "loading_state": 2, "flags": 0, "id": "77", "attachment_id": "77" } } },
+                    { "type": 12, "id": 5, "items": [ { "media": {
+                          "url": "", "attachment_id": "78", "proxy_url": "p", "width": 1 } } ] },
+                    { "type": 13, "id": 6, "file": {
+                          "url": "attachment://doc.pdf", "content_scan_metadata": {}, "attachment_id": "79" },
+                      "name": "doc.pdf", "size": 12 },
+                    { "type": 1, "id": 7, "components": [
+                        { "type": 2, "id": 8, "style": 1, "custom_id": "x:y", "label": "Go" } ] },
+                ]},
+            ]}
+        });
+        let resp = disable_clicked(&interaction, "x:y", "expired");
+        let body = futures_body(resp);
+        let container = &body["data"]["components"][0];
+        let thumb = &container["components"][0]["accessory"]["media"];
+        assert_eq!(
+            thumb,
+            &json!({ "url": "https://cdn.discordapp.com/attachments/1/2/a.png?ex=1" })
+        );
+        // No concrete url → the attachment reference is what's kept.
+        assert_eq!(
+            container["components"][1]["items"][0]["media"],
+            json!({ "attachment_id": "78" })
+        );
+        assert_eq!(
+            container["components"][2]["file"],
+            json!({ "url": "attachment://doc.pdf" })
+        );
+        // Component ids and everything else survive; the click is disabled.
+        assert_eq!(container["components"][2]["name"], "doc.pdf");
+        assert_eq!(container["components"][3]["components"][0]["id"], 8);
+        assert_eq!(
+            container["components"][3]["components"][0]["disabled"],
+            true
+        );
+    }
+
+    /// Read a synchronous handler's JSON body.
+    fn futures_body(resp: Response) -> Value {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                serde_json::from_slice(&bytes).unwrap()
+            })
     }
 
     #[test]

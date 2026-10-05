@@ -35,6 +35,10 @@ pub struct PermanentDetails {
     pub guild_id: String,
     pub added_by: String,
     pub added_at: i64,
+    /// Parked by a plan downgrade: the slot is still this guild's, but the
+    /// TTL gate ignores it ([`Store::is_permanent`]) until the guild
+    /// re-upgrades — so Message Info must not claim the message never expires.
+    pub suspended: bool,
 }
 
 pub enum Add {
@@ -43,6 +47,11 @@ pub enum Add {
     Already,
     /// Every slot is taken.
     Full,
+    /// The message already holds a slot granted by a *different* guild. A
+    /// message id is the table's primary key, so this must be refused here
+    /// rather than reaching the INSERT (a constraint failure would surface as
+    /// a 500 — the paging channel — for a request that is simply not allowed).
+    Taken,
 }
 
 /// One guild-registered custom application, as listed back to the dashboard.
@@ -216,19 +225,46 @@ impl Store {
         .is_some()
     }
 
+    /// [`Self::is_permanent`] for a click in `guild_id`: only that server's own
+    /// grant exempts it. The dashboard API can't prove where a message lives,
+    /// so a grant one server placed on another server's message must not keep
+    /// that message's components alive — that would let one paid server hand
+    /// never-expire to any server it likes. `None` (no guild on the click)
+    /// keeps the guild-blind answer; webhook messages always carry a guild.
+    pub fn is_permanent_for(&self, guild_id: Option<&str>, message_id: &str) -> bool {
+        let Some(guild_id) = guild_id else {
+            return self.is_permanent(message_id);
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT 1 FROM permanent_messages
+             WHERE message_id = ?1 AND guild_id = ?2 AND suspended_at IS NULL",
+            [message_id, guild_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .unwrap_or_else(|err| {
+            tracing::error!(%err, "permanent lookup failed");
+            None
+        })
+        .is_some()
+    }
+
     /// The grant behind a permanent message, if any. `None` on a read error
     /// too — same fail-toward-expiry bias as [`Self::is_permanent`], and the
     /// caller (Message Info) then reports the message as a regular one.
     pub fn permanent_details(&self, message_id: &str) -> Option<PermanentDetails> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT guild_id, added_by, added_at FROM permanent_messages WHERE message_id = ?1",
+            "SELECT guild_id, added_by, added_at, suspended_at IS NOT NULL
+             FROM permanent_messages WHERE message_id = ?1",
             [message_id],
             |r| {
                 Ok(PermanentDetails {
                     guild_id: r.get(0)?,
                     added_by: r.get(1)?,
                     added_at: r.get(2)?,
+                    suspended: r.get(3)?,
                 })
             },
         )
@@ -257,15 +293,20 @@ impl Store {
         cap: u32,
     ) -> rusqlite::Result<Add> {
         let conn = self.conn.lock().unwrap();
-        let already: Option<()> = conn
+        let owner: Option<String> = conn
             .query_row(
-                "SELECT 1 FROM permanent_messages WHERE message_id = ?1 AND guild_id = ?2",
-                (message_id, guild_id),
-                |_| Ok(()),
+                "SELECT guild_id FROM permanent_messages WHERE message_id = ?1",
+                [message_id],
+                |r| r.get(0),
             )
             .optional()?;
-        if already.is_some() {
-            return Ok(Add::Already);
+        match owner.as_deref() {
+            Some(g) if g == guild_id => return Ok(Add::Already),
+            // Another guild's grant: neither re-grant it here (the message id is
+            // the primary key) nor claim it — `remove` is guild-scoped, so the
+            // owner keeps sole control of its slot.
+            Some(_) => return Ok(Add::Taken),
+            None => {}
         }
         // Only *active* grants consume quota — suspended (over-cap) rows are
         // parked and don't count, so a server can always fill up to its cap in
@@ -562,8 +603,14 @@ impl Store {
             .optional()?;
         match owner.as_deref() {
             Some(g) if g == guild_id => {
+                // A changed key resets the "connected" proof: `verified_at`
+                // vouched for the OLD key, and keeping it would show a
+                // mistyped replacement as verified while every click 401s.
+                // (SET expressions read the row's pre-update values, so the
+                // CASE compares the stored key with the new one.)
                 conn.execute(
-                    "UPDATE custom_apps SET public_key = ?1, name = ?2, client_secret_enc = ?3
+                    "UPDATE custom_apps SET public_key = ?1, name = ?2, client_secret_enc = ?3,
+                         verified_at = CASE WHEN public_key = ?1 THEN verified_at ELSE NULL END
                      WHERE application_id = ?4",
                     (public_key, name, client_secret_enc, application_id),
                 )?;
@@ -824,6 +871,55 @@ mod tests {
             s.add("g1", "c", "200", "u", 1).unwrap(),
             Add::Added
         ));
+    }
+
+    #[test]
+    fn a_message_granted_by_another_guild_is_taken_not_a_constraint_error() {
+        let s = store();
+        perm(&s, "g1", "100");
+        // Re-granting from the owner is the idempotent no-op it always was…
+        assert!(matches!(
+            s.add("g1", "c", "100", "u", 1000).unwrap(),
+            Add::Already
+        ));
+        // …but another guild can neither re-grant it (the message id is the
+        // primary key — this used to surface as a 500) nor claim it.
+        assert!(matches!(
+            s.add("g2", "c", "100", "u", 1000).unwrap(),
+            Add::Taken
+        ));
+        assert_eq!(s.permanent_details("100").unwrap().guild_id, "g1");
+        assert!(!s.remove("g2", "100").unwrap());
+        assert!(s.is_permanent("100"));
+    }
+
+    #[test]
+    fn permanent_details_report_a_parked_grant_as_suspended() {
+        let s = store();
+        perm(&s, "g1", "100");
+        assert!(!s.permanent_details("100").unwrap().suspended);
+        s.reconcile_permanent("g1", 0).unwrap();
+        let parked = s.permanent_details("100").unwrap();
+        assert!(parked.suspended);
+        assert_eq!(parked.guild_id, "g1");
+        assert!(!s.is_permanent("100"));
+    }
+
+    #[test]
+    fn re_registering_a_different_key_resets_the_verified_proof() {
+        let s = store();
+        let key = "a".repeat(64);
+        s.custom_app_add("g1", "100", &key, "bot", "", "u", 1000)
+            .unwrap();
+        assert!(s.mark_custom_verified("100").unwrap());
+        // Same key again (a name refresh): the proof stands.
+        s.custom_app_add("g1", "100", &key, "bot2", "", "u", 1000)
+            .unwrap();
+        assert!(s.custom_apps_list("g1").unwrap()[0].verified_at.is_some());
+        // A different key: the proof vouched for the old one, so it goes.
+        s.custom_app_add("g1", "100", &"b".repeat(64), "bot2", "", "u", 1000)
+            .unwrap();
+        assert!(s.custom_apps_list("g1").unwrap()[0].verified_at.is_none());
     }
 
     #[test]
