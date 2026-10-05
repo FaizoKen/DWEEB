@@ -229,9 +229,11 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
 /// configured message. The forward runs on a short timeout so the user-facing
 /// reply always lands within Discord's ~3s window — but when it *fails*, the
 /// reply says so (never the configured "thanks" — that would silently swallow
-/// the submission). For a one-response-per-person form, the submission is
-/// recorded only when the forward actually reached the destination, so a
-/// transient failure can't lock the member out forever.
+/// the submission). For a one-response-per-person form, the member's one
+/// response is claimed atomically *before* forwarding (so a second modal
+/// opened before the first was submitted is turned away here, not forwarded
+/// too) and given back if the forward fails, so a transient failure can't lock
+/// the member out forever.
 async fn handle_modal_submit(state: &AppState, interaction: &discord::Interaction) -> Response {
     let Some(data) = interaction.data.as_ref() else {
         return Json(discord::ephemeral_text("Empty submission.")).into_response();
@@ -251,6 +253,23 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
             return Json(discord::ephemeral_text("Something went wrong.")).into_response();
         }
     };
+
+    // One response per person: claim it before anything is forwarded. Fails
+    // *open* on a storage hiccup, like the click-time check — better a rare
+    // second response than a working form walled off behind a DB blip.
+    let mut claimed: Option<&str> = None;
+    if cfg.limit_one {
+        if let Some(uid) = interaction.actor_id() {
+            match state.store.reserve_submission(id, uid) {
+                Ok(true) => claimed = Some(uid),
+                Ok(false) => return Json(discord::ephemeral_text(
+                    "You've already submitted this form — only one response per person is allowed.",
+                ))
+                .into_response(),
+                Err(e) => tracing::warn!(error = %e, "reserve submission"),
+            }
+        }
+    }
 
     let values = discord::collect_modal_values(data);
     let forward = discord::build_forward_message(&cfg, &values, interaction.actor());
@@ -285,22 +304,19 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
 
     // A failed forward means the answers went nowhere — say so instead of
     // sending the configured "thanks, recorded" reply, which would silently
-    // swallow the submission. Nothing was recorded (the one-per-person mark
-    // below only lands on success), so trying again is safe and honest.
+    // swallow the submission. The one-per-person claim is given back, so
+    // trying again is safe and honest.
     if !forwarded_ok {
+        if let Some(uid) = claimed {
+            if let Err(e) = state.store.release_submission(id, uid) {
+                tracing::warn!(error = %e, "release submission");
+            }
+        }
         return Json(discord::ephemeral_text(
             "\u{26A0}\u{FE0F} Your answers couldn't be delivered just now, so nothing was \
              recorded — please submit the form again in a moment.",
         ))
         .into_response();
-    }
-
-    if cfg.limit_one {
-        if let Some(uid) = interaction.actor_id() {
-            if let Err(e) = state.store.record_submission(id, uid) {
-                tracing::warn!(error = %e, "record submission");
-            }
-        }
     }
 
     Json(discord::build_reply(&cfg.reply)).into_response()
@@ -356,4 +372,123 @@ fn storage_error() -> Response {
         Json(json!({ "error": "Storage error." })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{ModalDef, ModalField, ReplyDef};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A forward destination that counts what it receives and answers with
+    /// `status`, plus the plugin state pointing a one-response form at it.
+    async fn form_forwarding_to(status: StatusCode) -> (AppState, Arc<AtomicUsize>) {
+        let forwards = Arc::new(AtomicUsize::new(0));
+        let counter = forwards.clone();
+        let capture = axum::Router::new().route(
+            "/api/webhooks/1/x",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    status
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, capture).await.unwrap() });
+
+        let store = Store::open(":memory:").unwrap();
+        let cfg = InstanceConfig {
+            modal: ModalDef {
+                title: "Application".into(),
+                fields: vec![ModalField {
+                    id: "f1".into(),
+                    label: "Why".into(),
+                    style: "short".into(),
+                    required: true,
+                    placeholder: None,
+                    value: None,
+                    min_length: None,
+                    max_length: None,
+                }],
+            },
+            // Stored directly (validation would demand discord.com) so the
+            // forward lands on the local capture server.
+            forward_webhook: format!("http://{addr}/api/webhooks/1/x"),
+            forward_username: None,
+            include_submitter: true,
+            limit_one: true,
+            reply: ReplyDef {
+                payload: None,
+                text: Some("Thanks".into()),
+            },
+        };
+        store.create("inst", &"a".repeat(64), &cfg).unwrap();
+        let state = AppState {
+            store: Arc::new(store),
+            http: reqwest::Client::new(),
+            config: Arc::new(Config {
+                port: 0,
+                public_base_url: String::new(),
+                discord_public_key: "00".repeat(32),
+                dispatcher_forward_secret: None,
+                database_path: String::new(),
+            }),
+            primary_key: ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]).verifying_key(),
+        };
+        (state, forwards)
+    }
+
+    fn submit() -> discord::Interaction {
+        serde_json::from_value(json!({
+            "type": 5,
+            "member": { "user": { "id": "42", "username": "ada" } },
+            "data": {
+                "custom_id": "modalform:submit:inst",
+                "components": [{ "components": [{ "custom_id": "f1", "value": "first" }] }]
+            }
+        }))
+        .unwrap()
+    }
+
+    async fn reply_text(resp: Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        body.to_string()
+    }
+
+    /// The click-time check only stops someone who already *finished*: a
+    /// member with two modals open (two devices, or a second click before
+    /// submitting) used to get both answers forwarded.
+    #[tokio::test]
+    async fn one_response_per_person_is_enforced_at_submit_time() {
+        let (state, forwards) = form_forwarding_to(StatusCode::NO_CONTENT).await;
+        let first = reply_text(handle_modal_submit(&state, &submit()).await).await;
+        assert!(first.contains("Thanks"), "{first}");
+        assert!(state.store.has_submitted("inst", "42").unwrap());
+
+        let second = reply_text(handle_modal_submit(&state, &submit()).await).await;
+        assert!(second.contains("already submitted"), "{second}");
+        assert_eq!(
+            forwards.load(Ordering::SeqCst),
+            1,
+            "only one answer went out"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_forward_gives_the_claim_back() {
+        let (state, forwards) = form_forwarding_to(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let reply = reply_text(handle_modal_submit(&state, &submit()).await).await;
+        assert!(reply.contains("couldn't be delivered"), "{reply}");
+        // Nothing reached the destination, so the member isn't locked out…
+        assert!(!state.store.has_submitted("inst", "42").unwrap());
+        // …and trying again really does try again.
+        let _ = handle_modal_submit(&state, &submit()).await;
+        assert_eq!(forwards.load(Ordering::SeqCst), 2);
+    }
 }

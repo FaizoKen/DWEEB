@@ -202,13 +202,31 @@ impl Store {
         Ok(exists.is_some())
     }
 
-    pub fn record_submission(&self, instance_id: &str, user_id: &str) -> rusqlite::Result<()> {
+    /// Claim a member's one response to a one-response-per-person form,
+    /// atomically: true when this call took the slot, false when it was
+    /// already taken. Claimed *before* the answers are forwarded, so two modals
+    /// open at once (two devices, or a second click before submitting) can't
+    /// both get through — the click-time check alone only stops a member who
+    /// already finished. A forward that fails gives the claim back
+    /// ([`Self::release_submission`]), so a transient failure never locks
+    /// anyone out.
+    pub fn reserve_submission(&self, instance_id: &str, user_id: &str) -> rusqlite::Result<bool> {
         let now = unix_millis();
         let conn = self.lock();
-        conn.execute(
+        let inserted = conn.execute(
             "INSERT OR IGNORE INTO submissions (instance_id, user_id, created_at)
              VALUES (?1, ?2, ?3)",
             (instance_id, user_id, now),
+        )?;
+        Ok(inserted == 1)
+    }
+
+    /// Give back a claim whose answers never reached the destination.
+    pub fn release_submission(&self, instance_id: &str, user_id: &str) -> rusqlite::Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "DELETE FROM submissions WHERE instance_id = ?1 AND user_id = ?2",
+            (instance_id, user_id),
         )?;
         Ok(())
     }
