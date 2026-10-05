@@ -20,6 +20,7 @@ import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { BrokenImageIcon } from "./BrokenImageIcon";
 import { mediaUrlText, useResolvedMediaUrl } from "./useResolvedMediaUrl";
+import { nextAspect, type MeasuredAspect } from "./measuredAspect";
 import { mediaKindFromName, mediaNameFromUrl } from "./mediaKind";
 import { usePreviewMediaPriority } from "../mediaPriorityContext";
 import styles from "./MediaGalleryRenderer.module.css";
@@ -96,20 +97,26 @@ function GalleryItem({
   // plain failure flag outlived it (with the <img> swapped out, nothing could
   // ever clear it — every later URL showed the broken glyph), and a stale
   // aspect would size a new picture to the old one's shape.
-  const [aspect, setAspect] = useState<{ src: string; ratio: number } | null>(null);
+  const [aspect, setAspect] = useState<MeasuredAspect | null>(null);
   const sourceAspect = aspect && aspect.src === src ? aspect.ratio : null;
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = src !== null && failedSrc === src;
+  // Record a loaded image's shape for this source — through `nextAspect`,
+  // which keeps the previous state object when nothing changed. That is what
+  // stops `readImageState` (a ref, so it runs on every render) from
+  // re-rendering forever on a cached image.
+  const recordAspect = (el: HTMLImageElement): boolean => {
+    if (src === null || el.naturalWidth <= 0 || el.naturalHeight <= 0) return false;
+    const ratio = el.naturalWidth / el.naturalHeight;
+    setAspect((prev) => nextAspect(prev, src, ratio));
+    return true;
+  };
   // A cached image can be `complete` before the load listener attaches, so
   // `onLoad` alone would miss it and leave the fallback geometry — read the
   // element's state directly on mount as well.
   const readImageState = (el: HTMLImageElement | null) => {
     if (!el || !el.complete || src === null) return;
-    if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-      setAspect({ src, ratio: el.naturalWidth / el.naturalHeight });
-    } else if (el.currentSrc) {
-      setFailedSrc(src);
-    }
+    if (!recordAspect(el) && el.currentSrc) setFailedSrc(src);
   };
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
   const hasAlt = Boolean(item.description);
@@ -165,10 +172,7 @@ function GalleryItem({
             onError={() => setFailedSrc(src)}
             onLoad={(e) => {
               setFailedSrc(null);
-              const el = e.currentTarget;
-              if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-                setAspect({ src, ratio: el.naturalWidth / el.naturalHeight });
-              }
+              recordAspect(e.currentTarget);
             }}
           />
         )
