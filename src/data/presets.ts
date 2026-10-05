@@ -1877,7 +1877,7 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
               _id: id(),
               type: ComponentType.TextDisplay,
               content:
-                "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own.",
+                "### 🎁 {prize}\nTap **Enter** below — the count ticks up live, and the host draws a fair winner when it closes.",
             },
           ],
           accessory: {

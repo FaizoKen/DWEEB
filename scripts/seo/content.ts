@@ -611,7 +611,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     description:
       "A Discord giveaway template with one-click button entry, a live entrant count and an automatic winner draw. Pairs with the Giveaway plugin.",
     intro:
-      "Run a giveaway your members can enter in one tap. The prize, live entrant count and winners fill themselves in, and a fair winner is drawn automatically — no reactions to count and no manual picking when it's time to choose.",
+      "Run a giveaway your members can enter in one tap. The prize, live entrant count and winners fill themselves in, and when it closes the host draws a fair random winner in one click — no reactions to count and no picking names by hand.",
     whenToUse: [
       "Hosting a prize giveaway or raffle",
       "Boosting engagement with one-click entry",

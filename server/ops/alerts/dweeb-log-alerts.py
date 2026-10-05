@@ -190,7 +190,12 @@ def classify(rest: str) -> tuple[str, str] | None:
     itself logged at WARN. It never pages on its own — the reader hands it to
     `Collector.note_upstream`, which pages once when they come in a burst.
     """
-    if not NON_PAGING_LEVEL_RE.match(rest) and PANIC_RE.search(rest):
+    # Never on a Caddy JSON entry either: it embeds the request — headers and
+    # all — so a User-Agent reading "thread 'x' panicked at y" on a request the
+    # client then aborts turned a muted hang-up into a PANIC page, on demand and
+    # repeatably. A Rust panic is never JSON, and Go's panics don't say
+    # "panicked at".
+    if not rest.startswith("{") and not NON_PAGING_LEVEL_RE.match(rest) and PANIC_RE.search(rest):
         return ("PANIC", rest.strip())
     head = TRACING_HEAD_RE.match(rest)
     if head:
@@ -328,7 +333,12 @@ class Collector:
         sig = f"{svc}|{label}|{normalize(msg if key is None else key)}"
         with self.lock:
             now = time.time() if now is None else now
-            if now - self.last_posted.get(sig, 0.0) < MUTE_SECS:
+            # A signature with an unresurfaced muted count is still inside its
+            # mute even at the instant the window expires: `flush_due` posts
+            # that count once as "still occurring". Queuing the hit as fresh too
+            # posted the same incident twice per window, the second time reading
+            # like a new one.
+            if now - self.last_posted.get(sig, 0.0) < MUTE_SECS or sig in self.muted_counts:
                 rec = self.muted_counts.setdefault(
                     sig, {"count": 0, "label": label, "svc": svc, "sample": msg}
                 )
@@ -552,6 +562,21 @@ PARSE_CASES: list[tuple[str, str | None, tuple[str, ...]]] = [
     # Caddy: a plain upstream timeout is not abort wording either.
     ('{"level":"error","logger":"http.log.error","msg":"context deadline exceeded"}',
      "ERROR http.log.error", ("deadline",)),
+    # Caddy entries embed the request headers: panic wording in a User-Agent must
+    # not turn a muted client hang-up into a PANIC page (it was a page on demand).
+    (
+        '{"level":"error","logger":"http.log.error","msg":"Application error 0x100 (remote)",'
+        '"request":{"proto":"HTTP/3.0","method":"GET","uri":"/x",'
+        '"headers":{"User-Agent":["thread \x27main\x27 panicked at src/main.rs:1:1"]}},"duration":2.0,"status":502}',
+        None,
+        (),
+    ),
+    (
+        '{"level":"error","logger":"http.log.error","msg":"write: broken pipe",'
+        '"request":{"method":"POST","uri":"/x","headers":{"User-Agent":["x panicked at y"]}},"status":502}',
+        None,
+        (),
+    ),
 ]
 
 
@@ -649,6 +674,19 @@ def parse_test() -> int:
         for i in range(UPSTREAM_BURST_COUNT)
     ]
     check("hits spread past the window never fire", not any(slow), repr(slow))
+
+    # An error firing every second posts once per mute window: the first post,
+    # then one "still occurring" per window — never a second, fresh-looking post
+    # for a hit that landed on the window's expiry.
+    steady = Collector()
+    posts = []
+    for second in range(0, 2 * MUTE_SECS + FLUSH_SECS + 5):
+        steady.add("proxy", "ERROR x", "same failure", now=t0 + second)
+        body = steady.flush_due(now=t0 + second)
+        if body:
+            posts.append((second, "(still occurring)" in body))
+    expected = [(FLUSH_SECS, False), (FLUSH_SECS + MUTE_SECS, True), (FLUSH_SECS + 2 * MUTE_SECS, True)]
+    check("a steady error posts once per window", posts == expected, repr(posts))
 
     # Counted, not hand-maintained: the literal `+ 7` here had drifted behind the
     # `check()` calls below it and printed 27/27 for 28 assertions. Harmless to

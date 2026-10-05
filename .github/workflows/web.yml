@@ -31,6 +31,11 @@ on:
       # The crash-attribution spec lives beside its Rust twin, but Vitest runs
       # it too: a spec-only edit must test (and ship) the client as well.
       - "server/src/foreign-code-vectors.json"
+      # Same for the MCP data: the TS corpus test reads validation-corpus.json,
+      # and the "generated MCP data is up to date" gate diffs the whole folder —
+      # a server-only commit touching it must run them here, not fail a later,
+      # unrelated frontend push.
+      - "server/src/mcp/**"
       - ".github/workflows/web.yml"
   pull_request:
     branches: [main]

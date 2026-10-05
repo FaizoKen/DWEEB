@@ -84,9 +84,17 @@ jobs:
           done
 
           # --- find an existing open incident (the persisted state) ---
-          incident=$(gh issue list --state open --limit 50 \
+          # An unreadable state is not "no incident": read as empty, a failing
+          # API call during an outage opened a duplicate incident and re-sent
+          # the DOWN alert, and on recovery every duplicate closed with its own
+          # RECOVERED (api.github.com is known to fail intermittently from
+          # runners). Change nothing this run; the next one reconciles.
+          if ! incident=$(gh issue list --state open --limit 50 \
             --json number,title \
-            --jq "[.[] | select(.title == \"$INCIDENT_TITLE\")][0].number // empty")
+            --jq "[.[] | select(.title == \"$INCIDENT_TITLE\")][0].number // empty"); then
+            echo "::warning::couldn't read the incident state from the GitHub API — changing nothing this run"
+            if [ "$ok" -eq 1 ]; then exit 0; else exit 1; fi
+          fi
 
           if [ "$ok" -eq 0 ]; then
             # ---- DOWN ----

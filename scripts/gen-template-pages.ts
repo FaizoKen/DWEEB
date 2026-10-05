@@ -53,7 +53,8 @@ const MAX_RELATED_FEATURES = 3;
 /**
  * Old site-relative paths → the page that replaced them. Keys and values are
  * directory paths with a trailing slash; a value must be a page this build
- * emits (the audit's link check verifies that through the stub's anchor).
+ * emits, and a key must not be one — both checked when the stubs are written,
+ * last (the audit's checks cover sitemap pages only, and stubs aren't any).
  */
 const LEGACY_REDIRECTS: Readonly<Record<string, string>> = {
   // The "welcome hub" template was retired in 7e5288e (2026-07-03); its page
@@ -277,17 +278,6 @@ async function main(): Promise<void> {
     await writeFile(join(DIST, payload.path.slice(1)), `${payload.json}\n`, "utf8");
   }
 
-  // Retired URLs that search engines still hold. GitHub Pages cannot answer a
-  // real 301, and a plain 404 throws away whatever ranking the old address had
-  // (Search Console showed `/templates/discord-onboarding-panel/` still earning
-  // impressions two months after 7e5288e removed that template). A zero-delay
-  // meta refresh is the redirect signal Google documents for static hosts; the
-  // stub is `noindex` so the audit's orphan check treats it as deliberate and
-  // so the old address itself never competes with its target.
-  for (const [from, to] of Object.entries(LEGACY_REDIRECTS)) {
-    await writePage(join(from.slice(1), "index.html"), legacyRedirectPage(from, to));
-  }
-
   // /templates index.
   await writePage(join("templates", "index.html"), renderIndexPage(all));
 
@@ -413,6 +403,39 @@ async function main(): Promise<void> {
     .replace(/<meta\s+property="og:url"[^>]*>\s*/gi, "")
     .replace(/<script\s+type="application\/ld\+json">[\s\S]*?<\/script>\s*/gi, "");
   await writeFile(join(DIST, "404.html"), fallback, "utf8");
+
+  // Retired URLs that search engines still hold. GitHub Pages cannot answer a
+  // real 301, and a plain 404 throws away whatever ranking the old address had
+  // (Search Console showed `/templates/discord-onboarding-panel/` still earning
+  // impressions two months after 7e5288e removed that template). A zero-delay
+  // meta refresh is the redirect signal Google documents for static hosts; the
+  // stub is `noindex` so the audit's orphan check treats it as deliberate and
+  // so the old address itself never competes with its target. Written last, so
+  // each one is checked against the finished build: a target this build doesn't
+  // emit (a typo, or a page retired in turn) would ship a refresh into a 404,
+  // and a `from` that is a real page again would be silently overwritten — the
+  // audit's link and orphan checks see neither, since stubs are off-sitemap.
+  const exists = (path: string) =>
+    access(path).then(
+      () => true,
+      () => false,
+    );
+  for (const [from, to] of Object.entries(LEGACY_REDIRECTS)) {
+    if (!(await exists(join(DIST, to.slice(1), "index.html")))) {
+      throw new Error(`LEGACY_REDIRECTS: ${from} points at ${to}, which this build doesn't emit.`);
+    }
+    const stubPath = join(DIST, from.slice(1), "index.html");
+    if (await exists(stubPath)) {
+      // Our own stub from an earlier `gen:seo` run in the same dist is fine.
+      const existing = await readFile(stubPath, "utf8");
+      if (!existing.includes("LEGACY_REDIRECTS. -->")) {
+        throw new Error(
+          `LEGACY_REDIRECTS: ${from} is a page this build emits — drop the redirect.`,
+        );
+      }
+    }
+    await writePage(join(from.slice(1), "index.html"), legacyRedirectPage(from, to));
+  }
 
   const sectionPages = 4 + LANDINGS.length; // indexes + landings + about
   console.log(

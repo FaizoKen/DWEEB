@@ -60,7 +60,11 @@ export function parseRatingAggregate(value: unknown): RatingAggregate | null {
   if (typeof average !== "number" || !Number.isFinite(average)) return null;
   if (typeof count !== "number" || !Number.isInteger(count) || count < 0) return null;
   if (typeof best !== "number" || typeof worst !== "number") return null;
-  if (!Number.isFinite(best) || !Number.isFinite(worst) || worst >= best) return null;
+  // The scale is pinned, not just ordered: the five buckets below are the five
+  // points of a 1–5 scale, so any other endpoints describe something the page
+  // can't draw — "out of 10" over five bars — and a huge `best` used to crash
+  // the build in the star renderer's `repeat`, which must never happen here.
+  if (worst !== 1 || best !== SCALE_POINTS) return null;
 
   // A mean outside its own scale is incoherent — publishing "6.2 out of 5"
   // would be visibly wrong on the page and is the shape a bug or a tampered

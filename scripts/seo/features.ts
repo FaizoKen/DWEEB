@@ -382,7 +382,7 @@ export const FEATURES: FeatureSeo[] = [
       },
       {
         name: "Draw a winner",
-        text: "Members enter in one click. When the timer ends, a fair winner is drawn automatically — reroll or cancel if you need to.",
+        text: "Members enter in one click. When the timer ends, the host draws a fair random winner with one click — reroll or cancel if you need to.",
       },
     ],
     configurable: [

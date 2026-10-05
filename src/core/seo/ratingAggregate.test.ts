@@ -67,6 +67,14 @@ describe("parseRatingAggregate", () => {
     expect(parseRatingAggregate({ ...valid, best: 5, worst: 5 })).toBeNull();
   });
 
+  it("rejects any scale but the 1–5 its five buckets describe", () => {
+    // "out of 10" over five bars, and a `best` big enough to crash the build's
+    // star renderer — which must never fail on this.
+    expect(parseRatingAggregate({ ...valid, best: 10 })).toBeNull();
+    expect(parseRatingAggregate({ ...valid, best: 2 ** 31 })).toBeNull();
+    expect(parseRatingAggregate({ ...valid, worst: 0 })).toBeNull();
+  });
+
   it("rejects anything that is not an object", () => {
     for (const junk of [null, undefined, 4.6, "4.6", [], true]) {
       expect(parseRatingAggregate(junk)).toBeNull();

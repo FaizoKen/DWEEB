@@ -65,8 +65,11 @@ function trackedAppPath(path: string, type: "guide" | "landing", id: string): st
  * a site-relative path from a conservative character class, so an external or
  * javascript: target cannot be expressed at all — an internal link is the only
  * thing this syntax can produce, which is also all the SEO audit will accept.
+ * A second leading slash is refused: `//host/path` is protocol-relative, i.e.
+ * an external link. Left unconverted, the literal then fails the audit's
+ * unrendered-link check rather than shipping.
  */
-const INLINE_LINK = /\[([^[\]]+)\]\((\/[A-Za-z0-9\-._~/]*)\)/g;
+const INLINE_LINK = /\[([^[\]]+)\]\((\/(?!\/)[A-Za-z0-9\-._~/]*)\)/g;
 
 export function renderProse(text: string): string {
   return escapeHtml(text).replace(
