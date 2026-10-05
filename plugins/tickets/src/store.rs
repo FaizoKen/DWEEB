@@ -301,10 +301,16 @@ pub struct Ticket {
     pub created_at: i64,
     pub closed_at: Option<i64>,
     pub closed_by: Option<String>,
+    /// The members a lock muted — exactly whom a reopen gives their voice
+    /// back, never someone staff muted by hand. `None` on a ticket locked by
+    /// an older build (or never locked), whose reopen falls back to restoring
+    /// every muted member.
+    pub lock_muted: Option<Vec<String>>,
 }
 
 const TICKET_COLS: &str = "channel_id, instance_id, guild_id, number, opener_id, opener_name, \
-     topic, topic_id, channel_name, claimed_by, status, created_at, closed_at, closed_by";
+     topic, topic_id, channel_name, claimed_by, status, created_at, closed_at, closed_by, \
+     muted_by_lock";
 
 fn ticket_from_row(r: &Row) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
@@ -322,7 +328,15 @@ fn ticket_from_row(r: &Row) -> rusqlite::Result<Ticket> {
         created_at: r.get(11)?,
         closed_at: r.get(12)?,
         closed_by: r.get(13)?,
+        // Unreadable reads as unknown, which falls back to the old rule.
+        lock_muted: r
+            .get::<_, Option<String>>(14)?
+            .and_then(|json| serde_json::from_str(&json).ok()),
     })
+}
+
+fn lock_muted_json(ids: Option<&[String]>) -> Option<String> {
+    ids.map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".into()))
 }
 
 /// A reservation older than this is stale — its open task is long dead (a
@@ -574,7 +588,7 @@ impl Store {
         tx.execute(
             &format!(
                 "INSERT OR REPLACE INTO tickets ({TICKET_COLS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
             ),
             rusqlite::params![
                 ticket.channel_id,
@@ -591,6 +605,7 @@ impl Store {
                 ticket.created_at,
                 ticket.closed_at,
                 ticket.closed_by,
+                lock_muted_json(ticket.lock_muted.as_deref()),
             ],
         )?;
         tx.commit()
@@ -703,6 +718,35 @@ impl Store {
             "UPDATE tickets SET status = ?3, closed_by = ?4, closed_at = ?5
              WHERE channel_id = ?1 AND status = ?2",
             (channel_id, from.as_str(), to.as_str(), closed_by, now_ms),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Record who a lock muted (`None` forgets it), while the ticket is still
+    /// in `status` — the state the calling flow won and holds, so no other
+    /// flow is writing the list at the same time.
+    pub fn set_lock_mutes(
+        &self,
+        channel_id: &str,
+        ids: Option<&[String]>,
+        status: Status,
+    ) -> rusqlite::Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE tickets SET muted_by_lock = ?2 WHERE channel_id = ?1 AND status = ?3",
+            (channel_id, lock_muted_json(ids), status.as_str()),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Finish a reopen that won its transition: `reopening` → `open`, and
+    /// forget who the lock muted — they can all post again.
+    pub fn finish_reopen(&self, channel_id: &str) -> rusqlite::Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE tickets SET status = 'open', muted_by_lock = NULL
+             WHERE channel_id = ?1 AND status = 'reopening'",
+            [channel_id],
         )?;
         Ok(n > 0)
     }
@@ -901,6 +945,9 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     ensure_column(conn, "tickets", "channel_name", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column(conn, "tickets", "closed_at", "INTEGER")?;
     ensure_column(conn, "tickets", "closed_by", "TEXT")?;
+    // Added after 0.3: who a lock muted (a JSON array of user ids). NULL on
+    // older rows — read as unknown, so their reopen keeps the old rule.
+    ensure_column(conn, "tickets", "muted_by_lock", "TEXT")?;
     Ok(())
 }
 
@@ -1005,6 +1052,7 @@ mod tests {
             created_at: unix_millis(),
             closed_at: None,
             closed_by: None,
+            lock_muted: None,
         };
         s.activate(&key, &t).unwrap();
         t

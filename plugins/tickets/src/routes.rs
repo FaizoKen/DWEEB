@@ -841,6 +841,7 @@ impl OpenTask {
             created_at: self.created_at,
             closed_at: None,
             closed_by: None,
+            lock_muted: None,
         };
         if let Err(e) = self.state.store.activate(&self.key, &ticket) {
             tracing::error!(error = %e, "record ticket");
@@ -868,7 +869,13 @@ impl OpenTask {
             }
             return Err(match e {
                 RestError::Refused(Refusal::MissingPermissions) => OpenFailure::MissingPermissions,
-                _ => OpenFailure::Busy,
+                // The channel vanished under us, or Discord is struggling: a
+                // retry makes a fresh channel and may well work.
+                RestError::Busy | RestError::Refused(Refusal::NotFound) => OpenFailure::Busy,
+                // Discord read the welcome and said no — something in its text,
+                // which no retry changes. "Try again" sent members round in
+                // circles while every open failed the same way.
+                RestError::Refused(_) => OpenFailure::WelcomeRejected,
             });
         }
         // The ticket stands without its answers, so a failure here doesn't
@@ -1240,20 +1247,39 @@ impl CloseTask {
     }
 
     /// Lock mode: take away posting from everyone but staff (the one step a
-    /// lock can't do without), then retire the open controls, post the closed
-    /// banner with Reopen/Delete, rename, and file the records.
+    /// lock can't do without), post the closed banner with Reopen/Delete,
+    /// record the ticket as locked — and only then retire the open controls,
+    /// rename, and file the records.
     async fn lock(self) {
         let d = &self.state.discord;
         let channel = &self.ticket.channel_id;
         let audit = self.audit();
-        if let Err(e) = set_member_access(&self.state, channel, Access::Locked, &audit).await {
+        // Members an earlier lock muted before a restart cut it short: its
+        // mutes are still on the channel and its list still in the row
+        // (recovery reopened the ticket, and this Close is the lock running
+        // again), so they are this lock's to answer for too.
+        let mut muted = self.ticket.lock_muted.clone().unwrap_or_default();
+        let change = set_member_access(&self.state, channel, Access::Locked, None, &audit).await;
+        for id in change.changed {
+            if !muted.contains(&id) {
+                muted.push(id);
+            }
+        }
+        if let Some(e) = change.error {
             tracing::warn!(?e, channel = %channel, "lock couldn't change member access");
-            let _ = self
-                .state
-                .store
-                .transition(channel, &[Status::Closing], Status::Open);
+            self.undo_lock(&muted, &audit).await;
             say(&self.state, &self.handle, lock_failure_text(e)).await;
             return;
+        }
+        // Who this lock muted, kept before anything else can be interrupted:
+        // a reopen gives exactly them their voice back — never someone staff
+        // muted by hand.
+        if let Err(e) = self
+            .state
+            .store
+            .set_lock_mutes(channel, Some(&muted), Status::Closing)
+        {
+            tracing::error!(error = %e, "record who a lock muted");
         }
         // The Reopen/Delete controls go up *before* the old ones come down: a
         // ticket must never be left with no working buttons. If they can't be
@@ -1266,16 +1292,36 @@ impl CloseTask {
             .await
         {
             tracing::warn!(?e, channel = %channel, "post locked banner — undoing the lock");
-            let undone = set_member_access(&self.state, channel, Access::Participant, &audit).await;
-            if let Err(e) = undone {
-                tracing::warn!(?e, channel = %channel, "couldn't restore access after a failed lock");
-            }
-            let _ = self
-                .state
-                .store
-                .transition(channel, &[Status::Closing], Status::Open);
+            self.undo_lock(&muted, &audit).await;
             say(&self.state, &self.handle, lock_failure_text(e)).await;
             return;
+        }
+        // Locked from here, and recorded so *before* the old controls are
+        // retired or the channel renamed: the rename is slow (retried, and held
+        // up by Discord's rename limit), and a restart inside it used to leave
+        // the ticket in `closing` — which recovery reopens — with its Close
+        // already gone and the banner's Reopen/Delete refusing an "open"
+        // ticket. Nobody could close it again.
+        let now = unix_millis();
+        match self.state.store.finish_close(
+            channel,
+            Status::Closing,
+            Status::Locked,
+            &self.closer_id,
+            now,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                // Only a restart's recovery takes a held claim away, and then
+                // the recovered state owns the ticket: touch nothing more.
+                tracing::warn!(channel = %channel, "a lock lost its claim before it finished");
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "record locked ticket");
+                say(&self.state, &self.handle, SOMETHING_WRONG).await;
+                return;
+            }
         }
         if let Some(m) = &self.control_message {
             let _ = d
@@ -1291,16 +1337,6 @@ impl CloseTask {
                 &audit,
             )
             .await;
-        let now = unix_millis();
-        if let Err(e) = self.state.store.finish_close(
-            channel,
-            Status::Closing,
-            Status::Locked,
-            &self.closer_id,
-            now,
-        ) {
-            tracing::error!(error = %e, "record locked ticket");
-        }
         let history = if self.wants_transcript() {
             Some(d.fetch_history(channel).await)
         } else {
@@ -1308,6 +1344,41 @@ impl CloseTask {
         };
         self.file_records(history, now).await;
         say(&self.state, &self.handle, "\u{1F512} Ticket closed.").await;
+    }
+
+    /// Put an unfinished lock back: give their voice back to exactly the
+    /// members it muted — not every muted member, which would also unmute
+    /// anyone staff muted by hand — remember any that Discord wouldn't restore
+    /// (the next lock picks them up, its reopen restores them), and reopen.
+    async fn undo_lock(&self, muted: &[String], audit: &str) {
+        let channel = &self.ticket.channel_id;
+        let mut left: Vec<String> = Vec::new();
+        if !muted.is_empty() {
+            let undone = set_member_access(
+                &self.state,
+                channel,
+                Access::Participant,
+                Some(muted),
+                audit,
+            )
+            .await;
+            if let Some(e) = undone.error {
+                tracing::warn!(?e, channel = %channel, "couldn't restore access after a failed lock");
+            }
+            left = undone.failed;
+        }
+        let left = (!left.is_empty()).then_some(left.as_slice());
+        if let Err(e) = self
+            .state
+            .store
+            .set_lock_mutes(channel, left, Status::Closing)
+        {
+            tracing::error!(error = %e, "record who a failed lock left muted");
+        }
+        let _ = self
+            .state
+            .store
+            .transition(channel, &[Status::Closing], Status::Open);
     }
 
     fn wants_transcript(&self) -> bool {
@@ -1447,6 +1518,31 @@ fn lock_failure_text(e: RestError) -> &'static str {
     }
 }
 
+/// A lock-mode Delete that didn't go through — the ticket is still *closed*
+/// (locked), which the delete-mode close's "stays open" wording got wrong.
+fn delete_failure_text(e: RestError) -> &'static str {
+    match e {
+        RestError::Refused(Refusal::MissingPermissions) => {
+            "I couldn't delete this channel — the bot needs **Manage Channels** here. The ticket stays closed; ask an admin to check the bot's permissions."
+        }
+        RestError::Busy => {
+            "Discord was busy and the channel wasn't deleted — try again in a moment."
+        }
+        RestError::Refused(_) => "Discord wouldn't delete this channel, so the ticket stays closed.",
+    }
+}
+
+/// Same three-way split as a lock's: a permanent refusal is never "busy".
+fn reopen_failure_text(e: RestError) -> &'static str {
+    match e {
+        RestError::Refused(Refusal::MissingPermissions) => {
+            "I couldn't reopen this ticket — the bot needs **Manage Roles** (Manage Permissions in this channel)."
+        }
+        RestError::Busy => "Discord was busy and the ticket didn't reopen — try again in a moment.",
+        RestError::Refused(_) => "Discord refused to reopen this ticket, so it stays closed.",
+    }
+}
+
 /// Which way [`set_member_access`] turns people's access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Access {
@@ -1457,11 +1553,13 @@ enum Access {
 }
 
 impl Access {
-    /// Whether an overwrite is one this change should touch. A lock mutes
+    /// Whether an overwrite is one this change could touch. A lock mutes
     /// member overwrites that can see and still post (the opener, anyone
-    /// added); a reopen restores exactly the shape a lock left. A member
-    /// overwrite that *hides* the channel from someone is never touched —
-    /// reopening must not reveal a ticket to a person staff kept out.
+    /// added); a reopen restores muted ones — narrowed by the caller to the
+    /// members the lock itself muted (`Ticket::lock_muted`), so someone staff
+    /// muted by hand stays muted. A member overwrite that *hides* the channel
+    /// from someone is never touched — reopening must not reveal a ticket to a
+    /// person staff kept out.
     fn applies_to(self, o: &Overwrite) -> bool {
         let sees = o.allow & perms::VIEW_CHANNEL != 0;
         let muted = o.deny & perms::SEND_MESSAGES != 0;
@@ -1479,24 +1577,58 @@ impl Access {
     }
 }
 
-/// Mute or restore every member overwrite on a ticket except the bot's own —
-/// the opener and anyone staff added. Staff *roles* keep their access.
+/// What [`set_member_access`] did. Every member is tried even when one fails,
+/// so a caller undoing a half-done change can put back exactly the members
+/// it changed — and a lock that failed for one guest no longer leaves the
+/// opener muted on a ticket that went back to open.
+struct AccessChange {
+    /// Members whose overwrite this change wrote.
+    changed: Vec<String>,
+    /// Members Discord wouldn't change.
+    failed: Vec<String>,
+    /// The first refusal, if anything failed (or the channel couldn't be read).
+    error: Option<RestError>,
+}
+
+impl AccessChange {
+    fn failed_before_starting(e: RestError) -> Self {
+        AccessChange {
+            changed: Vec::new(),
+            failed: Vec::new(),
+            error: Some(e),
+        }
+    }
+}
+
+/// Mute or restore member overwrites on a ticket except the bot's own — the
+/// opener and anyone staff added. Staff *roles* keep their access. `only`
+/// narrows the change to those members (whom a lock muted, or whom a failed
+/// step must put back); `None` means every member overwrite it applies to.
 async fn set_member_access(
     state: &AppState,
     channel_id: &str,
     access: Access,
+    only: Option<&[String]>,
     reason: &str,
-) -> Result<(), RestError> {
+) -> AccessChange {
     // Without the bot's own id its overwrite would look like a member's, and
     // a lock would mute the bot out of the channel it has to manage.
     let Some(bot) = ensure_bot(state).await else {
-        return Err(RestError::Busy);
+        return AccessChange::failed_before_starting(RestError::Busy);
     };
     let bot_id = bot.id;
-    let overwrites = state.discord.channel_overwrites(channel_id).await?;
+    let overwrites = match state.discord.channel_overwrites(channel_id).await {
+        Ok(o) => o,
+        Err(e) => return AccessChange::failed_before_starting(e),
+    };
     let targets: Vec<&Overwrite> = overwrites
         .iter()
-        .filter(|o| o.kind == OVERWRITE_MEMBER && o.id != bot_id && access.applies_to(o))
+        .filter(|o| {
+            o.kind == OVERWRITE_MEMBER
+                && o.id != bot_id
+                && access.applies_to(o)
+                && only.is_none_or(|ids| ids.contains(&o.id))
+        })
         .collect();
     let results = join_all(
         targets
@@ -1504,7 +1636,35 @@ async fn set_member_access(
             .map(|o| set_access(state, channel_id, &o.id, access, reason)),
     )
     .await;
-    results.into_iter().collect()
+    let mut change = AccessChange {
+        changed: Vec::new(),
+        failed: Vec::new(),
+        error: None,
+    };
+    for (o, result) in targets.into_iter().zip(results) {
+        match result {
+            Ok(Applied::Changed) => change.changed.push(o.id.clone()),
+            Ok(Applied::Gone) => {}
+            Err(e) => {
+                change.failed.push(o.id.clone());
+                change.error.get_or_insert(e);
+            }
+        }
+    }
+    change
+}
+
+/// What one member's overwrite change came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Applied {
+    Changed,
+    /// They've left the server. Discord refuses to write an overwrite for
+    /// someone who isn't a member — and such a refusal used to fail every lock
+    /// and reopen of the ticket for good, so staff couldn't close it at all.
+    /// Someone who isn't in the server can't post in it either, so there is
+    /// nothing to do. (Their old overwrite stays on the channel; should they
+    /// rejoin, staff can lock or remove them then.)
+    Gone,
 }
 
 /// Set one member's access, falling back to the essential bits when the bot
@@ -1515,9 +1675,9 @@ async fn set_access(
     user_id: &str,
     access: Access,
     reason: &str,
-) -> Result<(), RestError> {
+) -> Result<Applied, RestError> {
     let (allow, deny) = access.bits(Grants::Full);
-    match state
+    let result = match state
         .discord
         .set_overwrite(channel_id, user_id, OVERWRITE_MEMBER, allow, deny, reason)
         .await
@@ -1530,6 +1690,11 @@ async fn set_access(
                 .await
         }
         other => other,
+    };
+    match result {
+        Ok(()) => Ok(Applied::Changed),
+        Err(RestError::Refused(Refusal::UnknownMember)) => Ok(Applied::Gone),
+        Err(e) => Err(e),
     }
 }
 
@@ -1591,21 +1756,15 @@ impl ReopenTask {
             "Ticket #{:04} reopened by {}",
             self.ticket.number, self.reopener_name
         );
-        let fail = |e: RestError| {
-            match e {
-            RestError::Refused(Refusal::MissingPermissions) => {
-                "I couldn't reopen this ticket — the bot needs **Manage Roles** (Manage Permissions in this channel)."
-            }
-            _ => "Discord was busy and the ticket didn't reopen — try again in a moment.",
-        }
-        };
-        if let Err(e) = set_member_access(&self.state, channel, Access::Participant, &audit).await {
+        // Exactly the members the lock muted. A ticket an older build locked
+        // has no list, and restores every muted member, as it always did.
+        let only = self.ticket.lock_muted.as_deref();
+        let change =
+            set_member_access(&self.state, channel, Access::Participant, only, &audit).await;
+        if let Some(e) = change.error {
             tracing::warn!(?e, channel = %channel, "reopen couldn't restore member access");
-            let _ = self
-                .state
-                .store
-                .transition(channel, &[Status::Reopening], Status::Locked);
-            say(&self.state, &self.handle, fail(e)).await;
+            self.relock(&change.changed, &audit).await;
+            say(&self.state, &self.handle, reopen_failure_text(e)).await;
             return;
         }
         // New controls first, the locked banner's retired only after: if they
@@ -1619,22 +1778,11 @@ impl ReopenTask {
         );
         if let Err(e) = d.post_message(channel, &msg).await {
             tracing::warn!(?e, channel = %channel, "post reopened controls — staying locked");
-            let relocked = set_member_access(&self.state, channel, Access::Locked, &audit).await;
-            if let Err(e) = relocked {
-                tracing::warn!(?e, channel = %channel, "couldn't re-lock after a failed reopen");
-            }
-            let _ = self
-                .state
-                .store
-                .transition(channel, &[Status::Reopening], Status::Locked);
-            say(&self.state, &self.handle, fail(e)).await;
+            self.relock(&change.changed, &audit).await;
+            say(&self.state, &self.handle, reopen_failure_text(e)).await;
             return;
         }
-        if let Err(e) = self
-            .state
-            .store
-            .transition(channel, &[Status::Reopening], Status::Open)
-        {
+        if let Err(e) = self.state.store.finish_reopen(channel) {
             tracing::error!(error = %e, "record reopened ticket");
         }
         if let Some(m) = &self.control_message {
@@ -1654,6 +1802,25 @@ impl ReopenTask {
             let _ = d.post_message(log, &discord::log_message(&line)).await;
         }
         say(&self.state, &self.handle, "\u{1F513} Ticket reopened.").await;
+    }
+
+    /// Put a half-done reopen back: mute again exactly the members it gave
+    /// their voice back — not every member who can post, which would also
+    /// silence anyone who never was the lock's — and return the ticket to
+    /// locked. The lock's list stays as it was: they're its again.
+    async fn relock(&self, unmuted: &[String], audit: &str) {
+        let channel = &self.ticket.channel_id;
+        if !unmuted.is_empty() {
+            let relocked =
+                set_member_access(&self.state, channel, Access::Locked, Some(unmuted), audit).await;
+            if let Some(e) = relocked.error {
+                tracing::warn!(?e, channel = %channel, "couldn't re-lock after a failed reopen");
+            }
+        }
+        let _ = self
+            .state
+            .store
+            .transition(channel, &[Status::Reopening], Status::Locked);
     }
 }
 
@@ -1699,7 +1866,7 @@ fn delete(state: &AppState, ix: &Interaction, id: &str) -> Response {
                             state
                                 .store
                                 .transition(channel, &[Status::Deleting], Status::Locked);
-                        say(&state, &handle, close_failure_text(e)).await;
+                        say(&state, &handle, delete_failure_text(e)).await;
                     }
                 }
             });
@@ -1856,9 +2023,37 @@ impl MembersTask {
                 true
             })
             .collect();
+        // The click found the ticket open, but a close may have started since —
+        // and an add landing after a lock read the channel's overwrites would
+        // leave someone able to post in a locked ticket. Check again just
+        // before writing.
+        let status = match self.state.store.get_ticket(channel) {
+            Ok(t) => t.map_or(Status::Closed, |t| t.status),
+            Err(e) => {
+                tracing::error!(error = %e, "ticket lookup before changing members");
+                busy(&self.state, &self.handle, &self.instance_id).await;
+                return;
+            }
+        };
+        if status != Status::Open {
+            let note = format!("{} Nothing changed.", status_text(status));
+            let _ = d
+                .edit_original(
+                    &self.handle.app_id,
+                    &self.handle.token,
+                    &discord::members_panel(&self.instance_id, Some(&note)),
+                )
+                .await;
+            return;
+        }
         let results = join_all(targets.iter().map(|u| async {
             if self.add {
-                set_access(&self.state, channel, u, Access::Participant, &audit).await
+                match set_access(&self.state, channel, u, Access::Participant, &audit).await {
+                    Ok(Applied::Changed) => Ok(()),
+                    // Not in the server: nobody to let in.
+                    Ok(Applied::Gone) => Err(RestError::Refused(Refusal::UnknownMember)),
+                    Err(e) => Err(e),
+                }
             } else {
                 d.delete_overwrite(channel, u, &audit).await
             }
@@ -1900,6 +2095,9 @@ impl MembersTask {
                 match e {
                     RestError::Refused(Refusal::MissingPermissions) => {
                         "Some changes didn't go through — the bot needs **Manage Roles** (Manage Permissions in this channel)."
+                    }
+                    RestError::Refused(Refusal::UnknownMember) => {
+                        "Some of them aren't in this server, so they couldn't be added."
                     }
                     _ => "Some changes didn't go through — Discord was busy. Try again in a moment.",
                 }

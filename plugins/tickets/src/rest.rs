@@ -28,6 +28,7 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::discord::clamp;
 use crate::perms::{self, Overwrite, Scope};
 use crate::transcript;
 
@@ -80,6 +81,10 @@ pub enum ConnectError {
     /// Discord answered 5xx, or the connection dropped mid-flight. Transient,
     /// and theirs.
     Upstream,
+    /// 400 — Discord refused the id itself (one past what a snowflake can hold
+    /// passes a digit check but not Discord's). These reads are bodiless GETs,
+    /// so the path's ids are the only thing a 400 can be about: the caller's.
+    InvalidId,
     /// Couldn't connect to Discord at all (DNS, refused, TLS), or its reply
     /// wasn't the shape we expect — this host's network, or our code.
     Network,
@@ -103,6 +108,9 @@ impl ConnectError {
             ConnectError::Upstream => {
                 "Discord is having trouble right now — try again in a moment.".into()
             }
+            ConnectError::InvalidId => {
+                "Discord doesn't recognise that server id — pick the server again from the list.".into()
+            }
             ConnectError::Network => "Couldn't reach Discord just now — try again in a moment.".into(),
         }
     }
@@ -122,6 +130,9 @@ impl ConnectError {
             ConnectError::BadToken => StatusCode::INTERNAL_SERVER_ERROR,
             ConnectError::BotNotInGuild => StatusCode::NOT_FOUND,
             ConnectError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            // The caller sent an id Discord can't parse — anyone can, since
+            // `/api/connect` is open, so as a 5xx it would page on demand.
+            ConnectError::InvalidId => StatusCode::BAD_REQUEST,
             // Discord took the request and ran long: theirs — logged, not paged.
             ConnectError::Timeout => StatusCode::GATEWAY_TIMEOUT,
             // Discord answered 5xx or hung up mid-flight: theirs — logged, not paged.
@@ -150,9 +161,14 @@ pub enum RestError {
 pub enum Refusal {
     /// 50013 Missing Permissions / 50001 Missing Access (or a bare 403).
     MissingPermissions,
-    /// The target doesn't exist: an Unknown Channel/Guild/Member/Message/
-    /// Overwrite/User code, or a bare 404.
+    /// The target doesn't exist: an Unknown Channel/Guild/Message/Overwrite
+    /// code, or a bare 404.
     NotFound,
+    /// 10007 Unknown Member / 10013 Unknown User — the person has left the
+    /// server (or never was in it). Discord refuses to write an overwrite for
+    /// someone who isn't a member, however long their old one stays on the
+    /// channel.
+    UnknownMember,
     /// A form error on `parent_id`: the category is full (50 channels) or gone.
     CategoryProblem,
     /// 30013 — the server is at Discord's channel cap.
@@ -165,7 +181,10 @@ pub enum Refusal {
 impl RestError {
     /// A refusal because the target no longer exists.
     pub fn is_not_found(self) -> bool {
-        matches!(self, RestError::Refused(Refusal::NotFound))
+        matches!(
+            self,
+            RestError::Refused(Refusal::NotFound | Refusal::UnknownMember)
+        )
     }
 }
 
@@ -179,7 +198,8 @@ pub fn classify_refusal(status: u16, body: &str) -> Refusal {
         Some(30013) => Refusal::ChannelLimit,
         Some(50007) => Refusal::CannotDm,
         Some(50035) if body.contains("parent_id") => Refusal::CategoryProblem,
-        Some(10003 | 10004 | 10007 | 10008 | 10009 | 10013) => Refusal::NotFound,
+        Some(10007 | 10013) => Refusal::UnknownMember,
+        Some(10003 | 10004 | 10008 | 10009) => Refusal::NotFound,
         _ => match status {
             403 => Refusal::MissingPermissions,
             404 => Refusal::NotFound,
@@ -599,6 +619,9 @@ impl Discord {
         }
         Err(match status.as_u16() {
             401 => ConnectError::BadToken,
+            // A GET carries no body, so a 400 is about the id in its path —
+            // the caller's input, never a fault of ours (see `InvalidId`).
+            400 => ConnectError::InvalidId,
             403 | 404 => ConnectError::BotNotInGuild,
             429 => ConnectError::RateLimited,
             500..=599 => ConnectError::Upstream,
@@ -1298,10 +1321,6 @@ pub fn audit_reason(reason: &str) -> String {
     out
 }
 
-fn clamp(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1328,7 +1347,12 @@ mod tests {
             ConnectError::RateLimited.status(),
             StatusCode::TOO_MANY_REQUESTS
         );
-        for e in [ConnectError::BotNotInGuild, ConnectError::RateLimited] {
+        assert_eq!(ConnectError::InvalidId.status(), StatusCode::BAD_REQUEST);
+        for e in [
+            ConnectError::BotNotInGuild,
+            ConnectError::RateLimited,
+            ConnectError::InvalidId,
+        ] {
             assert!(
                 !e.status().is_server_error(),
                 "{e:?} must not be reported as a server error"
@@ -1480,6 +1504,7 @@ mod tests {
             ConnectError::RateLimited,
             ConnectError::Timeout,
             ConnectError::Upstream,
+            ConnectError::InvalidId,
             ConnectError::Network,
         ] {
             assert!(!e.message().trim().is_empty(), "{e:?} has no message");
@@ -1520,6 +1545,17 @@ mod tests {
             classify_refusal(404, r#"{"message":"Unknown Channel","code":10003}"#),
             Refusal::NotFound
         );
+        // Someone who left the server is a refusal of its own: the flows that
+        // write their overwrite treat it as nothing left to do.
+        assert_eq!(
+            classify_refusal(404, r#"{"message":"Unknown Member","code":10007}"#),
+            Refusal::UnknownMember
+        );
+        assert_eq!(
+            classify_refusal(404, r#"{"message":"Unknown User","code":10013}"#),
+            Refusal::UnknownMember
+        );
+        assert!(RestError::Refused(Refusal::UnknownMember).is_not_found());
         assert_eq!(
             classify_refusal(403, r#"{"code":50007}"#),
             Refusal::CannotDm
@@ -1821,6 +1857,38 @@ mod tests {
         assert_eq!(client(&base).channel_exists("1").await, Probe::Unknown);
         let (base, _) = fake_discord(vec![(200, r#"{"id":"1"}"#)]).await;
         assert_eq!(client(&base).channel_exists("1").await, Probe::Exists);
+    }
+
+    /// `/api/connect` and instance saves are open to anyone, so an id Discord
+    /// can't parse is something anyone can send — it must answer 4xx, never a
+    /// paging 502. (The snowflake check now refuses such an id first; this pins
+    /// the second line, should anything ever let one through.)
+    #[tokio::test]
+    async fn an_id_discord_cannot_parse_never_pages() {
+        let (base, _) = fake_discord(vec![(
+            400,
+            r#"{"code":50035,"errors":{"guild_id":{"_errors":[{"code":"NUMBER_TYPE_COERCE","message":"Value is not snowflake."}]}},"message":"Invalid Form Body"}"#,
+        )])
+        .await;
+        let e = client(&base)
+            .guild_channels("99999999999999999999")
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(e, ConnectError::InvalidId), "{e:?}");
+        // A 4xx never reaches `trace::on_failure` at all, so it can't page.
+        assert!(!e.status().is_server_error());
+    }
+
+    #[test]
+    fn clamping_counts_what_discord_counts() {
+        // ASCII is untouched by the switch to UTF-16 units…
+        assert_eq!(clamp("abcdef", 4), "abcd");
+        // …but an astral emoji is two units, and is never split in half.
+        assert_eq!(clamp("ab\u{1F600}cd", 3), "ab");
+        assert_eq!(clamp("ab\u{1F600}cd", 4), "ab\u{1F600}");
+        let s = clamp(&"\u{1F600}".repeat(1500), 2000);
+        assert_eq!(s.encode_utf16().count(), 2000);
     }
 
     #[tokio::test]

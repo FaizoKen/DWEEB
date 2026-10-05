@@ -72,7 +72,8 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     if welcome.is_empty() {
         return Err("Write a welcome message for new tickets.".into());
     }
-    if welcome.chars().count() > MAX_WELCOME {
+    // Counted as Discord (and the config UI's `maxlength`) count: UTF-16 units.
+    if crate::discord::utf16_len(welcome) > MAX_WELCOME {
         return Err(format!(
             "The welcome message must be \u{2264} {MAX_WELCOME} characters."
         ));
@@ -86,7 +87,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     }
     let mut intake_ids = HashSet::new();
     for f in &cfg.intake {
-        let id_len = f.id.chars().count();
+        // The id rides in a `custom_id`, which `discord::clamp` cuts by UTF-16
+        // units: measured the same way, a saved id is never cut short.
+        let id_len = crate::discord::utf16_len(&f.id);
         if id_len == 0 || id_len > 100 {
             return Err("Each intake field id must be 1–100 characters.".into());
         }
@@ -218,9 +221,14 @@ fn check_roles(roles: &[StaffRole], guild_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Discord snowflakes are 17–20 digits today; accept a little slack.
+/// A Discord snowflake: 17–20 digits that fit the u64 Discord stores them in.
+/// The old 15–25-digit slack let through ids past u64 that Discord answers
+/// with a 400 — reachable by anyone through the open config API, and mapped to
+/// a paging 502 before `ConnectError::InvalidId` existed.
 pub fn is_snowflake(s: &str) -> bool {
-    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    (17..=20).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
 }
 
 #[cfg(test)]
@@ -447,6 +455,28 @@ mod tests {
             name: "A".into(),
             color: 0,
         }];
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn snowflakes_must_fit_what_discord_stores() {
+        assert!(is_snowflake("123456789012345678"));
+        assert!(is_snowflake("18446744073709551615")); // u64::MAX
+        assert!(!is_snowflake("18446744073709551616")); // one past it
+        assert!(!is_snowflake("99999999999999999999999")); // the old slack let this in
+        assert!(!is_snowflake("1234567890123456")); // 16 digits
+        assert!(!is_snowflake("12345678901234567a"));
+        let mut c = button_cfg();
+        c.guild_id = "99999999999999999999999".into();
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn the_welcome_is_measured_as_discord_measures_it() {
+        let mut c = button_cfg();
+        c.welcome = "\u{1F389}".repeat(MAX_WELCOME / 2);
+        assert!(validate_config(&c).is_ok());
+        c.welcome = "\u{1F389}".repeat(MAX_WELCOME / 2 + 1);
         assert!(validate_config(&c).is_err());
     }
 

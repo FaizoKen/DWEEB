@@ -71,6 +71,20 @@ struct World {
     /// The first `PATCH @original` for each interaction token answers
     /// Unknown Message — the edit arriving before its own deferred reply.
     original_arrives_late: bool,
+    /// How long a channel rename (`PATCH /channels/{id}`) takes — Discord's
+    /// rename limit often makes it slow.
+    rename_delay: Duration,
+    /// How long reading a channel (`GET /channels/{id}`) takes.
+    channel_read_delay: Duration,
+    /// Every overwrite write for this target answers 500 — a Discord blip on
+    /// exactly one member's change, however often it's retried.
+    refuse_overwrite_for: Option<String>,
+    /// Overwrite writes for this target answer 404 Unknown Member — the
+    /// person has left the server.
+    unknown_member: Option<String>,
+    /// A message POST whose content contains this answers 400 Invalid Form
+    /// Body — Discord refusing the message itself.
+    reject_posts_containing: Option<String>,
 }
 
 #[derive(Default, Clone)]
@@ -177,12 +191,32 @@ async fn fake_discord(
     let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
     let json_body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
 
-    if let ("POST", ["guilds", _, "channels"]) = (method.as_str(), segs.as_slice()) {
-        let delay = world.lock().unwrap().create_delay;
+    // Delays are slept before the world is locked, so a slow call never holds
+    // up the rest of the fake.
+    let delay = {
+        let w = world.lock().unwrap();
+        match (method.as_str(), segs.as_slice()) {
+            ("POST", ["guilds", _, "channels"]) => w.create_delay,
+            ("PATCH", ["channels", _]) => w.rename_delay,
+            ("GET", ["channels", _]) => w.channel_read_delay,
+            _ => Duration::ZERO,
+        }
+    };
+    // Only a real delay sleeps: even a zero sleep yields, and a few tests time
+    // a deferred step against the store flipping status.
+    if !delay.is_zero() {
         tokio::time::sleep(delay).await;
     }
 
     let mut w = world.lock().unwrap();
+    if let ("PUT", ["channels", _, "permissions", target]) = (method.as_str(), segs.as_slice()) {
+        if w.refuse_overwrite_for.as_deref() == Some(*target) {
+            return discord_error(500, json!({ "message": "Internal Server Error" }));
+        }
+        if w.unknown_member.as_deref() == Some(*target) {
+            return discord_error(404, json!({ "message": "Unknown Member", "code": 10007 }));
+        }
+    }
     match (method.as_str(), segs.as_slice()) {
         ("GET", ["users", "@me"]) => {
             if w.me_fails {
@@ -302,6 +336,14 @@ async fn fake_discord(
             if let Some(needle) = &w.fail_posts_containing {
                 if content.contains(needle.as_str()) {
                     return discord_error(500, json!({ "message": "Internal Server Error" }));
+                }
+            }
+            if let Some(needle) = &w.reject_posts_containing {
+                if content.contains(needle.as_str()) {
+                    return discord_error(
+                        400,
+                        json!({ "code": 50035, "message": "Invalid Form Body", "errors": { "content": { "_errors": [{ "code": "BASE_TYPE_MAX_LENGTH", "message": "Must be 2000 or fewer in length." }] } } }),
+                    );
                 }
             }
             let mid = w.id();
@@ -1713,6 +1755,7 @@ impl Harness {
             created_at: crate::store::unix_millis(),
             closed_at: None,
             closed_by: None,
+            lock_muted: None,
         };
         self.state.store.activate(&key, &ticket).unwrap();
         channel
@@ -1912,4 +1955,340 @@ async fn a_deferred_edit_that_beats_its_ack_still_lands() {
         .await;
     let text = h.outcome(&sent).await;
     assert!(text.contains("No tickets are open"), "{text}");
+}
+
+// ── what the 2026-10 audit found ─────────────────────────────────────────────
+
+/// A restart inside a lock's slow rename used to strand the ticket: the old
+/// controls were already retired, but the lock wasn't recorded yet, so
+/// recovery reopened it — and every button left on screen refused an "open"
+/// ticket. The lock is now recorded before anything is retired.
+#[tokio::test]
+async fn a_restart_during_a_locks_rename_leaves_it_locked_and_reopenable() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    let (welcome_id, welcome) = h.control_message(&channel);
+    h.world().rename_delay = Duration::from_millis(1500);
+    let _close = h
+        .click_on(
+            &format!("tickets:close:{panel}"),
+            &channel,
+            &staff(),
+            message_ref(&welcome_id, &welcome),
+        )
+        .await;
+    // Wait until the welcome's Close is retired: the flow is now in the rename.
+    let (wid, ch) = (welcome_id.clone(), channel.clone());
+    h.eventually(move |w| {
+        let m = w.channel(&ch).messages.iter().find(|m| m.id == wid)?;
+        m.edits
+            .last()
+            .filter(|e| e["components"] == json!([]))
+            .map(|_| ())
+    })
+    .await;
+    // A deploy restarts the service right here; startup recovery runs.
+    let rec = h.state.store.recover_interrupted().unwrap();
+    assert_eq!(rec.reopened, 0, "the lock was already recorded");
+    assert_eq!(
+        h.state.store.get_ticket(&channel).unwrap().unwrap().status,
+        Status::Locked
+    );
+    // Let the old task's tail run out (a real restart would have killed it).
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&reopen).await;
+    h.status_becomes(&channel, Status::Open).await;
+    let (_, deny) = h.world().overwrite(&channel, OPENER).unwrap();
+    assert_eq!(deny & perms::SEND_MESSAGES, 0);
+}
+
+/// A lock that fails for one member puts back exactly what it changed: the
+/// opener it had already muted can post again on the ticket that stays open.
+#[tokio::test]
+async fn a_lock_that_fails_part_way_unmutes_whoever_it_muted() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    let add = h
+        .pick(
+            &format!("tickets:addmember:{panel}"),
+            &channel,
+            &staff(),
+            &[GUEST],
+        )
+        .await;
+    h.outcome(&add).await;
+    h.world().refuse_overwrite_for = Some(GUEST.into());
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&close, "didn't close").await;
+    h.status_becomes(&channel, Status::Open).await;
+    let (_, deny) = h.world().overwrite(&channel, OPENER).unwrap();
+    assert_eq!(deny & perms::SEND_MESSAGES, 0, "the opener was left muted");
+    // Nobody is left on the lock's list of who it muted.
+    assert_eq!(
+        h.state
+            .store
+            .get_ticket(&channel)
+            .unwrap()
+            .unwrap()
+            .lock_muted,
+        None
+    );
+}
+
+/// Someone who left the server can't be locked or unlocked — Discord refuses
+/// to write their overwrite. That used to fail every lock and every reopen of
+/// the ticket for good; now there is simply nothing to do for them.
+#[tokio::test]
+async fn a_ticket_whose_opener_left_still_locks_and_reopens() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    h.world().unknown_member = Some(OPENER.into());
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&close, "Ticket closed").await;
+    h.status_becomes(&channel, Status::Locked).await;
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&reopen, "Ticket reopened").await;
+    h.status_becomes(&channel, Status::Open).await;
+}
+
+#[tokio::test]
+async fn a_locked_ticket_whose_opener_since_left_still_reopens() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&close).await;
+    h.status_becomes(&channel, Status::Locked).await;
+    h.world().unknown_member = Some(OPENER.into());
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&reopen, "Ticket reopened").await;
+    h.status_becomes(&channel, Status::Open).await;
+}
+
+/// A reopen gives back the voice of exactly the members the lock muted — a
+/// guest a moderator muted by hand before the close stays muted.
+#[tokio::test]
+async fn a_reopen_leaves_someone_staff_muted_by_hand_muted() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    {
+        let mut w = h.world();
+        let read_only = json!({
+            "id": GUEST, "type": 1,
+            "allow": (perms::VIEW_CHANNEL | perms::READ_MESSAGE_HISTORY).to_string(),
+            "deny": perms::SEND_MESSAGES.to_string(),
+        });
+        w.channels
+            .get_mut(&channel)
+            .unwrap()
+            .overwrites
+            .push(read_only);
+    }
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&close).await;
+    h.status_becomes(&channel, Status::Locked).await;
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&reopen).await;
+    h.status_becomes(&channel, Status::Open).await;
+    let w = h.world();
+    let (_, guest_deny) = w.overwrite(&channel, GUEST).unwrap();
+    assert_ne!(
+        guest_deny & perms::SEND_MESSAGES,
+        0,
+        "the hand mute was undone"
+    );
+    let (_, opener_deny) = w.overwrite(&channel, OPENER).unwrap();
+    assert_eq!(
+        opener_deny & perms::SEND_MESSAGES,
+        0,
+        "the opener stayed muted"
+    );
+}
+
+/// A ticket an older build locked carries no list of whom the lock muted:
+/// its reopen restores every muted member, as reopens always did.
+#[tokio::test]
+async fn a_ticket_locked_by_an_older_build_still_reopens_everyone() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&close).await;
+    h.status_becomes(&channel, Status::Locked).await;
+    assert!(h
+        .state
+        .store
+        .set_lock_mutes(&channel, None, Status::Locked)
+        .unwrap());
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&reopen).await;
+    h.status_becomes(&channel, Status::Open).await;
+    let (_, deny) = h.world().overwrite(&channel, OPENER).unwrap();
+    assert_eq!(deny & perms::SEND_MESSAGES, 0);
+}
+
+/// A lock a restart cut short after it muted people leaves their mutes and
+/// its list behind (recovery reopens the ticket). The next Close inherits
+/// them, so the reopen after it still gives everyone their voice back.
+#[tokio::test]
+async fn a_lock_run_again_after_a_restart_still_restores_everyone_it_muted() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    // The interrupted lock: the opener muted, the list written, then a restart.
+    {
+        let locked = perms::Grants::Full;
+        let mut w = h.world();
+        let c = w.channels.get_mut(&channel).unwrap();
+        c.overwrites.retain(|o| o["id"] != OPENER);
+        c.overwrites.push(json!({
+            "id": OPENER, "type": 1,
+            "allow": locked.locked_allow().to_string(),
+            "deny": locked.locked_deny().to_string(),
+        }));
+    }
+    let store = &h.state.store;
+    store
+        .transition(&channel, &[Status::Open], Status::Closing)
+        .unwrap()
+        .unwrap();
+    assert!(store
+        .set_lock_mutes(&channel, Some(&[OPENER.to_string()]), Status::Closing)
+        .unwrap());
+    assert_eq!(store.recover_interrupted().unwrap().reopened, 1);
+
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&close, "Ticket closed").await;
+    h.status_becomes(&channel, Status::Locked).await;
+    let reopen = h
+        .click(&format!("tickets:reopen:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&reopen).await;
+    h.status_becomes(&channel, Status::Open).await;
+    let (_, deny) = h.world().overwrite(&channel, OPENER).unwrap();
+    assert_eq!(deny & perms::SEND_MESSAGES, 0, "the opener stayed muted");
+}
+
+/// An add that a close overtakes between the click and the write changes
+/// nothing — it would otherwise let someone post in a locked ticket.
+#[tokio::test]
+async fn an_add_overtaken_by_a_close_changes_nothing() {
+    let h = Harness::start().await;
+    let panel = h.panel(json!({})).await;
+    let channel = h.open(&panel, &opener()).await;
+    h.world().channel_read_delay = Duration::from_millis(400);
+    let add = h
+        .pick(
+            &format!("tickets:addmember:{panel}"),
+            &channel,
+            &staff(),
+            &[GUEST],
+        )
+        .await;
+    // A close starts while the add is still reading the channel.
+    h.state
+        .store
+        .transition(&channel, &[Status::Open], Status::Closing)
+        .unwrap()
+        .unwrap();
+    h.world().channel_read_delay = Duration::ZERO;
+    let token = add.token.clone();
+    let panel_text = h
+        .eventually(move |w| {
+            w.originals.get(&token)?.iter().find_map(|e| {
+                let text = e.to_string();
+                text.contains("Nothing changed").then_some(text)
+            })
+        })
+        .await;
+    assert!(panel_text.contains("being closed"), "{panel_text}");
+    assert!(h.world().overwrite(&channel, GUEST).is_none());
+}
+
+/// A welcome Discord refuses is a problem with its text: the opener is told
+/// to ask an admin, never to "try again" into the same refusal.
+#[tokio::test]
+async fn a_refused_welcome_names_the_welcome_not_a_blip() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "welcome": "Hello {user}, refuse me" }))
+        .await;
+    h.world().reject_posts_containing = Some("refuse me".into());
+    let sent = h
+        .click(&format!("tickets:open:{panel}"), "999", &opener())
+        .await;
+    let reply = h.outcome(&sent).await;
+    assert!(reply.contains("welcome message"), "{reply}");
+    assert!(!reply.contains("try again"), "{reply}");
+    // The half-made channel is gone and the slot released.
+    assert!(h
+        .world()
+        .live()
+        .iter()
+        .all(|(_, c)| !c.name.starts_with("ticket-")));
+    h.world().reject_posts_containing = None;
+    h.open(&panel, &opener()).await;
+}
+
+/// A lock-mode Delete that fails says the ticket stays *closed*.
+#[tokio::test]
+async fn a_failed_delete_of_a_locked_ticket_says_it_stays_closed() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.outcome(&close).await;
+    h.status_becomes(&channel, Status::Locked).await;
+    h.world().refuse_delete = true;
+    let delete = h
+        .click(&format!("tickets:delete:{panel}"), &channel, &staff())
+        .await;
+    let reply = h.reply_containing(&delete, "stays closed").await;
+    assert!(!reply.contains("stays open"), "{reply}");
+    h.status_becomes(&channel, Status::Locked).await;
 }

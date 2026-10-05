@@ -774,7 +774,7 @@ const CLAIM_MARK: &str = "\u{1F64B} Claimed by <@";
 pub fn with_claim_line(content: &str, claimer: &str) -> String {
     let line = format!("\n\n{CLAIM_MARK}{claimer}>");
     let base = without_claim_line(content);
-    let room = MAX_CONTENT.saturating_sub(line.chars().count());
+    let room = MAX_CONTENT.saturating_sub(utf16_len(&line));
     format!("{}{line}", clamp(&base, room))
 }
 
@@ -831,7 +831,7 @@ pub fn intake_messages(fields: &[IntakeField], answers: &[(String, String)]) -> 
     let mut messages = Vec::new();
     let mut current = String::from("\u{1F4CB} **Intake answers**");
     for block in blocks {
-        let joined = current.chars().count() + 2 + block.chars().count();
+        let joined = utf16_len(&current) + 2 + utf16_len(&block);
         if joined > MAX_CONTENT && !current.is_empty() {
             messages.push(std::mem::take(&mut current));
             current = block;
@@ -1000,7 +1000,7 @@ pub fn manage_text(tickets: &[Ticket], total_shown_cap: usize) -> String {
             (Some(by), _) => line.push_str(&format!(" · \u{1F64B} <@{by}>")),
             (None, _) => line.push_str(" · unclaimed"),
         }
-        if out.chars().count() + line.chars().count() > MAX_CONTENT - 80 {
+        if utf16_len(&out) + utf16_len(&line) > MAX_CONTENT - 80 {
             out.push_str("\n-# …and more. Open the ticket category to see them all.");
             return out;
         }
@@ -1144,6 +1144,9 @@ pub enum OpenFailure {
     ChannelLimit,
     Busy,
     Rejected,
+    /// The channel was made but Discord refused its welcome — a problem with
+    /// the welcome text itself, which retrying can't fix.
+    WelcomeRejected,
     /// Our own storage failed.
     Internal,
 }
@@ -1160,6 +1163,9 @@ pub fn open_failure_text(f: OpenFailure) -> &'static str {
         OpenFailure::Busy => "Discord was busy and I couldn't open your ticket — try again in a moment.",
         OpenFailure::Rejected => {
             "Discord wouldn't create the ticket channel. Ask an admin to check this panel's settings in DWEEB."
+        }
+        OpenFailure::WelcomeRejected => {
+            "Discord wouldn't accept this panel's welcome message, so I couldn't open your ticket. Ask an admin to check the welcome text in this panel's settings in DWEEB."
         }
     }
 }
@@ -1241,9 +1247,26 @@ pub fn log_message(content: &str) -> Value {
     json!({ "content": clamp(content, MAX_CONTENT), "allowed_mentions": { "parse": [] } })
 }
 
-/// Truncate to at most `max` characters (respecting char boundaries).
+/// Truncate to at most `max` UTF-16 code units — how Discord counts its text
+/// limits — never splitting a character. Counting `chars()` instead let a text
+/// of astral emoji through at up to twice a cap, and Discord refuses the whole
+/// message over it (a welcome refused that way failed every open).
 pub fn clamp(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
+    let mut units = 0;
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+        units += c.len_utf16();
+        if units > max {
+            break;
+        }
+        end = i + c.len_utf8();
+    }
+    s[..end].to_string()
+}
+
+/// A text's length as Discord counts it (UTF-16 code units).
+pub fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
 }
 
 #[cfg(test)]
@@ -1281,6 +1304,7 @@ mod tests {
             created_at: 1_000_000,
             closed_at: None,
             closed_by: None,
+            lock_muted: None,
         }
     }
 
@@ -1828,10 +1852,25 @@ mod tests {
             OpenFailure::ChannelLimit,
             OpenFailure::Busy,
             OpenFailure::Rejected,
+            OpenFailure::WelcomeRejected,
             OpenFailure::Internal,
         ] {
             assert!(!open_failure_text(f).is_empty());
         }
+    }
+
+    /// A welcome full of astral emoji, expanded past the cap, still fits the
+    /// 2000 units Discord counts — clamped by `chars()` it came out at ~4000.
+    #[test]
+    fn an_emoji_heavy_welcome_still_fits_discords_cap() {
+        let mut cfg = base_cfg();
+        cfg.welcome = format!("{}{{staff}}", "\u{1F389}".repeat(1400));
+        let msg = welcome_message(&cfg, "abc", &ctx(), &[]);
+        let content = msg["content"].as_str().unwrap();
+        assert!(utf16_len(content) <= MAX_CONTENT, "{}", utf16_len(content));
+        // A claim line added to a full message keeps the whole under the cap.
+        let claimed = with_claim_line(content, "123456789012345678");
+        assert!(utf16_len(&claimed) <= MAX_CONTENT);
     }
 
     // ── records ────────────────────────────────────────────────────────────

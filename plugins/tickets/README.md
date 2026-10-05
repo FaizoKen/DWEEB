@@ -80,8 +80,11 @@ Every ticket opens with a control row:
 
 A **locked** ticket (close mode = *lock*) shows **Reopen** and **Delete** (staff
 only) instead, and its old controls are retired so a stale button can't act. A
-lock mutes everyone who isn't staff — the opener *and* anyone added — and a
-reopen restores exactly them.
+lock mutes everyone who isn't staff — the opener *and* anyone added — and
+remembers whom it muted, so a reopen restores exactly them (someone a
+moderator muted by hand stays muted). Someone who has left the server is
+skipped: Discord won't change a non-member's access, and they can't post there
+anyway.
 
 ## The ticket lifecycle
 
@@ -97,8 +100,10 @@ transition first and only the winner touches Discord. So two staff pressing
 Close together close it once, a stale Reopen on a ticket that was already
 reopened does nothing, and a double-click on the panel opens one ticket. A
 flow whose Discord work fails moves the ticket back and tells the person who
-clicked why — and it posts its new controls *before* retiring the old ones,
-so a ticket is never left without working buttons. `pending`, `closing`,
+clicked why, undoing exactly what it had changed — and it posts its new
+controls *before* retiring the old ones, so a ticket is never left without
+working buttons. A lock records itself as locked before it retires anything,
+so even a restart mid-lock leaves buttons that work. `pending`, `closing`,
 `reopening` and `deleting` exist only while the work runs; a deploy lets
 running work finish, and a restart puts back anything it still interrupted.
 
