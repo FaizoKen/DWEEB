@@ -28,13 +28,36 @@
  *    from the identity each connection already stamps on its `focus` frames — a
  *    replacer sends one just before its draft.
  *
+ *  - **Nothing goes out until we know what the room holds** (`synced`). A
+ *    joiner's editor starts on the fresh-open default, not the room's work, and
+ *    peers adopt a full draft wholesale — so an unsynced connection never answers
+ *    a `hello`, never sends a patch, draft or snapshot, and doesn't reveal the
+ *    editor on the connect grace while others are present. It becomes synced by
+ *    adopting a peer draft, by the server's `resume` (sent only to the room's
+ *    first member), or by finding nobody else in the room. A connection that has
+ *    never synced adopts the room's draft verbatim: edits made on the default
+ *    were never the room's, and merging them in is how a default once wiped
+ *    everyone's work. A reconnect is unsynced again until it hears back, and its
+ *    held offline edits are merged on top of what it hears (or, alone, sent).
+ *  - **Frames apply in the server's relay order** — our own included. The
+ *    server echoes every relayed frame to its sender, so a peer frame that
+ *    arrives before the echo of one of ours was relayed *before* ours: everyone
+ *    else applies it first and ours on top. So we re-apply our in-flight
+ *    patches over it (and an in-flight full draft supersedes it outright),
+ *    rebasing any newer unsent typing on top. Without this, two people typing in
+ *    one block each ended on the *other's* text, permanently.
+ *  - A `hello` answer is addressed (`to`) — a synced peer ignores answers meant
+ *    for someone else, which carry nothing new and could only revert edits still
+ *    in flight. Older clients ignore the field and behave as before.
+ *
  * The server relays every frame opaquely, so this protocol is entirely
  * client-side. It's intentionally not a CRDT: concurrent edits to the *same*
- * node resolve to whoever typed last — the honest, robust tradeoff for a small
- * group co-writing one announcement. One corollary worth knowing (pinned by
- * `messageStore.test.ts`): remote frames bypass the local undo history, so an
- * undo restores the whole pre-edit snapshot — including nodes a peer has since
- * edited — and re-broadcasts it. Same rule, applied to time travel.
+ * node resolve to whichever reached the server last — the honest, robust
+ * tradeoff for a small group co-writing one announcement. One corollary worth
+ * knowing (pinned by `messageStore.test.ts`): remote frames bypass the local
+ * undo history, so an undo restores the whole pre-edit snapshot — including
+ * nodes a peer has since edited — and re-broadcasts it. Same rule, applied to
+ * time travel.
  *
  * The socket authenticates with a single-use ticket minted over an
  * authenticated POST (`/api/activity/room-ticket`) right before each connect,
@@ -123,15 +146,27 @@ const SNAPSHOT_THROTTLE_MS = 4000;
  *  revealing the editor anyway (see `onHydrated`). A room with a draft answers our
  *  `hello` well within this; a brand-new room sends nothing, so this bounds the
  *  wait for that case. Timed from connect — not launch — so a slow socket can't
- *  reveal the fresh-open default before a draft has had a chance to arrive. */
+ *  reveal the fresh-open default before a draft has had a chance to arrive.
+ *
+ *  The same settle decides when a connection that found nobody else here may
+ *  treat its own content as the room's (see `onConnectSettle`): the roster lists
+ *  people, not connections, so "nobody else" can still be this user's other tab,
+ *  which answers our `hello` well inside the grace. */
 const HYDRATE_GRACE_MS = 700;
+/** How long one of our relayed frames counts as in flight before we assume its
+ *  echo was lost (an oversized frame the server dropped, a socket that lagged)
+ *  and stop replaying it over peers' frames. Far above any real relay delay. */
+const INFLIGHT_TTL_MS = 10_000;
+/** The server's first frame to a new socket is always the roster. One that hasn't
+ *  arrived by the settle means a slow link — wait for it rather than guess the
+ *  room is empty, but not forever. */
+const ROSTER_OVERDUE_MS = 5_000;
 
 let socket: WebSocket | null = null;
 let unsubStore: (() => void) | null = null;
 let unsubSelection: (() => void) | null = null;
 let sendTimer: ReturnType<typeof setTimeout> | null = null;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
-let hydrateGraceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSnapshotAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
@@ -191,6 +226,47 @@ const peers = new Map<string, ReplaceActor>();
 let pendingAnswer: { at: number; afterHydration: boolean } | null = null;
 const ANSWER_WINDOW_MS = 10_000;
 let opts: StartOptions | null = null;
+/**
+ * Whether this connection holds the room's current content — the gate on every
+ * frame that carries content (see the module comment). Reset on each connect,
+ * cleared by a drop or a `resync`; set by {@link markSynced}.
+ */
+let synced = false;
+/** Whether any connection this session has synced. Until then our content is the
+ *  fresh-open default, so the room's first draft is adopted verbatim. */
+let everSynced = false;
+/** This connection has seen a roster, and one that listed nobody but us; and
+ *  whether the latest one lists anybody else. */
+let rosterSeen = false;
+let roomWasSolo = false;
+let othersHere = false;
+/** This connection's settle (see `HYDRATE_GRACE_MS`) has elapsed. */
+let connectSettled = false;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+/** The connect grace has elapsed at least once this session — the reveal waits on
+ *  it so this user's other tab can answer before we show our own content. */
+let graceElapsed = false;
+/** `hello`s that reached us while we couldn't answer truthfully, by sender —
+ *  answered once synced unless some other answer reaches them first. */
+const owedHellos = new Set<string>();
+/** Our relayed content frames whose echo hasn't come back yet, oldest first. */
+type InflightFrame =
+  | { seq: number; at: number; kind: "patch"; ops: CollabOp[] }
+  | { seq: number; at: number; kind: "draft" };
+let inflight: InflightFrame[] = [];
+/** Sequence stamped on our tracked frames, so one echo retires everything sent
+ *  before it (the server relays a connection's frames in order). */
+let nextSeq = 1;
+/**
+ * A shared-destination pick of ours that hasn't come back from the room yet.
+ * Until it echoes, any `target` frame we receive was relayed before it (or never
+ * saw it — a hello answer while we were offline), so it's stale and ignored
+ * rather than silently moving the bar back. `sentAt` is null while it still has
+ * to go out (picked while disconnected).
+ */
+let pendingTarget: { channelId: string; seq: number; sentAt: number | null } | null = null;
+/** The exit-flush listeners (see `flushOnExit`), kept to remove them. */
+let exitListeners: (() => void) | null = null;
 
 /** Open the room socket and start syncing the message store. Idempotent-ish:
  *  calling it again tears down the previous session first. */
@@ -205,8 +281,11 @@ export function startCollab(options: StartOptions): void {
   currentFocus = useMessageStore.getState().selectedId;
   diverged = false;
   hydratedFired = false;
+  everSynced = false;
+  graceElapsed = false;
   subscribeStore();
   subscribeSelection();
+  listenForExit();
   connect();
 }
 
@@ -216,33 +295,40 @@ export function startCollab(options: StartOptions): void {
  *  need — and it must never widen to carry a guild (a peer outside it couldn't
  *  load its channels, and their post gate couldn't be resolved). No-op on a DM
  *  launch (collaborators don't share a postable server, so there's nothing to
- *  agree on) and when nothing changed. */
+ *  agree on) and when nothing changed. A pick made while disconnected is kept and
+ *  sent on reconnect (see `pendingTarget`). */
 export function broadcastTarget(channelId: string): void {
   if (!opts?.guildId) return;
   if (currentTarget === channelId) return;
   currentTarget = channelId;
-  send({ type: "target", cid, channelId });
+  pendingTarget = { channelId, seq: 0, sentAt: null };
+  flushTarget();
+}
+
+/** Whether a whole-draft replace can judge what it would replace from our own
+ *  editor: true unless we're in a live session that hasn't synced with the room
+ *  yet (a joiner still on its fresh-open default, or a reconnect that hasn't
+ *  heard back). Outside a session — not started, room full, signed out — the
+ *  editor is all there is. */
+export function isRoomSynced(): boolean {
+  return !opts || stopped || synced;
 }
 
 /** Tear everything down (socket, store subscription, timers). */
 export function stopCollab(): void {
   stopped = true;
-  // Best-effort final snapshot so the last few seconds of edits (still inside the
-  // throttle window) aren't lost when the closer is the room's last member —
-  // send it before we tear the socket down below.
-  if (snapshotTimer && socket && socket.readyState === WebSocket.OPEN) {
-    clearTimeout(snapshotTimer);
-    snapshotTimer = null;
-    sendPersistSnapshot();
-  }
+  // Best-effort final flush so the last few seconds of edits (still inside the
+  // debounce / throttle windows) aren't lost when the closer is the room's last
+  // member — send it before we tear the socket down below.
+  flushOnExit();
+  exitListeners?.();
+  exitListeners = null;
   if (sendTimer) clearTimeout(sendTimer);
   if (snapshotTimer) clearTimeout(snapshotTimer);
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  if (hydrateGraceTimer) clearTimeout(hydrateGraceTimer);
   sendTimer = null;
   snapshotTimer = null;
   reconnectTimer = null;
-  hydrateGraceTimer = null;
   unsubStore?.();
   unsubStore = null;
   unsubSelection?.();
@@ -253,6 +339,8 @@ export function stopCollab(): void {
   currentFocus = null;
   peers.clear();
   pendingAnswer = null;
+  resetConnectionSync();
+  pendingTarget = null;
   // Clear everyone's per-node presence rings — the room is gone.
   usePresenceStore.getState().reset();
   if (socket) {
@@ -320,26 +408,29 @@ function openSocket(o: StartOptions, ticket: string): void {
 
   ws.onopen = () => {
     reconnectAttempts = 0;
+    // A fresh connection knows nothing of what the room did meanwhile.
+    resetConnectionSync();
     opts?.onConnectedChange?.(true);
     // Announce ourselves; existing peers answer with their current draft. We do
-    // NOT flush pending offline edits here: the baseline (`lastSent`) stays at the
+    // NOT flush pending offline edits here — nothing content-bearing goes out
+    // until we've synced (see `synced`): the baseline (`lastSent`) stays at the
     // pre-drop state, so when a peer's answering draft lands, `applyFull` reapplies
     // our still-pending edits on top of it and then broadcasts them. Flushing a
     // patch here first would advance the baseline and let a peer's *stale* draft
     // (sent before our patch reached it) overwrite us — the race `applyFull` avoids
     // by reconciling against the un-advanced baseline instead.
     sendHello();
+    // A destination picked while we were offline goes out now — it's newer than
+    // whatever a peer's answer is about to say.
+    flushTarget();
     // Re-announce where we're editing so a reconnect restores our presence ring
     // for everyone (peers dropped it when our socket closed).
     if (currentFocus) sendFocus(currentFocus);
-    // Arm the fresh-room reveal fallback: if no draft answers our `hello` within
-    // the grace, reveal the editor anyway (nothing's coming). Started here, on
+    // Arm the settle: the fresh-room reveal fallback (no draft answered our
+    // `hello` within the grace — nothing's coming) and, for a room we found
+    // empty, the moment our own content counts as the room's. Started here, on
     // connect, so the wait is measured from when a draft could actually arrive.
-    // A draft landing first cancels it (see `signalHydrated`); on a reconnect
-    // it's already fired, so the guard skips re-arming.
-    if (!hydratedFired && !hydrateGraceTimer) {
-      hydrateGraceTimer = setTimeout(signalHydrated, HYDRATE_GRACE_MS);
-    }
+    settleTimer = setTimeout(onConnectSettle, HYDRATE_GRACE_MS);
   };
 
   ws.onmessage = (ev: MessageEvent) => {
@@ -356,6 +447,10 @@ function openSocket(o: StartOptions, ticket: string): void {
   ws.onclose = () => {
     opts?.onConnectedChange?.(false);
     socket = null;
+    // Out of the room: we can't know what it does now, and what we sent may or
+    // may not have landed — a pick goes out again on reconnect.
+    resetConnectionSync();
+    if (pendingTarget) pendingTarget.sentAt = null;
     scheduleReconnect();
   };
 
@@ -377,6 +472,14 @@ function handleFrame(frame: Record<string, unknown>): void {
     const present = new Set(participants.map((p) => p.id));
     usePresenceStore.getState().retain([...present]);
     for (const [peerCid, peer] of peers) if (!present.has(peer.userId)) peers.delete(peerCid);
+    // Nobody else here: no one will answer our `hello`, so our content is the
+    // room's. Taken at the settle, not now — see `onConnectSettle` — unless the
+    // settle already passed (the others it waited on have since left).
+    rosterSeen = true;
+    const self = opts?.self.id;
+    othersHere = participants.some((p) => p.id !== self);
+    if (!othersHere) roomWasSolo = true;
+    if (!synced && roomWasSolo && connectSettled) markSynced();
     return;
   }
   if (type === "room_full") {
@@ -404,23 +507,35 @@ function handleFrame(frame: Record<string, unknown>): void {
     // `applyFull` reconciles against our un-broadcast local edits (nothing
     // pending is lost), and we re-announce our focus so our presence ring
     // survives the round trip. Handled before the echo guard (no `cid`).
+    //
+    // Until that answer lands we may be stale, so nothing content-bearing goes
+    // out (we'd revert what we missed) — unless nobody else is here to answer.
+    // The lag may also have eaten our own echoes, so nothing of ours is still
+    // known to be in flight.
+    if (othersHere) synced = false;
+    inflight = [];
     sendHello();
     if (currentFocus) sendFocus(currentFocus);
     return;
   }
-  // Ignore the echo of our own frames.
-  if (frame.cid === cid) return;
+  // Our own frame, relayed back: it — and everything we sent before it — has now
+  // landed in the room's order, so it's no longer in flight.
+  if (frame.cid === cid) {
+    if (typeof frame.seq === "number") retireInflight(frame.seq);
+    return;
+  }
   if (type === "hello") {
     // A peer just joined — hand them our full current draft (a latecomer can't
-    // replay patch history, so it needs the whole state) and, on a server launch,
-    // the room's agreed destination so they don't land on a stale default.
-    sendSnapshot(useMessageStore.getState().message);
-    if (opts?.guildId && currentTarget) {
-      send({ type: "target", cid, channelId: currentTarget });
+    // replay patch history, so it needs the whole state). Not while we're unsynced
+    // ourselves: we'd hand over the fresh-open default (or a stale copy), and every
+    // peer adopts a full draft wholesale. Owe it instead — a synced peer answers
+    // meanwhile, or we do once synced.
+    const from = typeof frame.cid === "string" ? frame.cid : "";
+    if (!synced) {
+      if (from) owedHellos.add(from);
+      return;
     }
-    // Also tell them where we're editing so our presence ring shows up for the
-    // newcomer straight away, not only on our next selection change.
-    if (currentFocus) sendFocus(currentFocus);
+    answerHello(from);
     return;
   }
   if (type === "focus") {
@@ -440,16 +555,33 @@ function handleFrame(frame: Record<string, unknown>): void {
     }
     return;
   }
+  // An answer addressed to another connection (`to`) carries the room's state for
+  // a joiner. A synced peer already holds it, and adopting it could only revert
+  // our edits still in flight — so it's for the addressee, or for us while we're
+  // still syncing ourselves.
+  const to = typeof frame.to === "string" ? frame.to : null;
   if (type === "draft" && frame.message && typeof frame.message === "object") {
-    receiveDraft(frame.message as WebhookMessage, typeof frame.cid === "string" ? frame.cid : "");
+    // A full draft reaches everyone it's broadcast to, so it answers every hello
+    // still waiting on it — or just its addressee's.
+    if (to) owedHellos.delete(to);
+    else owedHellos.clear();
+    if (to && to !== cid && synced) return;
+    receiveDraft(
+      frame.message as WebhookMessage,
+      typeof frame.cid === "string" ? frame.cid : "",
+      to,
+    );
     return;
   }
   if (type === "resume" && frame.message && typeof frame.message === "object") {
     // The server replayed the persisted draft to us as the room's first member.
     // Load it only if we haven't diverged from our fresh-open baseline — a plain
     // reconnect already holds newer state and must ignore it. `applyFull` marks us
-    // diverged, so a rapid second `resume` won't re-apply.
+    // diverged, so a rapid second `resume` won't re-apply. Either way it means
+    // nobody else is here to answer us: what we now hold is the room's, so held
+    // offline edits go out (see `markSynced`).
     if (!diverged) applyFull(frame.message as WebhookMessage);
+    markSynced();
     return;
   }
   if (type === "patch" && Array.isArray(frame.ops)) {
@@ -460,24 +592,129 @@ function handleFrame(frame: Record<string, unknown>): void {
     // A peer moved the shared post destination. Server launch only — a DM launch
     // never sends these (collaborators don't share a postable server), and the
     // guard keeps a stray frame from re-pointing a DM composer's local choice.
-    if (opts?.guildId) {
-      currentTarget = frame.channelId;
-      opts.onTarget?.(frame.channelId);
-    }
+    if (!opts?.guildId) return;
+    if (to && to !== cid && synced) return;
+    // Our own pick hasn't come back from the room yet, so this one was relayed
+    // before it (or is a hello answer that never saw it) — already stale.
+    if (pendingTarget && !targetGivenUp()) return;
+    pendingTarget = null;
+    currentTarget = frame.channelId;
+    opts.onTarget?.(frame.channelId);
   }
+}
+
+/** Mark this connection synced with the room: answer the hellos we owed, send
+ *  the edits we held back while we couldn't tell what the room holds, and — if
+ *  the connect grace has passed — reveal the editor. */
+function markSynced(): void {
+  if (synced) return;
+  synced = true;
+  everSynced = true;
+  for (const to of owedHellos) answerHello(to);
+  owedHellos.clear();
+  scheduleSync();
+  if (graceElapsed) signalHydrated();
+}
+
+/** The connect settle (see `HYDRATE_GRACE_MS`): reveal the editor if we're synced
+ *  by now, and — when the room was empty when we joined — count our own content
+ *  as the room's. A room with others in it waits for their answer instead: the
+ *  shell's own cap reveals the editor if that answer is slow, but nothing we hold
+ *  goes out before it. */
+function onConnectSettle(): void {
+  settleTimer = null;
+  connectSettled = true;
+  graceElapsed = true;
+  if (!synced && roomWasSolo) markSynced();
+  else if (synced) signalHydrated();
+  // No roster yet: the link is slow (the roster is always first). Its arrival
+  // decides (see the roster handler); only if it never comes do we go it alone.
+  if (!synced && !rosterSeen) settleTimer = setTimeout(onRosterOverdue, ROSTER_OVERDUE_MS);
+}
+
+/** No roster arrived at all — treat the room as ours rather than hold every edit
+ *  back forever. */
+function onRosterOverdue(): void {
+  settleTimer = null;
+  if (!synced && !rosterSeen) markSynced();
+}
+
+/** Forget everything this connection knew about the room — on connect, on a
+ *  drop, and on teardown. */
+function resetConnectionSync(): void {
+  synced = false;
+  rosterSeen = false;
+  roomWasSolo = false;
+  othersHere = false;
+  connectSettled = false;
+  owedHellos.clear();
+  inflight = [];
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+}
+
+/** Hand a joiner the room's state: our full draft, addressed to them, plus (on a
+ *  server launch) the agreed destination and where we're editing, so our presence
+ *  ring shows up for the newcomer straight away. */
+function answerHello(to: string): void {
+  send({ type: "draft", cid, message: useMessageStore.getState().message, ...(to ? { to } : {}) });
+  if (opts?.guildId && currentTarget) {
+    send({ type: "target", cid, channelId: currentTarget, ...(to ? { to } : {}) });
+  }
+  if (currentFocus) sendFocus(currentFocus);
+}
+
+/** Our frames still in flight, minus any whose echo we've given up on. */
+function liveInflight(): InflightFrame[] {
+  const now = Date.now();
+  if (inflight.some((f) => now - f.at >= INFLIGHT_TTL_MS)) {
+    inflight = inflight.filter((f) => now - f.at < INFLIGHT_TTL_MS);
+  }
+  return inflight;
+}
+
+/** Our frame `seq` echoed back: it and everything sent before it have landed. */
+function retireInflight(seq: number): void {
+  if (inflight.length) inflight = inflight.filter((f) => f.seq > seq);
+  if (pendingTarget && pendingTarget.sentAt !== null && pendingTarget.seq <= seq) {
+    pendingTarget = null;
+  }
+}
+
+/** The ops of our in-flight patches, in the order we sent them. */
+function inflightOps(frames: readonly InflightFrame[]): CollabOp[] {
+  return frames.flatMap((f) => (f.kind === "patch" ? f.ops : []));
+}
+
+/** Put a pending destination pick on the wire, if one is waiting to go. */
+function flushTarget(): void {
+  if (!pendingTarget || pendingTarget.sentAt !== null) return;
+  const seq = nextSeq++;
+  if (send({ type: "target", cid, channelId: pendingTarget.channelId, seq })) {
+    pendingTarget.seq = seq;
+    pendingTarget.sentAt = Date.now();
+  }
+}
+
+/** A sent pick whose echo never came back (a dropped frame) stops shielding us
+ *  from peers' picks, or we'd never follow the room again. */
+function targetGivenUp(): boolean {
+  return (
+    pendingTarget !== null &&
+    pendingTarget.sentAt !== null &&
+    Date.now() - pendingTarget.sentAt >= INFLIGHT_TTL_MS
+  );
 }
 
 /** Tell the shell the room's initial content has settled, exactly once — the
  *  first time we take in a full draft (from `applyFull`) or, for a fresh room,
- *  when the connect grace elapses with nothing received. Clears the grace timer
- *  so the two paths can't double-fire. */
+ *  when the connect settle finds nothing coming (and nobody else here). The
+ *  one-shot latch keeps the paths from double-firing. */
 function signalHydrated(): void {
   if (hydratedFired) return;
   hydratedFired = true;
-  if (hydrateGraceTimer) {
-    clearTimeout(hydrateGraceTimer);
-    hydrateGraceTimer = null;
-  }
   opts?.onHydrated?.();
 }
 
@@ -486,11 +723,20 @@ function signalHydrated(): void {
  * message out from under us (see `onPeerReplace`). The room's initial sync
  * never counts — a latecomer adopting the room's draft over its fresh-open
  * default replaced nothing anyone made — and neither does a draft we kept our
- * own structure over (`applyFull` adopted nothing).
+ * own structure over (`applyFull` adopted nothing). `to` is the connection the
+ * draft answers, when its sender addressed it.
  */
-function receiveDraft(message: WebhookMessage, senderCid: string): void {
-  const answer =
+function receiveDraft(message: WebhookMessage, senderCid: string, to: string | null): void {
+  // A full draft of ours is still in flight: in the room's order it lands after
+  // this one and replaces it wholesale for everyone — so for us too.
+  if (liveInflight().some((f) => f.kind === "draft")) return;
+  const fresh =
     pendingAnswer && Date.now() - pendingAnswer.at < ANSWER_WINDOW_MS ? pendingAnswer : null;
+  // An addressed draft is an answer to a hello by definition (ours, or — taken
+  // while we're still syncing — another joiner's, carrying the same room state);
+  // an unaddressed one (an older client) only reads as one inside the window
+  // after our own hello.
+  const answer = to !== null ? (fresh ?? { at: Date.now(), afterHydration: hydratedFired }) : fresh;
   pendingAnswer = null;
   const wasHydrated = hydratedFired;
   const before = useMessageStore.getState().message;
@@ -519,10 +765,18 @@ function receiveDraft(message: WebhookMessage, senderCid: string): void {
  *  snapshot overwrites edits made while our socket was down — the offline-edit
  *  data-loss bug. When nothing is pending this reduces to adopting the peer's
  *  state verbatim, exactly as before. Returns whether the peer's message was
- *  written to the store (false when our own unbroadcast structure was kept). */
+ *  written to the store (false when our own unbroadcast structure was kept).
+ *
+ *  Two refinements. Our in-flight patches were relayed after this draft (it
+ *  arrived before their echo), so everyone else applies them on top of it — the
+ *  baseline does too. And a connection that has never synced has no local work to
+ *  keep: its edits were made on the fresh-open default, so the room's draft is
+ *  adopted verbatim — merging them in (above all, keeping a "structural" change
+ *  to the default) is how a joiner once wiped everyone's draft. */
 function applyFull(message: WebhookMessage): boolean {
   const ours = useMessageStore.getState().message;
-  const pending = lastSent ? diffMessage(lastSent, ours) : [];
+  const pending = !everSynced ? [] : lastSent ? diffMessage(lastSent, ours) : [];
+  const base = applyOps(message, inflightOps(liveInflight()));
 
   // A top-level structural change we haven't broadcast can't be merged per node.
   // Don't drop it: keep our version and let the next sync re-broadcast it as a
@@ -530,8 +784,9 @@ function applyFull(message: WebhookMessage): boolean {
   // structural conflict). Adopt the peer's frame only as the new baseline so the
   // diff recomputes against it.
   if (pending === null) {
-    lastSent = message;
+    lastSent = base;
     diverged = true;
+    markSynced();
     scheduleSync();
     // We received the room's draft (kept ours for a structural conflict, but the
     // initial sync is settled) — safe to reveal.
@@ -539,7 +794,7 @@ function applyFull(message: WebhookMessage): boolean {
     return false;
   }
 
-  const next = pending.length > 0 ? applyOps(message, pending) : message;
+  const next = pending.length > 0 ? applyOps(base, pending) : base;
   applyingRemote = true;
   try {
     useMessageStore.setState({ message: next });
@@ -552,28 +807,48 @@ function applyFull(message: WebhookMessage): boolean {
   // the tree is shown but still holds the fresh-open default — the flash we're
   // avoiding.
   signalHydrated();
-  // Baseline is the peer's frame; any reapplied local ops remain a pending diff
+  // Baseline is the room's state; any reapplied local ops remain a pending diff
   // against it, so the next sync re-broadcasts our surviving edits to the room.
-  lastSent = message;
+  lastSent = base;
   // We now hold live room state; a later server `resume` must not revert us.
   diverged = true;
+  markSynced();
   if (pending.length > 0) scheduleSync();
   return true;
 }
 
 /** Apply a peer's per-node ops, touching only the named nodes so a concurrent
- *  local edit elsewhere is preserved. */
+ *  local edit elsewhere is preserved — in the room's relay order: a patch that
+ *  arrives before the echo of one of ours was relayed before it, so ours applies
+ *  on top (and an in-flight full draft of ours replaces it outright). */
 function applyPatch(ops: CollabOp[]): void {
+  const flight = liveInflight();
+  // Our in-flight full draft lands after this patch and replaces the whole
+  // message for everyone — so for us too.
+  if (flight.some((f) => f.kind === "draft")) return;
+  const replay = inflightOps(flight);
+  const store = useMessageStore.getState().message;
+  // Advance the baseline by the SAME ops (then ours, in relay order) rather than
+  // reading the store: the store may also hold our own not-yet-broadcast edits,
+  // which must remain a diff to send on the next sync.
+  const base = lastSent ? applyOps(applyOps(lastSent, ops), replay) : null;
+  const pending = lastSent ? diffMessage(lastSent, store) : null;
+  // Rebase our unsent edits onto the new baseline, so newer typing in a node we
+  // also had in flight is kept. A pending top-level change can't be rebased per
+  // node; it goes out as a full draft on the next sync and settles everyone then.
+  const next =
+    base && pending !== null
+      ? pending.length > 0
+        ? applyOps(base, pending)
+        : base
+      : applyOps(store, ops);
   applyingRemote = true;
   try {
-    useMessageStore.setState((s) => ({ message: applyOps(s.message, ops) }));
+    useMessageStore.setState({ message: next });
   } finally {
     applyingRemote = false;
   }
-  // Advance the baseline by the SAME ops rather than reading the store: the
-  // store may also hold our own not-yet-broadcast edits, which must remain a
-  // diff to send on the next sync.
-  if (lastSent) lastSent = applyOps(lastSent, ops);
+  if (base) lastSent = base;
   // A peer's edit means we're tracking live room state — don't let a later
   // server `resume` revert us.
   diverged = true;
@@ -622,6 +897,10 @@ function scheduleSync(): void {
  *  change — a granular `patch`, or a full `draft` when the diff isn't expressible
  *  in place (top-level structure changed, or there's no baseline yet). */
 function syncNow(): void {
+  // Until we know what the room holds, nothing goes out — a joiner's default, or a
+  // reconnect's stale copy, would land on peers as their state. Held edits stay a
+  // pending diff and go out when we sync (see `markSynced`).
+  if (!synced) return;
   const current = useMessageStore.getState().message;
   const base = lastSent;
   // The baseline only advances when the frame actually goes on the wire (see
@@ -629,7 +908,7 @@ function syncNow(): void {
   // old baseline, so a reconnect re-broadcasts the whole accumulated change
   // instead of silently swallowing edits made while disconnected.
   if (!base) {
-    if (sendSnapshot(current)) {
+    if (sendDraft(current)) {
       lastSent = current;
       schedulePersist();
     }
@@ -642,14 +921,16 @@ function syncNow(): void {
     // frame with its usual meaning (our selection, which the replace just
     // cleared), so peers on an older build handle it exactly as before.
     if (isWholeDocumentReplace(base, current)) sendFocus(currentFocus);
-    if (sendSnapshot(current)) {
+    if (sendDraft(current)) {
       lastSent = current;
       schedulePersist();
     }
     return;
   }
   if (ops.length === 0) return; // nothing semantic changed
-  if (send({ type: "patch", cid, ops })) {
+  const seq = nextSeq++;
+  if (send({ type: "patch", cid, ops, seq })) {
+    inflight.push({ seq, at: Date.now(), kind: "patch", ops });
     lastSent = current;
     schedulePersist();
   }
@@ -663,9 +944,13 @@ function sendHello(): void {
   }
 }
 
-/** Broadcast the whole message as a `draft`; returns whether it was sent. */
-function sendSnapshot(message: WebhookMessage): boolean {
-  return send({ type: "draft", cid, message });
+/** Broadcast the whole message as a `draft` (tracked as in flight until its echo);
+ *  returns whether it was sent. */
+function sendDraft(message: WebhookMessage): boolean {
+  const seq = nextSeq++;
+  if (!send({ type: "draft", cid, message, seq })) return false;
+  inflight.push({ seq, at: Date.now(), kind: "draft" });
+  return true;
 }
 
 /**
@@ -683,11 +968,55 @@ function schedulePersist(): void {
   snapshotTimer = setTimeout(sendPersistSnapshot, delay);
 }
 
-/** Emit the persistence snapshot now (reads the freshest message). */
+/** Emit the persistence snapshot now (reads the freshest message). Skipped while
+ *  unsynced: what we hold then isn't known to be the room's, and the stored copy
+ *  is what a relaunch resumes. The next sync after we re-sync schedules another. */
 function sendPersistSnapshot(): void {
   snapshotTimer = null;
+  if (!synced) return;
   lastSnapshotAt = Date.now();
   send({ type: "snapshot", cid, message: useMessageStore.getState().message });
+}
+
+/**
+ * Flush what's still waiting on a timer — the debounced sync, then the throttled
+ * persistence snapshot (which the sync may just have queued). The Activity is
+ * closed by tearing its frame down, with no teardown call of ours, so without
+ * this the last member's final few seconds of edits never reach the stored draft
+ * a relaunch resumes.
+ */
+function flushOnExit(): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (sendTimer) {
+    clearTimeout(sendTimer);
+    sendTimer = null;
+    syncNow();
+  }
+  if (snapshotTimer) {
+    clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+    sendPersistSnapshot();
+  }
+}
+
+/** Flush on `pagehide`, and whenever the page is hidden — the last signals a
+ *  closing (or backgrounded) Activity frame reliably gets. */
+function listenForExit(): void {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  const win = window;
+  const doc = document;
+  if (typeof win.addEventListener !== "function" || typeof doc.addEventListener !== "function")
+    return;
+  const onPageHide = () => flushOnExit();
+  const onVisibility = () => {
+    if (doc.visibilityState === "hidden") flushOnExit();
+  };
+  win.addEventListener("pagehide", onPageHide);
+  doc.addEventListener("visibilitychange", onVisibility);
+  exitListeners = () => {
+    win.removeEventListener("pagehide", onPageHide);
+    doc.removeEventListener("visibilitychange", onVisibility);
+  };
 }
 
 /** Put a frame on the wire, returning whether it actually went out. The caller

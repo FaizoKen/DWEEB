@@ -11,6 +11,7 @@
 
 import { useMemo } from "react";
 import { useActivityStore } from "@/core/activity/activityStore";
+import { isRoomSynced } from "@/core/activity/collab";
 import { useMessageStore } from "@/core/state/messageStore";
 import {
   editingTogetherPhrase,
@@ -76,9 +77,12 @@ export function RoomReplaceNote({ action }: { action: string }) {
   const participants = useActivityStore((s) => s.participants);
   const selfId = useActivityStore((s) => s.user?.id);
   const message = useMessageStore((s) => s.message);
+  // Sync state isn't reactive; this note only shows inside a confirmation step,
+  // so reading it on render is enough.
+  const synced = isRoomSynced();
   const needed = useMemo(
-    () => needsRoomReplaceConfirm(message, participants, selfId),
-    [message, participants, selfId],
+    () => needsRoomReplaceConfirm(message, participants, selfId, synced),
+    [message, participants, selfId, synced],
   );
   if (!needed) return null;
   return (

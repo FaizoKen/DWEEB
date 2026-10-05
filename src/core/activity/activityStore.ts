@@ -357,6 +357,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const mock = devOverrideSession();
     if (mock) {
       stampPlatformOnRoot(mock.platform);
+      forgetOtherGuild(mock.context.guildId);
       set({
         status: "ready",
         step: "done",
@@ -416,6 +417,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const guildId = sdk.guildId || null;
       const channelId = sdk.channelId;
       instanceId = sdk.instanceId;
+      // Before anything renders against it: the guild store hydrated whatever
+      // server this origin last connected, which needn't be the one we launched in.
+      forgetOtherGuild(guildId);
 
       set({ step: "authorizing" });
       trace.stage("authorizing", "reached", { platform, instance: instanceId });
@@ -1098,6 +1102,26 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     void useGuildStore.getState().connect(guildId);
   },
 }));
+
+/**
+ * Drop the guild store's data unless it already belongs to `launchGuildId`.
+ *
+ * The store hydrates the last-connected server from localStorage at module load
+ * — the web app's "pick up where you left off". Inside Discord the destination
+ * is the launching guild, and on a launch where the bot is missing (or a DM
+ * launch, before a server is picked) nothing ever calls `connect()`, so a
+ * previous session's server would otherwise serve the whole session: its roles
+ * and emoji in the pickers, its names in the preview, and its id as a plugin
+ * config's `"guild"` resource — configuring a plugin for the wrong server. The
+ * same server's cache is kept: `connect()` refreshes it in place.
+ */
+function forgetOtherGuild(launchGuildId: string | null): void {
+  const current = useGuildStore.getState();
+  if (launchGuildId && current.guildId === launchGuildId && current.data?.guildId === launchGuildId)
+    return;
+  if (!current.guildId && !current.data) return;
+  useGuildStore.setState({ guildId: "", status: "idle", data: null, error: null });
+}
 
 /** Load a server launch's launching-guild meta (name + icon) for the header's
  *  top-right server indicator, resolve whether the user can post there, and —

@@ -54,7 +54,7 @@ import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
 import { formatInstant } from "@/core/schedule/recurrence";
 import { ScheduleHistory } from "@/features/templates/GalleryScheduled";
 import { validateMessage } from "@/core/schema/validation";
-import { openExternalLink } from "@/core/activity/sdk";
+import { openExternalUrl } from "@/core/activity/runtime";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import { CloseIcon, PlusIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
@@ -898,7 +898,10 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
                           failed === 0 ? "success" : "info",
                         );
                       }}
-                      openLink={(url) => void openExternalLink(url)}
+                      // The catching helper: a bare SDK call that rejects would be
+                      // an unhandled rejection with no frame locations — reported
+                      // as our crash, and paged.
+                      openLink={(url) => void openExternalUrl(url)}
                     />
                   </div>
                 ) : null}

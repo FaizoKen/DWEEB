@@ -14,6 +14,7 @@
 import { create } from "zustand";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "./activityStore";
+import { isRoomSynced } from "./collab";
 import { needsRoomReplaceConfirm } from "./roomReplace";
 
 export interface RoomReplaceRequest {
@@ -37,7 +38,7 @@ export const useRoomReplaceStore = create<RoomReplaceState>(() => ({ pending: nu
 export function requestRoomReplace(request: RoomReplaceRequest): void {
   const { participants, user } = useActivityStore.getState();
   const message = useMessageStore.getState().message;
-  if (!needsRoomReplaceConfirm(message, participants, user?.id)) {
+  if (!needsRoomReplaceConfirm(message, participants, user?.id, isRoomSynced())) {
     request.run();
     return;
   }

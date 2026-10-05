@@ -83,6 +83,14 @@ describe("needsRoomReplaceConfirm", () => {
     expect(needsRoomReplaceConfirm({ components: [] }, [me, ana], "me")).toBe(false);
     expect(needsRoomReplaceConfirm(DEFAULT_PRESET.message, [me, ana, bo], "me")).toBe(false);
   });
+
+  it("always asks while unsynced with others here — our editor isn't the room's draft yet", () => {
+    // A joiner still on its fresh-open default says nothing about what Ana has.
+    expect(needsRoomReplaceConfirm(DEFAULT_PRESET.message, [me, ana], "me", false)).toBe(true);
+    expect(needsRoomReplaceConfirm({ components: [] }, [me, ana], "me", false)).toBe(true);
+    // …but solo, nobody can lose anything.
+    expect(needsRoomReplaceConfirm(edited, [me], "me", false)).toBe(false);
+  });
 });
 
 describe("editingTogetherPhrase", () => {

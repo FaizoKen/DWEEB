@@ -15,6 +15,8 @@ const activity = vi.hoisted(() => ({
 vi.mock("./activityStore", () => ({
   useActivityStore: { getState: () => activity },
 }));
+const room = vi.hoisted(() => ({ synced: true }));
+vi.mock("./collab", () => ({ isRoomSynced: () => room.synced }));
 
 import { useMessageStore } from "@/core/state/messageStore";
 import {
@@ -35,6 +37,20 @@ describe("requestRoomReplace", () => {
     useRoomReplaceStore.setState({ pending: null });
     useMessageStore.setState({ message: work });
     activity.participants = [me, ana];
+    room.synced = true;
+  });
+
+  it("asks even over an untouched-looking draft while the room hasn't synced in yet", () => {
+    // A joiner's editor still holds its fresh-open default; the room's real draft
+    // hasn't arrived, so "nothing to lose" can't be read off it.
+    useMessageStore.setState({ message: { components: [] } });
+    room.synced = false;
+    const run = vi.fn();
+    requestRoomReplace({ action: "Starting from scratch", run });
+    expect(run).not.toHaveBeenCalled();
+    expect(useRoomReplaceStore.getState().pending).toMatchObject({
+      action: "Starting from scratch",
+    });
   });
 
   it("runs straight away for solo use — no extra step", () => {

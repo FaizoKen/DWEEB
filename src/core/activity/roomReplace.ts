@@ -63,13 +63,22 @@ export function isPristineDraft(message: WebhookMessage): boolean {
  * Whether replacing the whole shared draft should ask first: someone else is in
  * the room to have their view of it replaced, and it holds work worth keeping.
  * Solo use never asks — your own Undo covers you.
+ *
+ * Whether it "holds work" is read off our own editor, which is only the room's
+ * draft once we've synced with it (`roomSynced`, see collab's `isRoomSynced`).
+ * Before that — a joiner still on its fresh-open default, a reconnect that
+ * hasn't heard back — a pristine-looking editor says nothing about what the
+ * others have, so with anyone else here it always asks.
  */
 export function needsRoomReplaceConfirm(
   message: WebhookMessage,
   participants: readonly CollabParticipant[],
   selfId: string | null | undefined,
+  roomSynced = true,
 ): boolean {
-  return otherEditors(participants, selfId).length > 0 && !isPristineDraft(message);
+  return (
+    otherEditors(participants, selfId).length > 0 && (!roomSynced || !isPristineDraft(message))
+  );
 }
 
 /** "You and Ana" / "You and 3 others" — who is editing the draft with you. */
