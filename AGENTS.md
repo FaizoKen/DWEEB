@@ -1037,7 +1037,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   us" statuses, and relayed bare they would page as ours). Deliberate capacity 503s (upload
   permits, AI budget/busy, row caps) are `AppError::Status` and still page as ours — a decision
   not taken here, recorded as such. What still pages, deliberately: a rejected bot token (401), the
-  bot lacking guild access (403), the dispatcher or one of our own allow-listed plugin hosts
+  dispatcher or one of our own allow-listed plugin hosts
   unreachable, a Discord connect failure (this host can't reach discord.com at all) or a DNS
   failure with no earlier answer to fall back on (a merely *stalled* lookup no longer fails the
   dial — next entry), Stripe,
@@ -1195,12 +1195,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   such Quick Replies instances across 3 servers. Quick Replies now refuses one at save (config
   UI note on the card + `validate.rs`) and, for replies stored before that, leaves the picture
   out at click time (`src/media.rs`, mirrored in `config.html`'s `unsendableMedia`) instead of
-  sending a reply Discord rejects. Only an `http(s)://` link is sendable. **Known residue:** 3
-  giveaway instances (2026-09-16) hold a `session://` thumbnail in `message_template`, which
-  their UPDATE_MESSAGE re-render sends as-is; the fix there is unverified (whether Discord
-  resolves an `attachment://` name against an edited message's kept attachments needs a live
-  test) and was left for a separate change. Hosting uploads so a reply *can* carry them is a
-  product decision (storage, abuse — instance creation is anonymous), not a bug fix.
+  sending a reply Discord rejects. Only an `http(s)://` link is sendable, and **a File component
+  never is** (Discord only accepts `attachment://` there, and a reply uploads nothing). The same
+  rule now covers every plugin that stores a message and re-sends it (2026-10-05): Giveaway,
+  Poll and Directory refuse such a template at save, and a template stored before that falls
+  back to the live-message path instead of failing every click. Hosting uploads so a reply
+  *can* carry them is a product decision (storage, abuse — instance creation is anonymous), not
+  a bug fix.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,
@@ -1991,7 +1992,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `savedMessagesStore.test.ts` (the incident case fails on the old code).
 - **Browser upload hydration follows reachability.** Startup collects `session://` ids from the
   live message, undo/redo, and named browser saves, reads only those IndexedDB blobs, and deletes
-  orphan keys with a key-only cursor (never materializing stale file bytes). Those orphan deletes
+  orphan keys with a key-only cursor (never materializing stale file bytes) — **but only when no
+  other DWEEB tab answers** (`core/state/tabPresence.ts`, a BroadcastChannel ping; 2026-10-05).
+  Every tab shares one IndexedDB yet judges orphans from its own editor and saves, so a tab that
+  deleted a saved message used to evict the uploads another tab had loaded from it, which then
+  came back "missing" on that tab's next reload. Loading (`loadAttachmentBlobs`) and pruning
+  (`pruneAttachmentBlobs`) are separate steps for that reason; runtime GC still frees memory at
+  once and leaves stored bytes to a tab that is alone. Those orphan deletes
   are issued as `store.delete(key)` requests, **never `IDBCursor.delete()`** — a key cursor's
   `delete()` throws `InvalidStateError`, and an exception (or unhandled request error, hence the
   `preventDefault` on each delete) inside the transaction's handlers aborts the whole transaction:
@@ -2252,6 +2259,92 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   since changing a row's `display` drops implicit table semantics in some engines; at 390 px the
   four-column table had put Copy and the preview off-screen. The sticky site header is opaque on
   phones — they skip its backdrop blur, and the translucent fill let text show through.
+
+- **Full audit 2026-10-05 — invariants it added; don't regress them.** A 14-slice audit found
+  three ways anyone could act inside servers they don't control, plus a long tail; each fix
+  below is guarded by tests named after the failure.
+  **Trust boundaries.** (1) A custom app is registered only under the key Discord itself
+  publishes for it: `custom_apps_add` reads `verify_key` from the public
+  `GET /applications/{id}/rpc` (falling back to `/oauth2/@me` through the client secret) and
+  refuses any other key (`check_custom_app_key`; a Discord outage is a non-paging 502). Before
+  that, anyone could register a keypair they generated and sign interactions naming any
+  guild, member, roles and permissions, which the dispatcher forwarded with a valid
+  attestation and every plugin acted on. The dispatcher also refuses weak (small-order) keys,
+  which verify every signature. **Ops:** a registration made before this shipped was never
+  checked — compare each `custom_apps.public_key` in prod `dispatcher.db` against that
+  endpoint's `verify_key` and remove mismatches through the API. (2) A web schedule can never
+  name a custom-bot target (`application_id`/`channel_id` are refused; only the Activity's
+  `ScheduleTarget::Activity` sets one), and its server is Discord's answer for the webhook,
+  never the body's. (3) Every MCP tool checks the channel belongs to the named server before
+  resolving a webhook, and `fetch_message`/`update_message` never create one. (4) A bearer
+  token must be issued to DWEEB's own client (`/oauth2/@me` → `application.id`); `/users/@me`
+  answers for any app's token and was a confused deputy. (5) MCP shows DWEEB's own consent page
+  (client name + redirect origin, unframeable, code minted only on Allow) after Discord's.
+  (6) The unauthenticated image proxy relays raster image/video types only, with `nosniff` and
+  a sandbox CSP, and dials only public addresses on every hop (`PublicOnlyResolver`): it serves
+  from the credentialed API origin, where an SVG ran script with the user's cookies. The plugin
+  frame's response CSP must stay identical to `PLUGIN_IFRAME_SANDBOX_PROXIED`. (7) Room peers
+  can't send server-only frames (`roster`, `room_full`, `resync`, `resume`, `bot_connected`),
+  `focus` identity is stamped by the server, one `cid` per socket, at most 8 sockets per user;
+  a persisted Activity draft is keyed only on an instance Discord's activity-instance endpoint
+  confirms (any doubt disables persistence for that session — never another channel's draft).
+  (8) Self Role refuses @everyone, managed roles and roles with moderation/admin permissions at
+  save, and re-checks at click. (9) A never-expire grant exempts only clicks from the server
+  holding it, the Message Info toggle's custom_id carries a per-boot MAC over
+  guild|channel|message, a message another server holds answers 409 `slot_taken`, and Message
+  Info (which proves where a message lives) takes such a foreign grant over. (10) Manager-only
+  writes (slots, custom bots, checkout/sync/reassign, scheduled never-expire, auto-binding
+  floating premium) use `authorize_manager*`, independent of the `REQUIRE_MANAGE_GUILD` read
+  policy. (11) A popup/redirect OAuth result is acted on only by a tab holding a live attempt
+  (`openPopup` records it in memory + sessionStorage; login is the one every-tab flow), popups
+  are recognised by the pending mark alone (`window.opener`/`name` are attacker-chosen), and
+  `consumeReturn` answers only a tab that redirected itself — a crafted `#dweeb_webhook=` link
+  used to plant an attacker's webhook in Send. (12) Code export: attachment names are reduced to
+  safe basenames (`safeAttachmentName`), cURL file parts are single-quoted shell words, and
+  discord.py emits `SelectDefaultValueType` only for user/role/channel.
+  **Paging.** Bot reads answering 403 (bot not in that server) are 404; a Discord 413 is the
+  user's 413; a 501 (feature switched off) is not a failure at all; OAuth callback failures
+  land on the builder with the flow's error marker instead of a raw JSON page; a Discord 400
+  for an id it can't parse is a 400 in every bot-token plugin, whose `is_snowflake` now needs
+  17–20 digits that fit a u64; the alerter never content-matches a Caddy JSON line (it embeds
+  request headers, so a User-Agent could page "PANIC" on demand), and a signature still firing
+  at its mute's expiry posts once, as "still occurring".
+  **Billing.** Stripe events are mirrored from the subscription as Stripe holds it *now* (event
+  order isn't promised, so a late `updated` resurrected a cancelled plan); an event we couldn't
+  apply answers 5xx so Stripe retries (Stripe unreachable = Upstream warn, our store = page);
+  any matching `v1` verifies (a secret roll sends several); an `active` row past its period by a
+  day is re-read from Stripe on the backfill throttle; `STRIPE_PRICE_SLOTS` that doesn't parse is
+  a boot error; a cache fill that straddles an invalidation isn't stored (`EntitlementCache`
+  epoch).
+  **Schedules/library.** PATCH is a compare-and-swap on worker-owned state (409 on conflict, no
+  edits while `sending`); a plan suspension preserves the user's pause
+  (`paused_before_suspend`); a run cap at or below the runs made finishes the series;
+  count-then-insert runs in IMMEDIATE transactions; library PATCH writes only the columns it
+  names; every move+use of a custom bot's roaming webhook holds `lock_custom_hook`, scheduler
+  included. Send, schedule create and schedule save share one pre-flight and one placeholder
+  context; URL fields never receive placeholder samples (values are URL-encoded mid-URL, a
+  whole-field token is taken verbatim, a leftover core token is refused at send).
+  **Editor.** History frames record a whole-document swap (`HistoryFrame.replaced`, plus
+  memory-only origins): undo/redo across one restores the restore origin and advances the
+  document generation, so undoing a Restore no longer leaves Update aimed at the posted
+  message. The import boundary also repairs array *entries* and scalar types (select options,
+  default values, media fields) the schema layer walks unguarded; UI lookups by a node's own
+  type use `componentMeta()` (unknown types render, never crash); the store mints fresh
+  custom_ids for inspector switches too (`freshCustomId`) and Duplicate honours capacity; JSON
+  export drops Discord's read-only media fields (`resolvedMedia.ts`) and a pasted share URL is
+  percent-decoded; the JSON panel follows the live message until edited. Activity collab: an
+  unsynced connection sends nothing, hello answers are addressed (`to`), our frames carry `seq`
+  and are reconciled in relay order, pending sync/snapshot flush on `pagehide`, and the guild
+  store is reset at Activity init unless it already holds the launching guild.
+  **Plugins.** Tickets: a lock records `locked` before retiring controls, `muted_by_lock` is what
+  reopen restores (NULL = pre-change row, old rule), Unknown Member (10007/10013) is nothing to
+  do. Directory: an in-message refresh renders from the raw template but takes bindings from
+  the live message, and declines to a private reply when the two no longer line up; shared
+  channel sweeps list only @everyone-visible channels, a private reply only what the clicker
+  sees; gated content (Directory notes, Quick Replies replies) needs the edit token to read.
+  Giveaway/Poll: the re-render binds by id, then by live position, never "first interactive";
+  a select poll's options always come from its config; rerolls exclude everyone ever drawn
+  (`drawn`). Modal Form's one-response limit is reserved atomically at submit.
 
 ## CI
 
