@@ -518,9 +518,7 @@ impl Config {
 
         let stripe_secret_key = opt_env("STRIPE_SECRET_KEY");
         let stripe_webhook_secret = opt_env("STRIPE_WEBHOOK_SECRET");
-        let stripe_price_slots = opt_env("STRIPE_PRICE_SLOTS")
-            .and_then(|s| serde_json::from_str::<HashMap<String, i64>>(&s).ok())
-            .unwrap_or_default();
+        let stripe_price_slots = price_slots_value(opt_env("STRIPE_PRICE_SLOTS").as_deref())?;
         // Keys are "plus"/"pro" (monthly) and "plus_year"/"pro_year" (annual);
         // see `stripe::checkout_key`.
         let mut stripe_checkout_price = HashMap::new();
@@ -904,6 +902,20 @@ fn bool_value(key: &str, raw: Option<&str>, default: bool) -> Result<bool, Strin
     }
 }
 
+/// Parse `STRIPE_PRICE_SLOTS` (`{"price_…": 36, …}`). A present but malformed
+/// value is a boot error, never an empty map: every server would sum 0 slots,
+/// the next reconcile would suspend every paying server's never-expire slots,
+/// custom bots and schedules above the Free caps, and checkout would go on
+/// selling plans that grant nothing — all without a log line.
+fn price_slots_value(raw: Option<&str>) -> Result<HashMap<String, i64>, String> {
+    match raw {
+        None => Ok(HashMap::new()),
+        Some(raw) => serde_json::from_str::<HashMap<String, i64>>(raw).map_err(|e| {
+            format!("STRIPE_PRICE_SLOTS must be a JSON object of price id → integer slots: {e}")
+        }),
+    }
+}
+
 /// Split a comma-separated env value, trimming whitespace and dropping blanks.
 fn split_list(s: &str) -> Vec<String> {
     s.split(',')
@@ -945,8 +957,19 @@ fn valid_feedback_webhook_url(value: &str) -> bool {
 mod tests {
     use super::{
         bool_value, check_durable_store_paths, is_durable_path, normalize, origin_of, parse_value,
-        valid_feedback_webhook_url, DurableStores,
+        price_slots_value, valid_feedback_webhook_url, DurableStores,
     };
+
+    #[test]
+    fn a_malformed_price_slots_map_is_a_boot_error_not_an_empty_map() {
+        assert!(price_slots_value(None).unwrap().is_empty());
+        let ok = price_slots_value(Some(r#"{"price_a":36,"price_b":10}"#)).unwrap();
+        assert_eq!(ok.get("price_a"), Some(&36));
+        // A typo or string values used to parse as "no prices" and silently
+        // drop every paying server to Free on the next reconcile.
+        assert!(price_slots_value(Some(r#"{"price_a":"36"}"#)).is_err());
+        assert!(price_slots_value(Some(r#"{"price_a":36,}"#)).is_err());
+    }
 
     /// Only the stores a test actually cares about; the rest are "off".
     fn stores<'a>(schedule: Option<&'a str>, library: Option<&'a str>) -> DurableStores<'a> {

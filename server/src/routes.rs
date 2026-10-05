@@ -23,7 +23,7 @@ use serde_json::{json, Value};
 
 use crate::cache::DataCache;
 use crate::config::Config;
-use crate::discord::Discord;
+use crate::discord::{AppLookup, Discord};
 use crate::error::AppError;
 use crate::session::{Session, SESSION_COOKIE};
 use crate::shortlink::ShortLinkStore;
@@ -131,6 +131,12 @@ pub struct UsableGuild {
     /// false, and a data refresh re-resolves them).
     #[serde(default)]
     pub can_manage_webhooks: bool,
+    /// Whether the user owns or holds Manage Server here — the gate for the
+    /// writes only a server's managers may make, whatever `REQUIRE_MANAGE_GUILD`
+    /// says about reads (see [`authorize_manager_session`]). Defaults to false
+    /// for entries cached before it existed.
+    #[serde(default)]
+    pub can_manage: bool,
 }
 
 /// Liveness probe — no auth, no upstream calls.
@@ -410,7 +416,7 @@ pub async fn permanent_add(
     Path(guild): Path<String>,
     Json(body): Json<PermanentAddBody>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_manager(&st, &jar, &guild).await?;
     if !is_snowflake(&body.message_id) || !is_snowflake(&body.channel_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -455,7 +461,7 @@ pub async fn permanent_remove(
     jar: PrivateCookieJar,
     Path((guild, message_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    authorize_manager(&st, &jar, &guild).await?;
     if !is_snowflake(&message_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -526,7 +532,7 @@ pub async fn custom_apps_add(
     Path(guild): Path<String>,
     Json(body): Json<CustomAppAddBody>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_manager(&st, &jar, &guild).await?;
     let application_id = body.application_id.trim().to_string();
     let public_key = body.public_key.trim().to_lowercase();
     if !is_snowflake(&application_id) {
@@ -578,25 +584,31 @@ pub async fn custom_apps_add(
         }
     };
     let api = dispatcher_api(&st)?;
-    // Nobody types the name — it's resolved from Discord, best-effort. The
-    // public lookup covers nearly every app; the few that 404 there get a
-    // second chance through the just-provided client secret. Failing both
-    // never blocks registration: an empty name makes the UI show the
-    // application id, and an Update retries the lookup.
-    let mut name = st
-        .discord
-        .application_name(&application_id)
-        .await
-        .unwrap_or_default();
-    if name.is_empty() {
+    // Bind the key to the application before anything is registered. The
+    // dispatcher forwards every interaction a registered key verifies as
+    // genuine — and every plugin then acts on the guild, member, roles and
+    // permissions the payload names. So a key that isn't the app's own is
+    // not a typo to tolerate: it is a keypair whose private half someone
+    // else holds, and they could sign interactions for any server. Discord
+    // publishes each app's `verify_key`; only that key may be registered.
+    // The public lookup covers nearly every app; the few that 404 there get
+    // a second chance through the just-provided client secret, whose grant
+    // only succeeds for this very app. The display name rides along.
+    let mut lookup = st.discord.application_identity(&application_id).await;
+    if lookup.verify_key().is_none() {
         if let Some(secret) = client_secret {
-            name = st
+            let via_secret = st
                 .discord
-                .application_name_via_secret(&application_id, secret)
-                .await
-                .unwrap_or_default();
+                .application_identity_via_secret(&application_id, secret)
+                .await;
+            lookup = prefer_lookup(lookup, via_secret);
         }
     }
+    check_custom_app_key(&public_key, &lookup)?;
+    let name = match lookup {
+        AppLookup::Found(identity) => identity.name.unwrap_or_default(),
+        _ => String::new(),
+    };
     let cap = st.entitlements.custom_bots_cap(&guild).await;
     let req = api
         .http
@@ -638,13 +650,51 @@ pub async fn custom_apps_add(
     Ok(resp)
 }
 
+/// Combine the public lookup with the client-secret one: whichever produced a
+/// key wins; otherwise "Discord didn't answer" beats "Discord had nothing",
+/// since only the former is worth retrying.
+fn prefer_lookup(public: AppLookup, via_secret: AppLookup) -> AppLookup {
+    match (public, via_secret) {
+        (_, second) if second.verify_key().is_some() => second,
+        (first, _) if first.verify_key().is_some() => first,
+        (AppLookup::Unavailable, _) | (_, AppLookup::Unavailable) => AppLookup::Unavailable,
+        (first, _) => first,
+    }
+}
+
+/// A custom app may only be registered under the key Discord itself signs its
+/// interactions with. Pure, so the rule is pinned without a network.
+fn check_custom_app_key(public_key: &str, lookup: &AppLookup) -> Result<(), AppError> {
+    match lookup.verify_key() {
+        Some(verify_key) if verify_key == public_key => Ok(()),
+        Some(_) => Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "That Public Key doesn't belong to this application. Copy it from the \
+                      app's General Information page in the Discord Developer Portal."
+                .into(),
+            retry_after: None,
+        }),
+        // Discord not answering is not the user's mistake — and not ours either.
+        None if matches!(lookup, AppLookup::Unavailable) => Err(AppError::upstream(
+            "Discord didn't answer while confirming the app's Public Key — try again in a moment.",
+        )),
+        None => Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Discord couldn't confirm this app's Public Key. Check the Application \
+                      ID, or add the app's Client Secret and try again."
+                .into(),
+            retry_after: None,
+        }),
+    }
+}
+
 /// `DELETE /api/guilds/:id/custom-apps/:application_id` — unregister.
 pub async fn custom_apps_remove(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
     Path((guild, application_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    authorize_manager(&st, &jar, &guild).await?;
     if !is_snowflake(&application_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -891,6 +941,11 @@ async fn revive_message_components(
         if !clear_disabled(&mut components) {
             return Ok(Revived::NothingToDo);
         }
+        // The tree is Discord's own echo, resolved media fields and all, and the
+        // edit endpoint refuses those — which would leave the buttons greyed
+        // forever behind a "revived" grant. Same cleaning as the dispatcher's
+        // expired-click update and the web app's re-post of a restored message.
+        sanitize_echoed_media(&mut components);
         let mut body = json!({ "components": components });
         // A Components-V2 message must keep its IS_COMPONENTS_V2 flag for the
         // edit to validate the V2 component types (text displays, containers).
@@ -909,6 +964,78 @@ async fn revive_message_components(
         return Ok(Revived::Patched);
     }
     Ok(Revived::WebhookGone)
+}
+
+/// Fields Discord stamps onto every media item it returns. All output-only:
+/// the execute/edit endpoints refuse a message that sends any of them back.
+/// Mirrors `RESOLVED_MEDIA_FIELDS` in src/core/serialization/attachments.ts and
+/// the dispatcher's copy.
+const RESOLVED_MEDIA_FIELDS: [&str; 10] = [
+    "proxy_url",
+    "height",
+    "width",
+    "content_type",
+    "loading_state",
+    "id",
+    "placeholder",
+    "placeholder_version",
+    "content_scan_metadata",
+    "flags",
+];
+
+/// Make a component tree Discord returned safe to send back in an edit — the
+/// web app's `cleanMedia`: every media item (a Thumbnail's `media`, a File's
+/// `file`, each gallery item's `media`) loses the resolved fields and keeps
+/// exactly one reference, the concrete `url` when there is one (Discord
+/// re-resolves it), else the `attachment_id`.
+fn sanitize_echoed_media(node: &mut Value) {
+    fn clean(media: &mut Value) {
+        let Value::Object(map) = media else {
+            return;
+        };
+        for field in RESOLVED_MEDIA_FIELDS {
+            map.remove(field);
+        }
+        let has = |map: &serde_json::Map<String, Value>, key: &str| {
+            map.get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|v| !v.is_empty())
+        };
+        if has(map, "url") {
+            map.remove("attachment_id");
+        } else {
+            map.remove("url");
+            if !has(map, "attachment_id") {
+                map.remove("attachment_id");
+            }
+        }
+    }
+    match node {
+        Value::Array(items) => items.iter_mut().for_each(sanitize_echoed_media),
+        Value::Object(map) => {
+            match map.get("type").and_then(Value::as_u64) {
+                Some(13) => map.get_mut("file").into_iter().for_each(clean),
+                Some(11) => map.get_mut("media").into_iter().for_each(clean),
+                Some(12) => {
+                    if let Some(Value::Array(items)) = map.get_mut("items") {
+                        for item in items {
+                            if let Some(media) = item.get_mut("media") {
+                                clean(media);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if let Some(children) = map.get_mut("components") {
+                sanitize_echoed_media(children);
+            }
+            if let Some(accessory) = map.get_mut("accessory") {
+                sanitize_echoed_media(accessory);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Clear the `disabled` flag from every *interactive* component (one carrying a
@@ -1404,6 +1531,48 @@ pub(crate) async fn authorize_member_session(
     }
 }
 
+/// The gate for the writes only a server's managers may make — spending or
+/// releasing never-expire slots, registering custom bots, buying or moving a
+/// plan. `REQUIRE_MANAGE_GUILD` is a *read* policy: switched off, it lets any
+/// member load a server, and these writes used to ride the same membership
+/// gate, so any member could spend a server's paid slots or move its plan.
+pub(crate) async fn authorize_manager(
+    st: &AppState,
+    jar: &PrivateCookieJar,
+    guild: &str,
+) -> Result<Session, AppError> {
+    let session = require_session(jar)?;
+    authorize_manager_session(st, session, guild).await
+}
+
+/// [`authorize_manager`] for an already-resolved session.
+pub(crate) async fn authorize_manager_session(
+    st: &AppState,
+    session: Session,
+    guild: &str,
+) -> Result<Session, AppError> {
+    let entry = find_guild(st, &session, GuildLens::Usable, guild).await?;
+    if may_manage(st.config.require_manage_guild, entry.as_ref()) {
+        Ok(session)
+    } else {
+        Err(AppError::Forbidden(
+            "Only someone who manages this server (Manage Server) can change that.".into(),
+        ))
+    }
+}
+
+/// The verdict behind [`authorize_manager_session`], given the user's entry in
+/// the usable list. With the read gate on, that list holds managed servers only
+/// — including entries cached before `can_manage` existed, which decode it as
+/// false and must still pass.
+fn may_manage(require_manage_guild: bool, entry: Option<&UsableGuild>) -> bool {
+    match entry {
+        Some(_) if require_manage_guild => true,
+        Some(g) => g.can_manage,
+        None => false,
+    }
+}
+
 /// Resolve identity (cookie OR bearer) and apply the membership gate that fits the
 /// surface: the web app's `REQUIRE_MANAGE_GUILD` policy for a cookie session, or the
 /// embedded Activity's plain-membership gate for a bearer — there the guild is
@@ -1587,6 +1756,7 @@ async fn fetch_guilds(
         .filter(|g| !require || g.can_manage())
         .map(|g| UsableGuild {
             can_manage_webhooks: g.can_manage_webhooks(),
+            can_manage: g.can_manage(),
             id: g.id,
             name: g.name,
             icon: g.icon,
@@ -1771,6 +1941,119 @@ fn value_response(value: &Value) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discord::AppIdentity;
+
+    // ── custom-app key binding ────────────────────────────────────────────────
+
+    const APP_KEY: &str = "0be33a2dea127e2aa4c7f86b581b4bc1758bd80623f7f2a5f4f22ae33b9e0330";
+
+    fn found(key: Option<&str>) -> AppLookup {
+        AppLookup::Found(AppIdentity {
+            name: Some("Their Bot".into()),
+            verify_key: key.map(str::to_string),
+        })
+    }
+
+    fn status_of(result: Result<(), AppError>) -> u16 {
+        match result {
+            Ok(()) => 200,
+            Err(e) => e.into_response().status().as_u16(),
+        }
+    }
+
+    #[test]
+    fn only_the_key_discord_publishes_for_the_app_may_be_registered() {
+        // The app's own key (Discord may send it in any case) is accepted…
+        let upper = found(Some(&APP_KEY.to_ascii_uppercase()));
+        assert_eq!(status_of(check_custom_app_key(APP_KEY, &upper)), 200);
+        // …while a self-generated keypair's public half — the forgery: its
+        // holder could sign interactions naming any server — is refused, as
+        // is the identity point that verifies every signature.
+        let forged = "1".repeat(64);
+        assert_eq!(
+            status_of(check_custom_app_key(&forged, &found(Some(APP_KEY)))),
+            400
+        );
+        let identity = format!("01{}", "0".repeat(62));
+        assert_eq!(
+            status_of(check_custom_app_key(&identity, &found(Some(APP_KEY)))),
+            400
+        );
+    }
+
+    #[test]
+    fn an_unconfirmable_key_is_refused_and_an_outage_never_pages() {
+        // Nothing to compare against: refuse — never register on faith.
+        assert_eq!(
+            status_of(check_custom_app_key(APP_KEY, &AppLookup::Missing)),
+            400
+        );
+        assert_eq!(status_of(check_custom_app_key(APP_KEY, &found(None))), 400);
+        // Discord not answering is a 502 marked as Discord's, which logs at
+        // warn instead of paging.
+        let resp = check_custom_app_key(APP_KEY, &AppLookup::Unavailable)
+            .unwrap_err()
+            .into_response();
+        assert_eq!(resp.status().as_u16(), 502);
+        assert_eq!(
+            resp.extensions().get::<crate::error::Fault>(),
+            Some(&crate::error::Fault::Upstream)
+        );
+    }
+
+    #[test]
+    fn the_secret_lookup_only_fills_in_what_the_public_one_lacked() {
+        let key = |l: AppLookup| l.verify_key();
+        assert_eq!(
+            key(prefer_lookup(AppLookup::Missing, found(Some(APP_KEY)))),
+            Some(APP_KEY.into())
+        );
+        assert_eq!(
+            key(prefer_lookup(found(Some(APP_KEY)), AppLookup::Missing)),
+            Some(APP_KEY.into())
+        );
+        assert!(matches!(
+            prefer_lookup(AppLookup::Missing, AppLookup::Unavailable),
+            AppLookup::Unavailable
+        ));
+        assert!(matches!(
+            prefer_lookup(AppLookup::Missing, AppLookup::Missing),
+            AppLookup::Missing
+        ));
+    }
+
+    // ── sanitize_echoed_media (component revival) ─────────────────────────────
+
+    #[test]
+    fn a_revived_tree_sends_back_no_resolved_media_fields() {
+        let mut tree = json!([{ "type": 17, "components": [
+            { "type": 9, "components": [{ "type": 10, "content": "hi" }],
+              "accessory": { "type": 11, "media": {
+                  "url": "https://cdn.discordapp.com/a.png", "proxy_url": "p",
+                  "width": 10, "height": 10, "content_type": "image/png",
+                  "attachment_id": "1", "placeholder": "x", "flags": 0, "id": "9" } } },
+            { "type": 12, "items": [{ "media": { "url": "", "attachment_id": "2",
+                  "loading_state": 2 } }] },
+            { "type": 13, "file": { "url": "attachment://a.txt", "id": "3" } },
+            { "type": 1, "components": [{ "type": 2, "custom_id": "b", "disabled": true }] }
+        ]}]);
+        sanitize_echoed_media(&mut tree);
+        let section = &tree[0]["components"][0]["accessory"]["media"];
+        assert_eq!(
+            section,
+            &json!({ "url": "https://cdn.discordapp.com/a.png" })
+        );
+        // No usable url: the upload reference is what's kept.
+        let item = &tree[0]["components"][1]["items"][0]["media"];
+        assert_eq!(item, &json!({ "attachment_id": "2" }));
+        let file = &tree[0]["components"][2]["file"];
+        assert_eq!(file, &json!({ "url": "attachment://a.txt" }));
+        // Non-media components are untouched.
+        assert_eq!(
+            tree[0]["components"][3]["components"][0]["disabled"],
+            json!(true)
+        );
+    }
 
     // ── clear_disabled (component revival) ───────────────────────────────────
 
@@ -1854,6 +2137,27 @@ mod tests {
         assert_eq!(found.name, "Beta");
         assert_eq!(found.icon.as_deref(), Some("h"));
         assert!(found.can_manage_webhooks);
+    }
+
+    #[test]
+    fn only_a_manager_may_make_manager_writes_whatever_the_read_policy() {
+        let member = scan_cached_guilds(&json!([{ "id": "1", "name": "A", "icon": null }]), "1")
+            .flatten()
+            .expect("entry");
+        // Cached before `can_manage` existed: decodes as not-a-manager…
+        assert!(!member.can_manage);
+        // …which, with the read gate on, the list itself already vouches for.
+        assert!(may_manage(true, Some(&member)));
+        // With the read gate off, any member is on the list: only a real
+        // manager passes.
+        assert!(!may_manage(false, Some(&member)));
+        let manager = UsableGuild {
+            can_manage: true,
+            ..member
+        };
+        assert!(may_manage(false, Some(&manager)));
+        assert!(!may_manage(true, None));
+        assert!(!may_manage(false, None));
     }
 
     #[test]

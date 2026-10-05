@@ -580,7 +580,7 @@
                 "components": [
                   {
                     "type": 10,
-                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own."
+                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live, and the host draws a fair winner when it closes."
                   }
                 ],
                 "accessory": {

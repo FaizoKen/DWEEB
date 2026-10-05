@@ -24,10 +24,9 @@
 //!     presence are relayed verbatim between participants (last-write-wins on the
 //!     whole message). Ephemeral by design — nothing is persisted.
 
-use std::collections::hash_map::DefaultHasher;
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -42,9 +41,10 @@ use reqwest::Url;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use tokio::sync::{broadcast, OwnedSemaphorePermit};
+use sha2::{Digest, Sha256};
+use tokio::sync::{broadcast, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
 
-use crate::discord::{DiscordUser, UploadFile, Webhook};
+use crate::discord::{ActivityInstance, CurrentAuthorization, DiscordUser, UploadFile, Webhook};
 use crate::error::{AppError, Fault};
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
@@ -106,24 +106,62 @@ pub(crate) async fn resolve_identity(
 }
 
 /// Build a [`Session`] from a Discord user access token: validate it by reading
-/// `GET /users/@me` (cached briefly by a fingerprint of the token so repeat calls
+/// `GET /oauth2/@me` (cached briefly by a digest of the token so repeat calls
 /// don't re-hit Discord), then carry the token forward so the usual
 /// `current_user_guilds` membership checks run exactly as they do for a cookie
 /// session. A `401` from Discord surfaces as Unauthorized → the Activity re-auths.
+///
+/// The token must have been issued to **this** deployment's application.
+/// Discord answers `/users/@me` and `/users/@me/guilds` for a token minted by
+/// any app, so checking only those turned DWEEB into a confused deputy: whoever
+/// held a victim's `identify guilds` token from some unrelated bot dashboard
+/// could call DWEEB as that victim — post through its webhooks, read its
+/// library's webhook URLs. Every legitimate bearer here (the Activity's code
+/// exchange, the MCP connector's Discord sign-in) comes from DWEEB's own client.
 pub(crate) async fn resolve_bearer(st: &AppState, token: &str) -> Result<Session, AppError> {
-    let key = format!("actid:{:016x}", fingerprint(token));
+    let key = format!("actid:{}", token_digest(token));
     if let Some(v) = st.cache.get(&key).await {
         // Deserialize by reference — this runs on every bearer-authenticated
-        // Activity request, so don't deep-clone the cached JSON first.
+        // Activity request, so don't deep-clone the cached JSON first. Only a
+        // token that passed `bearer_user` is ever cached under its digest.
         if let Ok(user) = DiscordUser::deserialize(v.as_ref()) {
             return Ok(session_from_user(user, token));
         }
     }
-    let user = st.discord.current_user(token).await?;
+    let authorization = st.discord.current_authorization(token).await?;
+    let user = bearer_user(authorization, &st.config.client_id)?;
     if let Ok(val) = serde_json::to_value(&user) {
         st.cache.put(key, Arc::new(val)).await;
     }
     Ok(session_from_user(user, token))
+}
+
+/// The scopes every DWEEB bearer carries — identity, and the server list the
+/// membership gates read.
+const BEARER_SCOPES: [&str; 2] = ["identify", "guilds"];
+
+/// Accept a bearer's authorization only when it was issued to `client_id` with
+/// the scopes the gates rely on, and yield its user. Pure, so the rule is pinned
+/// without a network.
+fn bearer_user(
+    authorization: CurrentAuthorization,
+    client_id: &str,
+) -> Result<DiscordUser, AppError> {
+    let refused = || {
+        AppError::Unauthorized(
+            "That Discord sign-in isn't DWEEB's — sign in to DWEEB again.".into(),
+        )
+    };
+    if authorization.application.id != client_id {
+        return Err(refused());
+    }
+    if !BEARER_SCOPES
+        .iter()
+        .all(|scope| authorization.scopes.iter().any(|s| s == scope))
+    {
+        return Err(refused());
+    }
+    authorization.user.ok_or_else(refused)
 }
 
 fn session_from_user(user: DiscordUser, token: &str) -> Session {
@@ -151,13 +189,12 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-/// A stable, non-reversible cache-bucket id for a token. Not a security boundary
-/// (the Discord call is the real check) — just keeps the raw token out of cache
-/// keys and logs.
-fn fingerprint(token: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    token.hash(&mut h);
-    h.finish()
+/// A stable, non-reversible cache key for a token: its SHA-256, hex. It IS a
+/// security boundary — a cache hit skips the Discord check entirely — so it must
+/// be collision-resistant; a 64-bit `DefaultHasher` fingerprint (zero-keyed,
+/// hence predictable) was not. Also keeps the raw token out of cache keys/logs.
+fn token_digest(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 fn not_enabled() -> AppError {
@@ -541,27 +578,34 @@ pub async fn activity_post(
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
 
-    let (webhook_id, token) = match custom_app.as_deref() {
+    let (webhook_id, token, hook_guard) = match custom_app.as_deref() {
         // Post as one of the server's own bots: through its connected Activity
         // webhook, brought to the destination channel first. The message then
         // carries the custom app's component routing — which the dispatcher
-        // serves too, so plugins keep working.
+        // serves too, so plugins keep working. The lock holds the webhook in
+        // place from the move until the post lands.
         Some(app) => {
             let hook = require_custom_hook(&st, &guild, app).await?;
+            let guard = lock_custom_hook(&guild, app).await;
             ensure_custom_hook_in_channel(&st, &guild, app, &hook, &channel_id).await?;
-            (hook.webhook_id, hook.token)
+            (hook.webhook_id, hook.token, Some(guard))
         }
         // Standard identity: reuse a DWEEB-owned incoming webhook already in
         // the channel; otherwise mint one. Either way the post carries
         // DWEEB's component routing.
-        None => require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?,
+        None => {
+            let (id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
+            (id, token, None)
+        }
     };
 
     let had_uploads = !files.is_empty();
     let created = st
         .discord
         .execute_webhook_with_files(&webhook_id, &token, &body.message, files)
-        .await?;
+        .await;
+    drop(hook_guard);
+    let created = created?;
     let message_id = created
         .get("id")
         .and_then(Value::as_str)
@@ -1072,13 +1116,57 @@ async fn clear_activity_hook(st: &AppState, guild: &str, application_id: &str) {
         .await;
 }
 
+/// The lock serializing every use of one custom bot's roaming Activity
+/// webhook, keyed by `(guild, application_id)`.
+///
+/// One webhook serves the whole server and is moved to each destination just
+/// before it's used — and Discord resolves a webhook post (and a webhook-message
+/// read/edit) in whatever channel the webhook sits in *at that moment*. Two
+/// uses overlapping (two people posting as the bot to different channels, a
+/// live post beside a scheduled fire, a restore probing candidates) could move
+/// it away between another use's move and its post, landing that message in the
+/// wrong channel — staff-only content in a public one. Holding this across
+/// move + use makes each pair atomic with respect to the others.
+fn custom_hook_locks() -> &'static Mutex<HookLocks> {
+    static LOCKS: OnceLock<Mutex<HookLocks>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `(guild, application_id)` → the lock for that bot's roaming webhook.
+type HookLocks = HashMap<(String, String), Arc<tokio::sync::Mutex<()>>>;
+
+/// Entries kept before idle locks are pruned (only registered custom bots ever
+/// get one, so this is rarely reached).
+const MAX_IDLE_HOOK_LOCKS: usize = 1_024;
+
+/// Acquire the [`custom_hook_locks`] entry for one custom bot. Every caller that
+/// moves the bot's webhook and then posts/edits/reads through it must hold the
+/// guard across both steps — including the scheduler around
+/// [`resolve_custom_hook_for_channel`] and its execute.
+pub(crate) async fn lock_custom_hook(guild: &str, application_id: &str) -> OwnedMutexGuard<()> {
+    let lock = {
+        let mut map = custom_hook_locks()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if map.len() >= MAX_IDLE_HOOK_LOCKS {
+            map.retain(|_, l| Arc::strong_count(l) > 1);
+        }
+        Arc::clone(
+            map.entry((guild.to_string(), application_id.to_string()))
+                .or_default(),
+        )
+    };
+    lock.lock_owned().await
+}
+
 /// Resolve a custom bot's Activity webhook and bring it to `channel_id`,
 /// returning the `(webhook_id, token)` a post can execute through right away.
 /// This is exactly what a live `activity_post`/`activity_edit` does before it
 /// executes ([`require_custom_hook`] + [`ensure_custom_hook_in_channel`]) — the
 /// scheduler calls it at fire time so a scheduled custom-bot post lands under
 /// the bot in the intended channel even though the single roaming webhook may
-/// have drifted elsewhere in the meantime.
+/// have drifted elsewhere in the meantime. The caller must hold
+/// [`lock_custom_hook`] from before this call until its post completes.
 pub(crate) async fn resolve_custom_hook_for_channel(
     st: &AppState,
     guild: &str,
@@ -1338,35 +1426,53 @@ pub async fn activity_connect_bot(
     Ok(Json(json!({ "url": url })).into_response())
 }
 
+/// Every DWEEB-owned incoming webhook in `channel_id` whose token we can post
+/// through, `prefer` (when it names one of them) first. A message can only be
+/// read back or edited through the webhook that authored it, so a caller that
+/// doesn't know which one did tries them in turn.
+pub(crate) async fn dweeb_webhooks_in_channel(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+    prefer: Option<&str>,
+) -> Result<Vec<(String, String)>, AppError> {
+    let hooks = st.discord.guild_webhooks(guild).await?;
+    let client_id = st.config.client_id.as_str();
+    let mut ours: Vec<(String, String)> = hooks
+        .iter()
+        .filter(|&w| webhook_is_ours(w, channel_id, client_id))
+        .map(|w| (w.id.clone(), w.token.clone().unwrap_or_default()))
+        .collect();
+    if let Some(at) = prefer.and_then(|id| ours.iter().position(|(hid, _)| hid == id)) {
+        ours.swap(0, at);
+    }
+    Ok(ours)
+}
+
 /// Find a DWEEB-owned incoming webhook in `channel_id` whose token we can post
 /// through. `prefer` names a specific webhook id to use when it's still valid
 /// (an edit naming the webhook that authored the message) — otherwise any
 /// DWEEB-owned hook in the channel. `None` when there's no usable DWEEB webhook.
-async fn dweeb_webhook_in_channel(
+pub(crate) async fn dweeb_webhook_in_channel(
     st: &AppState,
     guild: &str,
     channel_id: &str,
     prefer: Option<&str>,
 ) -> Result<Option<(String, String)>, AppError> {
-    let hooks = st.discord.guild_webhooks(guild).await?;
-    let client_id = st.config.client_id.as_str();
-    let chosen = prefer
-        .and_then(|id| {
-            hooks
-                .iter()
-                .find(|&w| w.id == id && webhook_is_ours(w, channel_id, client_id))
-        })
-        .or_else(|| {
-            hooks
-                .iter()
-                .find(|&w| webhook_is_ours(w, channel_id, client_id))
-        });
-    Ok(chosen.map(|w| (w.id.clone(), w.token.clone().unwrap_or_default())))
+    Ok(dweeb_webhooks_in_channel(st, guild, channel_id, prefer)
+        .await?
+        .into_iter()
+        .next())
 }
 
 /// Resolve the DWEEB webhook a standard-identity post rides: reuse a DWEEB-owned
 /// incoming webhook already in the channel (so we don't spawn duplicates, and
 /// never hijack a third party's hook), or mint one. Returns `(webhook_id, token)`.
+///
+/// Minting is refused for a channel outside `guild`: the guild is what the
+/// caller was authorized against, and `guild_webhooks(guild)` can't see another
+/// server's hooks — so without this a foreign channel id always "needed" a new
+/// webhook, and the bot would create one in someone else's server.
 pub(crate) async fn require_dweeb_webhook(
     st: &AppState,
     session_uid: &str,
@@ -1376,6 +1482,16 @@ pub(crate) async fn require_dweeb_webhook(
     match dweeb_webhook_in_channel(st, guild, channel_id, None).await? {
         Some(found) => Ok(found),
         None => {
+            if crate::routes::channel_type_in_guild(st, guild, channel_id)
+                .await?
+                .is_none()
+            {
+                return Err(AppError::Status {
+                    status: StatusCode::NOT_FOUND,
+                    message: "That channel isn't in this server.".into(),
+                    retry_after: None,
+                });
+            }
             let reason = format!("Created via DWEEB Activity by {session_uid}");
             let w = st
                 .discord
@@ -1479,11 +1595,11 @@ pub async fn activity_edit(
     // parent (e.g. the forum), which is what the guild's channel list knows.
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
-    let (webhook_id, token) = match custom_app.as_deref() {
+    let (webhook_id, token, hook_guard) = match custom_app.as_deref() {
         // The message was posted as one of the server's own bots: edit through
         // its connected Activity webhook, brought back to the message's channel
         // first (Discord resolves webhook-message edits within the webhook's
-        // current channel).
+        // current channel) — under the lock, so it stays there for the edit.
         Some(app) => {
             let hook = require_custom_hook(&st, &guild, app).await?;
             // Only the webhook that authored a message can edit it. A stored
@@ -1495,16 +1611,20 @@ pub async fn activity_edit(
                     "This message was posted through a webhook that's since been replaced — it can't be updated anymore. Post it again.",
                 ));
             }
+            let guard = lock_custom_hook(&guild, app).await;
             ensure_custom_hook_in_channel(&st, &guild, app, &hook, &channel_id).await?;
-            (hook.webhook_id, hook.token)
+            (hook.webhook_id, hook.token, Some(guard))
         }
-        None => dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
-            .await?
-            .ok_or_else(|| {
-                bad_request(
-                    "Couldn't find the DWEEB webhook that posted this message — post it again.",
-                )
-            })?,
+        None => {
+            let (id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
+                .await?
+                .ok_or_else(|| {
+                    bad_request(
+                        "Couldn't find the DWEEB webhook that posted this message — post it again.",
+                    )
+                })?;
+            (id, token, None)
+        }
     };
 
     let had_uploads = !files.is_empty();
@@ -1518,7 +1638,9 @@ pub async fn activity_edit(
             files,
             thread_id.as_deref(),
         )
-        .await?;
+        .await;
+    drop(hook_guard);
+    let updated = updated?;
 
     // Refresh the message's library entry (or create one, for a message posted
     // before the library existed) so the shared shelf tracks the live content.
@@ -1656,7 +1778,7 @@ pub async fn activity_schedule(
 
     let created = crate::schedule::create_for_owner(
         &st,
-        session.uid,
+        session,
         crate::schedule::CreateBody {
             webhook_url: format!("https://discord.com/api/webhooks/{webhook_id}/{token}"),
             thread_id: None,
@@ -1668,10 +1790,15 @@ pub async fn activity_schedule(
             max_runs: None,
             title: None,
             dest_label: body.dest_label,
-            guild_id: Some(guild),
+            // The target below carries the authorized server; the body's own
+            // `guild_id` is only ever a claim to check, so leave it unset.
+            guild_id: None,
             make_permanent: body.make_permanent,
+        },
+        crate::schedule::ScheduleTarget::Activity {
+            guild_id: guild,
+            channel_id,
             application_id: custom_app,
-            channel_id: Some(channel_id),
         },
     )
     .await?;
@@ -1755,9 +1882,10 @@ pub async fn activity_restore(
     // wrong candidate is a clean miss, never a leak.
     let mut found: Option<(Value, String, Option<String>)> = None;
     let mut had_candidate = false;
-    if let Some((webhook_id, token)) =
-        dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await?
-    {
+    // Every DWEEB-owned hook in the channel, not just the first: a channel can
+    // hold more than one (a web `webhook.incoming` hook beside the Activity's
+    // own), and only the one that authored the message can read it back.
+    for (webhook_id, token) in dweeb_webhooks_in_channel(&st, &guild, &channel_id, None).await? {
         had_candidate = true;
         if let Some(m) = st
             .discord
@@ -1765,6 +1893,7 @@ pub async fn activity_restore(
             .await?
         {
             found = Some((m, webhook_id, None));
+            break;
         }
     }
     if found.is_none() {
@@ -1774,6 +1903,9 @@ pub async fn activity_restore(
                 continue;
             };
             had_candidate = true;
+            // Held from the move through the read, so a concurrent post as this
+            // bot can't move the webhook away (or be moved by us) mid-use.
+            let _guard = lock_custom_hook(&guild, &app).await;
             // A hook that turns out dead (or unmovable) just drops out of the
             // candidate set — restore reports "not found" rather than erroring.
             if ensure_custom_hook_in_channel(&st, &guild, &app, &hook, &channel_id)
@@ -1855,6 +1987,33 @@ pub async fn activity_restore(
 const IMAGE_FETCH_TIMEOUT_SECS: u64 = 10;
 const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024; // comfortably over Discord's media sizes
 const MAX_IMAGE_REDIRECTS: usize = 4;
+/// How many image fetches may be buffered at once. Each holds up to
+/// `MAX_IMAGE_BYTES`, and the route is unauthenticated, so this is what bounds
+/// the memory it can pin. A message's gallery loads its images together, so a
+/// fetch over the bound waits briefly for a slot instead of failing at once.
+const IMAGE_FETCH_CONCURRENCY: usize = 16;
+const IMAGE_SLOT_WAIT: Duration = Duration::from_secs(8);
+
+/// The only media types the image proxy relays. Raster images and video only:
+/// the response is served from the API origin, where the session cookie lives,
+/// so anything a browser could render as an active document — SVG above all,
+/// which carries script — must never be echoed back from an arbitrary URL.
+/// Discord doesn't render SVG media either, so the preview loses nothing.
+const RELAYABLE_MEDIA_TYPES: [&str; 13] = [
+    "image/png",
+    "image/apng",
+    "image/jpeg",
+    "image/jpg",
+    "image/pjpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "image/bmp",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/ogg",
+];
 
 #[derive(Deserialize)]
 pub struct ImageQuery {
@@ -1862,22 +2021,49 @@ pub struct ImageQuery {
     url: String,
 }
 
+/// A resolver that hands reqwest only public addresses, so EVERY dial the
+/// proxy's outbound client makes — the first one, each redirect hop, each
+/// reconnect — goes to a vetted IP. Checking a hostname first and letting the
+/// client resolve it again afterwards left a gap a rebinding DNS answer (or a
+/// redirect onto an internal name) walked straight through: the request was
+/// sent before its peer address was ever checked.
+#[derive(Clone, Copy, Default)]
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| ip_is_public(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("{host} has no public address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
 /// Lazily-built HTTP client for the image proxy. It needs its own redirect policy
-/// (validate every hop's host so a 3xx can't bounce us onto a private address)
-/// and a short timeout, so it's separate from the Discord client. Built once.
+/// (validate every hop's host so a 3xx can't bounce us onto a private address),
+/// a resolver that only ever yields public addresses, and a short timeout, so
+/// it's separate from the Discord client. Built once.
 fn image_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(IMAGE_FETCH_TIMEOUT_SECS))
             .user_agent(concat!("dweeb-proxy-img/", env!("CARGO_PKG_VERSION")))
+            .dns_resolver(Arc::new(PublicOnlyResolver))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if attempt.previous().len() >= MAX_IMAGE_REDIRECTS {
                     return attempt.error("too many redirects");
                 }
-                // Block redirects onto IP-literals / obvious internal names. A
-                // hostname that *resolves* to a private IP is caught after the
-                // fact via the response's remote address (see below).
+                // Block redirects onto IP-literals / obvious internal names (an
+                // IP-literal never reaches the resolver). A hostname is vetted
+                // by `PublicOnlyResolver` when the hop is dialled.
                 if redirect_host_blocked(attempt.url()) {
                     attempt.error("redirect to a non-public host")
                 } else {
@@ -1887,6 +2073,18 @@ fn image_client() -> &'static reqwest::Client {
             .build()
             .expect("failed to build image proxy HTTP client")
     })
+}
+
+/// The slots bounding concurrent image fetches (see `IMAGE_FETCH_CONCURRENCY`).
+fn image_slots() -> &'static Arc<Semaphore> {
+    static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    SLOTS.get_or_init(|| Arc::new(Semaphore::new(IMAGE_FETCH_CONCURRENCY)))
+}
+
+/// Whether the image proxy may relay a response of this (already lowercased,
+/// parameter-free) media type.
+fn relayable_media_type(kind: &str) -> bool {
+    RELAYABLE_MEDIA_TYPES.contains(&kind)
 }
 
 /// `GET /api/activity/image?url=<encoded http(s) URL>` — fetch an external image
@@ -1901,8 +2099,10 @@ fn image_client() -> &'static reqwest::Client {
 /// render.
 ///
 /// No auth — an `<img>` can't send a bearer — so it's bounded hard instead:
-/// http(s) only, public hosts only (SSRF defence), a short timeout, a size cap,
-/// and only `image/*`/`video/*` content is relayed.
+/// http(s) only, public hosts only (SSRF defence, on every dial), a short
+/// timeout, a size cap, a bound on concurrent fetches, and only raster image
+/// and video content is relayed — never SVG or anything else a browser could
+/// run as a document on this origin.
 pub async fn activity_image(
     State(st): State<AppState>,
     Query(q): Query<ImageQuery>,
@@ -1919,9 +2119,20 @@ pub async fn activity_image(
         return Err(bad_request("url must be http(s)"));
     }
     // SSRF: resolve the host and refuse if any address is non-public, before we
-    // connect. (Redirect hops are vetted by the client's redirect policy, and the
-    // final connection is re-checked below to catch DNS rebinding.)
+    // connect. (Every dial — this one and each redirect hop — is additionally
+    // pinned to public addresses by the client's resolver.)
     ensure_public_host(&parsed, UrlOwner::Caller).await?;
+    // Load shedding answers 429, never a 5xx: a burst of previews is nobody's
+    // fault, and 5xx is the paging channel. The `<img>` shows its placeholder.
+    let _slot = tokio::time::timeout(IMAGE_SLOT_WAIT, Arc::clone(image_slots()).acquire_owned())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .ok_or_else(|| AppError::Status {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "The image proxy is busy — try again in a moment.".into(),
+            retry_after: Some(2.0),
+        })?;
 
     let mut resp = image_client()
         .get(parsed)
@@ -1949,17 +2160,17 @@ pub async fn activity_image(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    // Only relay actual media — never HTML/JSON/etc. Defence in depth: keeps the
-    // proxy from echoing an internal service's response if one ever slipped past
-    // the host checks.
+    // Only relay raster images and video — never HTML/JSON/SVG/etc. The bytes
+    // are served from the API origin, so an SVG (or any document type) relayed
+    // from an attacker's URL would run as script with the visitor's session.
     let kind = content_type
         .split(';')
         .next()
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    if !(kind.starts_with("image/") || kind.starts_with("video/")) {
-        return Err(bad_request("that URL isn't an image or video"));
+    if !relayable_media_type(&kind) {
+        return Err(bad_request("that URL isn't a supported image or video"));
     }
 
     // Reject up front when the server declares an oversize length…
@@ -1983,17 +2194,34 @@ pub async fn activity_image(
         buf.extend_from_slice(&chunk);
     }
 
-    let mut out = Response::new(Body::from(buf));
-    if let Ok(v) = HeaderValue::from_str(&content_type) {
+    Ok(relayed_media(kind, buf))
+}
+
+/// The image proxy's answer: the vetted, parameter-free media type (never the
+/// upstream's raw header), plus headers that keep the bytes inert if anyone
+/// opens the URL directly rather than through an `<img>`/`<video>` — `nosniff`
+/// so a browser can't reinterpret them as a document, and a CSP that sandboxes
+/// and blocks everything should one be rendered anyway.
+fn relayed_media(kind: String, bytes: Vec<u8>) -> Response {
+    let mut out = Response::new(Body::from(bytes));
+    if let Ok(v) = HeaderValue::from_str(&kind) {
         out.headers_mut().insert(header::CONTENT_TYPE, v);
     }
+    out.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    out.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
     // Cache hard at the browser + Discord's edge: a given URL renders the same
     // bytes for our purposes, so caching keeps repeat previews off our bandwidth.
     out.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=86400"),
     );
-    Ok(out)
+    out
 }
 
 /// Who chose the URL being vetted, which decides what a hostname that won't
@@ -2103,7 +2331,9 @@ fn redirect_host_blocked(url: &Url) -> bool {
 
 /// Whether an address is a public, routable unicast address — the allowlist for
 /// the image proxy. Everything private/reserved (loopback, RFC1918, link-local
-/// incl. cloud metadata `169.254.169.254`, CGNAT, ULA, …) is refused.
+/// incl. cloud metadata `169.254.169.254`, CGNAT, ULA, multicast, the IETF and
+/// benchmarking blocks, the IPv6 transition prefixes that embed an IPv4 address,
+/// …) is refused.
 fn ip_is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -2114,8 +2344,12 @@ fn ip_is_public(ip: IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.is_documentation()
                 || v4.is_unspecified()
+                || v4.is_multicast() // 224.0.0.0/4
                 || o[0] == 0
                 || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 CGNAT
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24 IETF
+                || (o[0] == 192 && o[1] == 88 && o[2] == 99) // 192.88.99.0/24 6to4 relay
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18.0.0/15 benchmarking
                 || o[0] >= 240) // 240.0.0.0/4 reserved
         }
         IpAddr::V6(v6) => {
@@ -2127,7 +2361,14 @@ fn ip_is_public(ip: IpAddr) -> bool {
                 || v6.is_unspecified()
                 || v6.is_multicast()
                 || (seg[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-                || (seg[0] & 0xffc0) == 0xfe80) // fe80::/10 link-local
+                || (seg[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+                || (seg[0] & 0xffc0) == 0xfec0 // fec0::/10 site-local (deprecated)
+                || seg[..6] == [0, 0, 0, 0, 0, 0] // ::/96 IPv4-compatible (deprecated)
+                || seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] // 64:ff9b::/96 NAT64
+                || seg[..3] == [0x64, 0xff9b, 1] // 64:ff9b:1::/48 local NAT64
+                || seg[0] == 0x2002 // 2002::/16 6to4
+                || (seg[0] == 0x2001 && seg[1] == 0x0db8) // 2001:db8::/32 documentation
+                || seg[..4] == [0x100, 0, 0, 0]) // 100::/64 discard-only
         }
     }
 }
@@ -2266,8 +2507,24 @@ pub async fn activity_plugin_frame(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // This HTML is served from the API origin. The Activity always frames it
+    // sandboxed WITHOUT `allow-same-origin` (`PLUGIN_IFRAME_SANDBOX_PROXIED`),
+    // so it runs in an opaque origin and the shim's relay calls carry no
+    // cookie. Opened directly as a top-level page, though, it would run on the
+    // API origin itself. The same sandbox as a response header — exactly the
+    // iframe's flags, so the framed page behaves identically — holds it to an
+    // opaque origin however it is reached.
+    out.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(PLUGIN_FRAME_CSP),
+    );
     Ok(out)
 }
+
+/// The sandbox the proxied plugin page always runs under — the same flags as the
+/// web app's `PLUGIN_IFRAME_SANDBOX_PROXIED` (src/core/plugins/protocol.ts).
+const PLUGIN_FRAME_CSP: &str =
+    "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 /// `(GET|POST|PUT|PATCH|DELETE) /api/activity/plugin-fetch?url=<encoded>` — relay
 /// a single plugin API call on the sandboxed iframe's behalf.
@@ -2473,6 +2730,10 @@ struct TicketClaim {
     guild: String,
     /// The room this ticket may join; a ticket for one room can't open another.
     instance: String,
+    /// The persisted-draft key this socket may read and write — only ever a
+    /// context Discord confirmed the user is in (see [`verified_draft_key`]);
+    /// `None` keeps the room ephemeral.
+    draft_key: Option<String>,
     expires_at: Instant,
 }
 
@@ -2492,7 +2753,13 @@ impl ActivityTickets {
     /// Mint a ticket for `me` to join `instance` (with `guild` already
     /// authorized by the caller). `None` only on rng/lock failure or when the
     /// outstanding-ticket cap is hit.
-    fn mint(&self, me: Participant, guild: String, instance: String) -> Option<String> {
+    fn mint(
+        &self,
+        me: Participant,
+        guild: String,
+        instance: String,
+        draft_key: Option<String>,
+    ) -> Option<String> {
         let id = crate::schedule::random_base62(TICKET_LEN)?;
         let now = Instant::now();
         let Ok(mut map) = self.inner.lock() else {
@@ -2510,6 +2777,7 @@ impl ActivityTickets {
                 me,
                 guild,
                 instance,
+                draft_key,
                 expires_at: now + Duration::from_secs(TICKET_TTL_SECS),
             },
         );
@@ -2556,12 +2824,14 @@ pub async fn activity_room_ticket(
         return Err(bad_request("invalid instance id"));
     }
     let guild = body.guild_id.trim().to_string();
+    check_room_guild(&instance, &guild)?;
     if !guild.is_empty() {
         if !is_snowflake(&guild) {
             return Err(bad_request("invalid guild id"));
         }
         authorize_activity_member(&st, session.clone(), &guild).await?;
     }
+    let draft_key = verified_draft_key(&st, &session.uid, &instance, &guild).await;
     let me = Participant {
         id: session.uid,
         name: session.name,
@@ -2569,9 +2839,117 @@ pub async fn activity_room_ticket(
     };
     let ticket = st
         .activity_tickets
-        .mint(me, guild, instance)
+        .mint(me, guild, instance, draft_key)
         .ok_or_else(|| AppError::Internal("could not mint a room ticket".into()))?;
     Ok(Json(json!({ "ticket": ticket, "expires_in": TICKET_TTL_SECS })).into_response())
+}
+
+/// A room whose instance id names a server (`…-gc-<guild>-<channel>`) may only
+/// be joined as that server: the guild the caller is authorized against is
+/// what caps the room's co-editors (and gates membership), so leaving it empty
+/// or naming another server would bypass a Free server's co-editor cap.
+fn check_room_guild(instance: &str, guild: &str) -> Result<(), AppError> {
+    match draft_context(instance).and_then(context_guild) {
+        Some(context_guild) if context_guild != guild => Err(bad_request(
+            "This Activity belongs to another server — relaunch it there.",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The persisted-draft key a socket may use, or `None` to keep its room
+/// ephemeral.
+///
+/// The key is the stable context at the end of the instance id
+/// (`gc-<guild>-<channel>` / `pc-<channel>`) — but the instance id is chosen by
+/// the client, so the context alone proves nothing: a guild member could name
+/// any channel of their server (including ones they can't see) and read or
+/// overwrite its draft, and a DM context named nobody at all. So the context is
+/// only trusted once Discord confirms it: the instance exists for this app, its
+/// location IS that context, and the caller is one of its users.
+///
+/// Failure never falls open into someone else's draft. A lookup Discord answers
+/// (no such instance, the caller isn't in it, the location differs) refuses
+/// persistence; a lookup that fails (Discord down) also refuses it, for that
+/// session only and uncached, so collaboration itself is never blocked — the
+/// room still works, just without resume-on-reopen.
+async fn verified_draft_key(
+    st: &AppState,
+    uid: &str,
+    instance: &str,
+    guild: &str,
+) -> Option<String> {
+    st.activity_drafts.as_ref()?;
+    draft_context(instance)?;
+    // Instance ids are validated URL-safe slugs, so the key needs no escaping.
+    let cache_key = format!("actinst:{instance}:{uid}");
+    if let Some(cached) = st.cache.get(&cache_key).await {
+        return cached
+            .as_str()
+            .filter(|key| !key.is_empty())
+            .map(str::to_string);
+    }
+    let verdict = match st
+        .discord
+        .activity_instance(&st.config.client_id, instance)
+        .await
+    {
+        Ok(Some(found)) => draft_key_for(instance, uid, guild, &found),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "couldn't verify an Activity instance; this room won't persist its draft"
+            );
+            return None;
+        }
+    };
+    if verdict.is_none() {
+        tracing::info!("Activity instance not confirmed for this user; draft persistence off");
+    }
+    // Cache both answers briefly: every reconnect mints a ticket, and a refused
+    // lookup shouldn't cost a Discord call per retry either.
+    st.cache
+        .put(
+            cache_key,
+            Arc::new(Value::String(verdict.clone().unwrap_or_default())),
+        )
+        .await;
+    verdict
+}
+
+/// Pure half of [`verified_draft_key`]: the context is usable only when the
+/// instance Discord returned is this one, sits exactly at that context (and, for
+/// a guild channel, in the guild the caller was authorized against), and lists
+/// the caller among its users.
+fn draft_key_for(
+    instance: &str,
+    uid: &str,
+    guild: &str,
+    found: &ActivityInstance,
+) -> Option<String> {
+    let ctx = draft_context(instance)?;
+    if found
+        .instance_id
+        .as_deref()
+        .is_some_and(|id| id != instance)
+    {
+        return None;
+    }
+    if !found.users.iter().any(|u| u == uid) {
+        return None;
+    }
+    let location = found.location.as_ref()?;
+    if location.id.as_deref() != Some(ctx) {
+        return None;
+    }
+    let located = match context_guild(ctx) {
+        Some(context_guild) => {
+            context_guild == guild && location.guild_id.as_deref() == Some(context_guild)
+        }
+        None => location.guild_id.as_deref().is_none_or(str::is_empty),
+    };
+    located.then(|| ctx.to_string())
 }
 
 /// In-memory state for one Activity instance: the broadcast channel every
@@ -2585,7 +2963,18 @@ struct RoomState {
     /// joiner's plan tier. A reconnecting member never counts twice, so this caps
     /// *people*, not connections.
     cap: u32,
+    /// Which user each connection id (`cid`) belongs to, with how many live
+    /// sockets claimed it. Clients ignore their own echoes and attribute a
+    /// whole-draft replace by `cid`, so a peer reusing someone else's `cid`
+    /// could hide frames from them or pin an edit on them.
+    cids: HashMap<String, (String, u32)>,
 }
+
+/// How many room sockets one user may hold at once, across every room. Two or
+/// three cover a desktop + phone plus a reconnect overlapping the old socket's
+/// reap; the cap is what bounds the broadcast backlog one account can pin (each
+/// room keeps up to `BROADCAST_CAP` frames of up to `MAX_RELAY_BYTES`).
+const MAX_SOCKETS_PER_USER: u32 = 8;
 
 /// Outcome of a [`ActivityRooms::join`] attempt.
 enum Joined {
@@ -2598,12 +2987,21 @@ enum Joined {
     RoomsFull,
     /// This room is full for the host's plan tier (carries that cap for the FE).
     CoeditorsFull(u32),
+    /// This user already holds `MAX_SOCKETS_PER_USER` room sockets.
+    TooManySockets,
+}
+
+/// The rooms plus the per-user socket count that spans them.
+#[derive(Default)]
+struct RoomsInner {
+    rooms: HashMap<String, RoomState>,
+    sockets: HashMap<String, u32>,
 }
 
 /// All live collaboration rooms, keyed by Activity instance id. Ephemeral: a
 /// room exists only while someone is connected and is forgotten when empty.
 pub struct ActivityRooms {
-    inner: Mutex<HashMap<String, RoomState>>,
+    inner: Mutex<RoomsInner>,
 }
 
 impl Default for ActivityRooms {
@@ -2615,7 +3013,7 @@ impl Default for ActivityRooms {
 impl ActivityRooms {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(RoomsInner::default()),
         }
     }
 
@@ -2630,18 +3028,23 @@ impl ActivityRooms {
     /// member — nobody else is here to answer its `hello` with the live draft, so
     /// the caller replays the persisted draft to it instead (resume-on-reopen).
     fn join(&self, instance: &str, me: &Participant, host_cap: u32) -> Joined {
-        let Ok(mut map) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock() else {
             return Joined::RoomsFull;
         };
-        if !map.contains_key(instance) && map.len() >= MAX_ROOMS {
+        let RoomsInner { rooms, sockets } = &mut *inner;
+        if sockets.get(&me.id).copied().unwrap_or(0) >= MAX_SOCKETS_PER_USER {
+            return Joined::TooManySockets;
+        }
+        if !rooms.contains_key(instance) && rooms.len() >= MAX_ROOMS {
             return Joined::RoomsFull;
         }
-        let room = map
+        let room = rooms
             .entry(instance.to_string())
             .or_insert_with(|| RoomState {
                 tx: broadcast::channel(BROADCAST_CAP).0,
                 members: HashMap::new(),
                 cap: host_cap.max(1),
+                cids: HashMap::new(),
             });
         // A returning member (another tab / a reconnect) never counts against the
         // cap; only a genuinely new person does.
@@ -2656,9 +3059,47 @@ impl ActivityRooms {
         entry.1 += 1;
         let roster = roster_json(&room.members);
         let tx = room.tx.clone();
-        drop(map);
+        *sockets.entry(me.id.clone()).or_insert(0) += 1;
+        drop(inner);
         let _ = tx.send(roster);
         Joined::Ok { tx, rx, is_first }
+    }
+
+    /// Bind connection id `cid` to `uid` in `instance`'s room. `false` when
+    /// another user's socket already claimed it — the frame must not be
+    /// relayed. A user's own sockets may share a `cid` (a reconnect reuses it).
+    fn claim_cid(&self, instance: &str, cid: &str, uid: &str) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        let Some(room) = inner.rooms.get_mut(instance) else {
+            return false;
+        };
+        let entry = room
+            .cids
+            .entry(cid.to_string())
+            .or_insert_with(|| (uid.to_string(), 0));
+        if entry.0 != uid {
+            return false;
+        }
+        entry.1 += 1;
+        true
+    }
+
+    /// Release one socket's claim on `cid` (the inverse of [`Self::claim_cid`]).
+    fn release_cid(&self, instance: &str, cid: &str) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        let Some(room) = inner.rooms.get_mut(instance) else {
+            return;
+        };
+        if let Some(entry) = room.cids.get_mut(cid) {
+            entry.1 = entry.1.saturating_sub(1);
+            if entry.1 == 0 {
+                room.cids.remove(cid);
+            }
+        }
     }
 
     /// Push a server-authored frame into `instance`'s room, reaching every
@@ -2667,10 +3108,10 @@ impl ActivityRooms {
     /// carries no `cid`, so clients treat it as authoritative. Used by the
     /// custom-bot connect callback to announce a freshly connected bot.
     pub(crate) fn notify(&self, instance: &str, msg: String) {
-        let Ok(map) = self.inner.lock() else {
+        let Ok(inner) = self.inner.lock() else {
             return;
         };
-        if let Some(room) = map.get(instance) {
+        if let Some(room) = inner.rooms.get(instance) {
             let _ = room.tx.send(msg);
         }
     }
@@ -2679,10 +3120,17 @@ impl ActivityRooms {
     /// when their last connection closes, the whole room when it empties, and
     /// broadcast the updated roster to anyone still connected.
     fn leave(&self, instance: &str, uid: &str) {
-        let Ok(mut map) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock() else {
             return;
         };
-        let Some(room) = map.get_mut(instance) else {
+        let RoomsInner { rooms, sockets } = &mut *inner;
+        if let Some(count) = sockets.get_mut(uid) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                sockets.remove(uid);
+            }
+        }
+        let Some(room) = rooms.get_mut(instance) else {
             return;
         };
         if let Some(entry) = room.members.get_mut(uid) {
@@ -2692,12 +3140,68 @@ impl ActivityRooms {
             }
         }
         if room.members.is_empty() {
-            map.remove(instance);
+            rooms.remove(instance);
         } else {
             let roster = roster_json(&room.members);
             let _ = room.tx.send(roster);
         }
     }
+}
+
+/// Frame types only the server may author. Relayed from a peer, `room_full`
+/// would stop every client collaborating, `roster` forge the presence list,
+/// `resume` replay an arbitrary draft as if it came from disk, `bot_connected`
+/// fake a finished connect, and `resync` start a hello/full-draft storm.
+const SERVER_ONLY_FRAMES: [&str; 5] = ["roster", "room_full", "resync", "resume", "bot_connected"];
+
+/// The routing fields of a peer frame, decoded the way the browser will read
+/// them — escapes included, so `"room_full"` can't slip past the filter
+/// as a different string than the one `JSON.parse` sees. A repeated key is a
+/// parse error here (while `JSON.parse` would keep the last one), so such a
+/// frame is dropped rather than misread.
+#[derive(Deserialize)]
+struct FrameHead<'a> {
+    #[serde(rename = "type", borrow, default)]
+    kind: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    cid: Option<Cow<'a, str>>,
+}
+
+/// What to do with one inbound peer frame.
+#[derive(Debug, PartialEq)]
+enum PeerFrame {
+    /// Not JSON, or a server-only type: never relayed.
+    Drop,
+    /// Relay it, after binding `cid` to the sender; a `focus` frame gets the
+    /// sender's authenticated identity stamped over whatever it claimed.
+    Relay { cid: Option<String>, focus: bool },
+}
+
+fn classify_peer_frame(frame: &str) -> PeerFrame {
+    let Ok(head) = serde_json::from_str::<FrameHead<'_>>(frame) else {
+        return PeerFrame::Drop;
+    };
+    let kind = head.kind.as_deref().unwrap_or_default();
+    if SERVER_ONLY_FRAMES.contains(&kind) {
+        return PeerFrame::Drop;
+    }
+    PeerFrame::Relay {
+        cid: head.cid.map(Cow::into_owned),
+        focus: kind == "focus",
+    }
+}
+
+/// Overwrite a `focus` frame's claimed identity with the sender's own. Peers
+/// render presence rings from these fields and remember them per `cid` to name
+/// whoever replaces the whole draft, so a client-chosen `userId`/`name` would
+/// let one participant put edits under another's name.
+fn stamp_focus(frame: &str, me: &Participant) -> Option<String> {
+    let mut v: Value = serde_json::from_str(frame).ok()?;
+    let obj = v.as_object_mut()?;
+    obj.insert("userId".into(), json!(me.id));
+    obj.insert("name".into(), json!(me.name));
+    obj.insert("avatar".into(), json!(me.avatar));
+    Some(v.to_string())
 }
 
 /// Serialise the current roster as the `{ type: "roster", participants }` frame
@@ -2757,7 +3261,13 @@ pub async fn activity_room(
     if !valid_instance(&instance) {
         return Err(bad_request("invalid instance id"));
     }
-    let (me, guild) = if !q.ticket.trim().is_empty() {
+    // The key drafts persist/resume under is the STABLE context of the instance
+    // id (`gc-<guild>-<channel>` / the DM context), NOT the whole id — Discord
+    // changes the per-launch prefix on every End→Play, so keying by the full id
+    // would never resume a relaunch (see `draft_context`). It is only ever a
+    // context Discord confirmed this user is in ([`verified_draft_key`]); `None`
+    // disables persistence for this socket (the room still works, just ephemeral).
+    let (me, guild, draft_key) = if !q.ticket.trim().is_empty() {
         // Ticket path: everything was resolved + authorized at mint. Consume
         // it (single use) and check it was minted for THIS room.
         let claim = st.activity_tickets.claim(q.ticket.trim()).ok_or_else(|| {
@@ -2770,10 +3280,10 @@ pub async fn activity_room(
                 "That room ticket is for a different room.".into(),
             ));
         }
-        (claim.me, claim.guild)
+        (claim.me, claim.guild, claim.draft_key)
     } else {
         // Legacy path: the access token itself in the query, gated exactly as
-        // it always was.
+        // the ticket mint gates it.
         if q.token.trim().is_empty() {
             return Err(AppError::Unauthorized(
                 "missing activity credentials".into(),
@@ -2781,12 +3291,14 @@ pub async fn activity_room(
         }
         let session = resolve_bearer(&st, q.token.trim()).await?;
         let guild = q.guild.trim();
+        check_room_guild(&instance, guild)?;
         if !guild.is_empty() {
             if !is_snowflake(guild) {
                 return Err(bad_request("invalid guild id"));
             }
             authorize_activity_member(&st, session.clone(), guild).await?;
         }
+        let draft_key = verified_draft_key(&st, &session.uid, &instance, guild).await;
         (
             Participant {
                 id: session.uid,
@@ -2794,20 +3306,9 @@ pub async fn activity_room(
                 avatar: session.avatar,
             },
             guild.to_string(),
+            draft_key,
         )
     };
-    // The key drafts persist/resume under. It's the STABLE context of the
-    // instance id (`gc-<guild>-<channel>` / the DM context), NOT the whole id —
-    // Discord changes the per-launch prefix on every End→Play, so keying by the
-    // full id would never resume a relaunch (see `draft_context`). `None` disables
-    // persistence for this socket (unrecognized id, or a `gc-` context whose guild
-    // doesn't match the authorized guild — so a forged instance path can't
-    // read or poison another channel's draft; the room still works, just ephemeral).
-    let draft_key: Option<String> =
-        draft_context(&instance).and_then(|ctx| match context_guild(ctx) {
-            Some(cg) => (cg == guild.as_str()).then(|| ctx.to_string()),
-            None => Some(ctx.to_string()),
-        });
     // This server's plan tier caps how many people can co-edit a room hosted in
     // it (per-server premium). A room with no guild context (a solo DM launch)
     // isn't billable to any server, so it stays unlimited — as does a
@@ -2858,7 +3359,17 @@ async fn room_socket(
             let _ = socket.send(Message::Close(None)).await;
             return;
         }
+        Joined::TooManySockets => {
+            // Not `room_full` — that would stop the client for good. A plain
+            // close lets it back off and retry once its stale sockets are reaped.
+            tracing::info!("activity room join refused: too many sockets for one user");
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
     };
+    // The connection id this socket speaks as, claimed on its first frame that
+    // names one; any later frame naming a different one is dropped.
+    let mut my_cid: Option<String> = None;
     // Resume-on-reopen: when we're the first one back in the room, no peer will
     // answer our `hello`, so replay the persisted draft (if any) straight to this
     // socket. It's sent as a dedicated `resume` frame (not a peer `draft`) so the
@@ -2888,7 +3399,12 @@ async fn room_socket(
             inbound = socket.recv() => match inbound {
                 Some(Ok(Message::Text(t))) => {
                     last_seen = Instant::now();
-                    if t.len() <= MAX_RELAY_BYTES {
+                    let vetted = if t.len() <= MAX_RELAY_BYTES {
+                        vet_inbound(&st, &instance, &me, &mut my_cid, t)
+                    } else {
+                        None
+                    };
+                    if let Some(t) = vetted {
                         // Persist full-draft frames for resume-on-reopen, and keep
                         // the server-only `snapshot` frames off the wire (peers
                         // already have that state via the granular patch that
@@ -2950,7 +3466,43 @@ async fn room_socket(
             },
         }
     }
+    if let Some(cid) = &my_cid {
+        st.activity_rooms.release_cid(&instance, cid);
+    }
     st.activity_rooms.leave(&instance, &me.id);
+}
+
+/// Vet one inbound peer frame before it is persisted or relayed: drop
+/// server-only types and anything that isn't a JSON object, hold the socket to
+/// a single `cid` that no other user's socket owns, and stamp a `focus` frame
+/// with the sender's authenticated identity. `None` = don't relay.
+fn vet_inbound(
+    st: &AppState,
+    instance: &str,
+    me: &Participant,
+    my_cid: &mut Option<String>,
+    frame: String,
+) -> Option<String> {
+    let PeerFrame::Relay { cid, focus } = classify_peer_frame(&frame) else {
+        return None;
+    };
+    if let Some(cid) = cid {
+        match my_cid.as_deref() {
+            Some(mine) if mine == cid => {}
+            Some(_) => return None,
+            None => {
+                if !st.activity_rooms.claim_cid(instance, &cid, &me.id) {
+                    return None;
+                }
+                *my_cid = Some(cid);
+            }
+        }
+    }
+    if focus {
+        stamp_focus(&frame, me)
+    } else {
+        Some(frame)
+    }
 }
 
 /// Inspect one inbound room frame: persist the draft it carries and report
@@ -3116,7 +3668,12 @@ mod tests {
             avatar: None,
         };
         let id = tickets
-            .mint(me, "g1".into(), "i-abc123-gc-g1-c1".into())
+            .mint(
+                me,
+                "g1".into(),
+                "i-abc123-gc-g1-c1".into(),
+                Some("gc-g1-c1".into()),
+            )
             .unwrap();
         // Unguessable-length id, and the claim carries what was authorized.
         assert_eq!(id.len(), TICKET_LEN);
@@ -3124,6 +3681,7 @@ mod tests {
         assert_eq!(claim.me.id, "u1");
         assert_eq!(claim.guild, "g1");
         assert_eq!(claim.instance, "i-abc123-gc-g1-c1");
+        assert_eq!(claim.draft_key.as_deref(), Some("gc-g1-c1"));
         // Single use: the same ticket can't be claimed twice…
         assert!(tickets.claim(&id).is_none());
         // …and an unknown ticket never resolves.
@@ -3322,9 +3880,279 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_is_stable_and_token_specific() {
-        assert_eq!(fingerprint("tok-abc"), fingerprint("tok-abc"));
-        assert_ne!(fingerprint("tok-abc"), fingerprint("tok-xyz"));
+    fn token_digest_is_a_stable_sha256() {
+        assert_eq!(token_digest("tok-abc"), token_digest("tok-abc"));
+        assert_ne!(token_digest("tok-abc"), token_digest("tok-xyz"));
+        // Full 256 bits as hex — a cache hit skips the Discord check, so the
+        // key must not be a collidable 64-bit fingerprint.
+        assert_eq!(token_digest("tok-abc").len(), 64);
+        assert!(!token_digest("tok-abc").contains("tok"));
+    }
+
+    fn authorization(app: &str, scopes: &[&str], user: bool) -> CurrentAuthorization {
+        serde_json::from_value(json!({
+            "application": { "id": app },
+            "scopes": scopes,
+            "user": user.then(|| json!({ "id": "42", "username": "nia" })),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn only_a_token_issued_to_this_app_is_a_dweeb_bearer() {
+        // The Activity's own token (identify + guilds, maybe presence) passes…
+        let ours = authorization(
+            "dweeb-app",
+            &["identify", "guilds", "rpc.activities.write"],
+            true,
+        );
+        assert_eq!(
+            bearer_user(ours, "dweeb-app").ok().map(|u| u.id).as_deref(),
+            Some("42")
+        );
+        // …while another app's token for the very same user is refused: Discord
+        // answers `/users/@me` for it, which is what made DWEEB a confused deputy.
+        let theirs = authorization("someone-elses-dashboard", &["identify", "guilds"], true);
+        let status = match bearer_user(theirs, "dweeb-app") {
+            Ok(_) => StatusCode::OK,
+            Err(e) => e.into_response().status(),
+        };
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        // Missing a scope the gates read, or no user behind it: refused too.
+        assert!(bearer_user(authorization("dweeb-app", &["identify"], true), "dweeb-app").is_err());
+        assert!(bearer_user(
+            authorization("dweeb-app", &["identify", "guilds"], false),
+            "dweeb-app"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn the_image_proxy_relays_raster_and_video_only() {
+        for kind in [
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "image/avif",
+            "video/mp4",
+            "video/webm",
+        ] {
+            assert!(relayable_media_type(kind), "{kind} should relay");
+        }
+        // SVG carries script and would run on the API origin; never relayed —
+        // nor anything else a browser could render as a document.
+        for kind in [
+            "image/svg+xml",
+            "image/svg",
+            "text/html",
+            "application/xml",
+            "image/x-icon",
+            "",
+        ] {
+            assert!(!relayable_media_type(kind), "{kind} must not relay");
+        }
+    }
+
+    #[test]
+    fn relayed_media_is_inert_when_opened_directly() {
+        let resp = relayed_media("image/png".into(), b"png".to_vec());
+        let h = resp.headers();
+        assert_eq!(h.get(header::CONTENT_TYPE).unwrap(), "image/png");
+        assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        let csp = h
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            csp.contains("default-src 'none'") && csp.contains("sandbox"),
+            "{csp}"
+        );
+    }
+
+    #[test]
+    fn peers_can_never_author_server_frames() {
+        for frame in [
+            r#"{"type":"room_full","cap":0}"#,
+            r#"{"type":"roster","participants":[]}"#,
+            r#"{"type":"resume","message":{}}"#,
+            r#"{"type":"resync"}"#,
+            r#"{"type":"bot_connected","application_id":"1"}"#,
+            // An escape decodes to the same string the browser reads…
+            r#"{"type":"room_full"}"#,
+            // …and a repeated key (JSON.parse keeps the last) is refused outright.
+            r#"{"type":"patch","type":"room_full"}"#,
+            "not json",
+        ] {
+            assert_eq!(classify_peer_frame(frame), PeerFrame::Drop, "{frame}");
+        }
+        assert_eq!(
+            classify_peer_frame(r#"{"type":"patch","cid":"c1","ops":[]}"#),
+            PeerFrame::Relay {
+                cid: Some("c1".into()),
+                focus: false
+            }
+        );
+        assert_eq!(
+            classify_peer_frame(r#"{"type":"focus","cid":"c1","userId":"x"}"#),
+            PeerFrame::Relay {
+                cid: Some("c1".into()),
+                focus: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_focus_frame_carries_the_senders_real_identity() {
+        let me = Participant {
+            id: "real".into(),
+            name: "Real Name".into(),
+            avatar: None,
+        };
+        let forged = r#"{"type":"focus","cid":"c1","nodeId":"n","userId":"victim","name":"Victim","avatar":"x"}"#;
+        let v: Value = serde_json::from_str(&stamp_focus(forged, &me).unwrap()).unwrap();
+        assert_eq!(v["userId"], "real");
+        assert_eq!(v["name"], "Real Name");
+        assert_eq!(v["avatar"], Value::Null);
+        // Everything else rides through untouched.
+        assert_eq!(v["nodeId"], "n");
+        assert_eq!(v["cid"], "c1");
+    }
+
+    #[test]
+    fn a_connection_id_belongs_to_one_user() {
+        let rooms = ActivityRooms::new();
+        let p = |id: &str| Participant {
+            id: id.into(),
+            name: id.into(),
+            avatar: None,
+        };
+        assert!(matches!(rooms.join("inst", &p("a"), 10), Joined::Ok { .. }));
+        assert!(matches!(rooms.join("inst", &p("b"), 10), Joined::Ok { .. }));
+        assert!(rooms.claim_cid("inst", "cid-a", "a"));
+        // Another user can't speak as that connection…
+        assert!(!rooms.claim_cid("inst", "cid-a", "b"));
+        // …the same user's second socket (a reconnect) can…
+        assert!(rooms.claim_cid("inst", "cid-a", "a"));
+        // …and once every socket released it, it's free again.
+        rooms.release_cid("inst", "cid-a");
+        rooms.release_cid("inst", "cid-a");
+        assert!(rooms.claim_cid("inst", "cid-a", "b"));
+    }
+
+    #[test]
+    fn one_user_holds_a_bounded_number_of_room_sockets() {
+        let rooms = ActivityRooms::new();
+        let me = Participant {
+            id: "u".into(),
+            name: "u".into(),
+            avatar: None,
+        };
+        for i in 0..MAX_SOCKETS_PER_USER {
+            assert!(matches!(
+                rooms.join(&format!("room-{i}"), &me, 10),
+                Joined::Ok { .. }
+            ));
+        }
+        assert!(matches!(
+            rooms.join("one-more", &me, 10),
+            Joined::TooManySockets
+        ));
+        // Closing one frees a slot.
+        rooms.leave("room-0", "u");
+        assert!(matches!(rooms.join("one-more", &me, 10), Joined::Ok { .. }));
+    }
+
+    #[test]
+    fn a_server_room_is_joined_only_as_that_server() {
+        let instance = "i-77-gc-1152851518228283392-1387427085177327747";
+        assert!(check_room_guild(instance, "1152851518228283392").is_ok());
+        // Empty (which skipped the membership gate and the co-editor cap) or a
+        // different server is refused.
+        assert!(check_room_guild(instance, "").is_err());
+        assert!(check_room_guild(instance, "999999999999999999").is_err());
+        // A DM context names no server, so there is nothing to match.
+        assert!(check_room_guild("i-77-pc-1387427085177327747", "").is_ok());
+    }
+
+    fn instance(id: &str, location: &str, guild: Option<&str>, users: &[&str]) -> ActivityInstance {
+        serde_json::from_value(json!({
+            "instance_id": id,
+            "location": { "id": location, "kind": if guild.is_some() { "gc" } else { "pc" },
+                          "channel_id": "1387427085177327747", "guild_id": guild },
+            "users": users,
+        }))
+        .unwrap()
+    }
+
+    /// The draft key is only trusted once Discord confirms the instance, its
+    /// location, and that the caller is in it. (Inverted from the audit's
+    /// evidence: a forged instance used to bind to any channel's draft, and a DM
+    /// context to anyone's.)
+    #[test]
+    fn a_draft_is_reachable_only_from_an_instance_discord_confirms() {
+        let guild = "1152851518228283392";
+        let id = "i-77-gc-1152851518228283392-1387427085177327747";
+        let ctx = "gc-1152851518228283392-1387427085177327747";
+        let real = instance(id, ctx, Some(guild), &["u1"]);
+        assert_eq!(draft_key_for(id, "u1", guild, &real).as_deref(), Some(ctx));
+        // A guild member who is not in that instance — e.g. a forged id naming a
+        // private channel — gets no draft.
+        assert_eq!(draft_key_for(id, "intruder", guild, &real), None);
+        // The location Discord reports must be exactly the context the id claims.
+        let elsewhere = instance(
+            id,
+            "gc-1152851518228283392-1316755985397715014",
+            Some(guild),
+            &["u1"],
+        );
+        assert_eq!(draft_key_for(id, "u1", guild, &elsewhere), None);
+        // …and in the server the caller was authorized against.
+        assert_eq!(draft_key_for(id, "u1", "999999999999999999", &real), None);
+        // Discord answering for a different instance is no confirmation.
+        let other = instance(
+            "i-78-gc-1152851518228283392-1387427085177327747",
+            ctx,
+            Some(guild),
+            &["u1"],
+        );
+        assert_eq!(draft_key_for(id, "u1", guild, &other), None);
+    }
+
+    #[test]
+    fn a_dm_draft_belongs_to_the_people_in_that_dm() {
+        let id = "i-77-pc-1387427085177327747";
+        let dm = instance(
+            id,
+            "pc-1387427085177327747",
+            None,
+            &["friend-a", "friend-b"],
+        );
+        assert_eq!(
+            draft_key_for(id, "friend-b", "", &dm).as_deref(),
+            Some("pc-1387427085177327747")
+        );
+        // Anyone else who merely knows the DM channel id gets nothing.
+        assert_eq!(draft_key_for(id, "stranger", "", &dm), None);
+    }
+
+    #[tokio::test]
+    async fn one_custom_bot_webhook_is_used_by_one_caller_at_a_time() {
+        let first = lock_custom_hook("g-lock", "app-lock").await;
+        let waiter = tokio::spawn(async { lock_custom_hook("g-lock", "app-lock").await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !waiter.is_finished(),
+            "a second use must wait for the move + post in flight"
+        );
+        // A different bot is never blocked by this one.
+        let _other = lock_custom_hook("g-lock", "another-app").await;
+        drop(first);
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("the waiter proceeds once the first use is done")
+            .unwrap();
     }
 
     #[test]
@@ -3343,6 +4171,18 @@ mod tests {
             "fc00::1",         // v6 ULA
             "fe80::1",         // v6 link-local
             "::ffff:10.0.0.1", // v4-mapped private
+            "224.0.0.1",       // multicast
+            "192.0.0.8",       // IETF protocol assignments
+            "198.18.0.1",      // benchmarking
+            "198.19.255.254",  // benchmarking
+            "192.88.99.1",     // 6to4 relay anycast
+            "64:ff9b::a00:1",  // NAT64 (embeds 10.0.0.1)
+            "64:ff9b:1::1",    // local-use NAT64
+            "2002:a00:1::1",   // 6to4 (embeds 10.0.0.1)
+            "::a00:1",         // IPv4-compatible (deprecated)
+            "fec0::1",         // site-local (deprecated)
+            "2001:db8::1",     // documentation
+            "100::1",          // discard-only
         ];
         for ip in blocked {
             assert!(!ip_is_public(ip.parse().unwrap()), "{ip} should be blocked");

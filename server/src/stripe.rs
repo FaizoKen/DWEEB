@@ -62,6 +62,10 @@ type HmacSha256 = Hmac<Sha256>;
 const STRIPE_API: &str = "https://api.stripe.com";
 /// Reject a webhook whose timestamp is this far from now (replay protection).
 const WEBHOOK_TOLERANCE_SECS: i64 = 300;
+/// How long past its billing period an `active` mirror row may sit before the
+/// entitlement read re-checks it with Stripe. A renewal moves the period end
+/// within the hour; a day of slack keeps a slow invoice from costing a call.
+const LAPSED_PERIOD_GRACE_SECS: i64 = 24 * 60 * 60;
 
 /// Stamped into every DWEEB-originated subscription's `source` metadata at
 /// checkout. The Stripe account and price IDs are **shared** with the sibling
@@ -241,6 +245,24 @@ impl StripeStore {
         rows.flatten()
             .map(|price| price_slots.get(&price).copied().unwrap_or(0))
             .sum()
+    }
+
+    /// Ids of a server's `active`/`trialing` rows whose billing period ended
+    /// before `before` — rows that should have been renewed or cancelled by an
+    /// event that never arrived. A period end of 0 means "not recorded" and is
+    /// never treated as lapsed.
+    pub fn lapsed_active_ids(&self, guild_id: &str, before: i64) -> Vec<String> {
+        let conn = self.lock();
+        let Ok(mut stmt) = conn.prepare_cached(
+            "SELECT id FROM stripe_subscriptions \
+             WHERE guild_id = ?1 AND status IN ('active','trialing') \
+               AND current_period_end > 0 AND current_period_end < ?2",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![guild_id, before], |r| r.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
     }
 
     pub fn upsert_subscription(&self, s: &SubRow) -> Result<(), String> {
@@ -798,8 +820,30 @@ impl StripeClient {
             .ok_or_else(|| "portal: no url".into())
     }
 
-    async fn retrieve_subscription(&self, id: &str) -> Result<Value, String> {
-        self.get(&format!("/v1/subscriptions/{id}"), &[]).await
+    /// One subscription as Stripe holds it **now** — what every event is
+    /// mirrored from. The error keeps Stripe's status, so a caller can tell
+    /// "Stripe rejected this" (retrying won't help) from "Stripe didn't answer"
+    /// (retry later).
+    async fn retrieve_subscription(&self, id: &str) -> Result<Value, StripeErr> {
+        let fail = |message: String| StripeErr {
+            status: None,
+            message,
+        };
+        let resp = self
+            .http
+            .get(format!("{STRIPE_API}/v1/subscriptions/{id}"))
+            .bearer_auth(&self.secret)
+            .send()
+            .await
+            .map_err(|e| fail(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(StripeErr {
+                status: Some(status),
+                message: format!("stripe {status}"),
+            });
+        }
+        resp.json().await.map_err(|e| fail(e.to_string()))
     }
 
     /// Every subscription bound to a server, via Stripe's search on the
@@ -848,7 +892,9 @@ impl StripeClient {
             },
         };
         for sub in self.list_customer_subscriptions(&customer).await {
-            self.upsert_from_sub(store, &sub, Some(uid)).await;
+            if let Err(e) = self.upsert_from_sub(store, &sub, Some(uid)).await {
+                tracing::warn!("stripe mirror upsert failed: {e}");
+            }
         }
         store.put_customer(uid, &customer, unix_now());
     }
@@ -870,7 +916,9 @@ impl StripeClient {
             .await
             .map_err(|e| e.to_string())?;
         // Re-mirror from Stripe's response so status/period/guild all stay in step.
-        self.upsert_from_sub(store, &sub, None).await;
+        if let Err(e) = self.upsert_from_sub(store, &sub, None).await {
+            tracing::warn!("stripe mirror upsert failed: {e}");
+        }
         // Defensive: guarantee the local guild matches even if the response was
         // missing the metadata echo for any reason.
         store.set_subscription_guild(sub_id, new_guild)?;
@@ -891,31 +939,43 @@ impl StripeClient {
 
     /// Verify a Stripe webhook signature and return the parsed event. Recomputes
     /// `HMAC-SHA256("{t}.{payload}")` and compares (constant-time) to the header's
-    /// `v1`, then checks the timestamp is within tolerance.
+    /// `v1` signatures, then checks the timestamp is within tolerance. While a
+    /// signing secret is being rolled Stripe signs with every active secret and
+    /// sends one `v1` per secret, in no promised order — any one matching ours is
+    /// genuine. Checking only the last one rejected every event for the whole
+    /// roll window whenever ours wasn't last.
     pub fn verify_webhook(&self, payload: &[u8], sig_header: &str) -> Result<Value, String> {
         let secret = self
             .webhook_secret
             .as_deref()
             .ok_or("webhook secret not configured")?;
-        let (mut ts, mut v1) = (None, None);
+        let mut ts = None;
+        let mut v1s: Vec<&str> = Vec::new();
         for part in sig_header.split(',') {
             match part.split_once('=') {
                 Some(("t", v)) => ts = Some(v.trim()),
-                Some(("v1", v)) => v1 = Some(v.trim()),
+                Some(("v1", v)) => v1s.push(v.trim()),
                 _ => {}
             }
         }
         let ts = ts.ok_or("missing t")?;
-        let v1 = v1.ok_or("missing v1")?;
+        if v1s.is_empty() {
+            return Err("missing v1".into());
+        }
 
         let mut mac =
             HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| "bad webhook secret")?;
         mac.update(ts.as_bytes());
         mac.update(b".");
         mac.update(payload);
-        let expected = hex::decode(v1).map_err(|_| "malformed v1")?;
-        mac.verify_slice(&expected)
-            .map_err(|_| "signature mismatch".to_string())?;
+        let genuine = v1s.iter().any(|v1| {
+            hex::decode(v1)
+                .map(|expected| mac.clone().verify_slice(&expected).is_ok())
+                .unwrap_or(false)
+        });
+        if !genuine {
+            return Err("signature mismatch".into());
+        }
 
         let ts_num: i64 = ts.parse().map_err(|_| "bad timestamp")?;
         if (unix_now() - ts_num).abs() > WEBHOOK_TOLERANCE_SECS {
@@ -927,18 +987,29 @@ impl StripeClient {
     /// Apply a verified event to the mirror. Idempotent (keyed upserts). Returns
     /// the `guild_id` the touched subscription is bound to, if any — the caller
     /// uses it to reconcile that server's suspended slots against its new tier
-    /// (see [`crate::reconcile`]). `None` for events that touch no guild-bound
-    /// sub (a foreign/legacy sub, or an event type we don't mirror).
-    pub async fn handle_event(&self, store: &StripeStore, event: &Value) -> Option<String> {
+    /// (see [`crate::reconcile`]). `Ok(None)` for events that touch no
+    /// guild-bound sub (a foreign/legacy sub, or an event type we don't mirror).
+    ///
+    /// Every subscription is mirrored from Stripe's **current** copy, never the
+    /// event's snapshot: Stripe doesn't promise delivery order, so a redelivered
+    /// `updated` (active) landing after `deleted` would otherwise resurrect a
+    /// cancelled plan in the mirror — premium for free, indefinitely. An `Err`
+    /// means the event wasn't applied and must be answered with a 5xx so Stripe
+    /// retries it; acknowledging it would lose it for good.
+    pub async fn handle_event(
+        &self,
+        store: &StripeStore,
+        event: &Value,
+    ) -> Result<Option<String>, AppError> {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
         let obj = event
             .pointer("/data/object")
             .cloned()
             .unwrap_or(Value::Null);
-        match kind {
+        let (sub_id, uid) = match kind {
             "checkout.session.completed" => {
                 if obj.get("mode").and_then(Value::as_str) != Some("subscription") {
-                    return None;
+                    return Ok(None);
                 }
                 let uid = obj
                     .get("client_reference_id")
@@ -951,26 +1022,34 @@ impl StripeClient {
                 if let (Some(uid), Some(cust)) = (uid.as_deref(), id_of(&obj["customer"])) {
                     store.put_customer(uid, &cust, unix_now());
                 }
-                if let Some(sub_id) = id_of(&obj["subscription"]) {
-                    if let Ok(sub) = self.retrieve_subscription(&sub_id).await {
-                        return self.upsert_from_sub(store, &sub, uid.as_deref()).await;
-                    }
-                }
-                None
+                (id_of(&obj["subscription"]), uid)
             }
             "customer.subscription.created"
             | "customer.subscription.updated"
-            | "customer.subscription.deleted" => self.upsert_from_sub(store, &obj, None).await,
-            "invoice.payment_failed" => {
-                if let Some(sub_id) = id_of(&obj["subscription"]) {
-                    if let Ok(sub) = self.retrieve_subscription(&sub_id).await {
-                        return self.upsert_from_sub(store, &sub, None).await;
-                    }
-                }
-                None
+            | "customer.subscription.deleted" => (id_of(&obj["id"]), None),
+            "invoice.payment_failed" => (id_of(&obj["subscription"]), None),
+            _ => return Ok(None),
+        };
+        let Some(sub_id) = sub_id else {
+            return Ok(None);
+        };
+        let sub = match self.retrieve_subscription(&sub_id).await {
+            Ok(sub) => sub,
+            // Stripe answered and refused (a sub of another account or mode):
+            // a retry would be refused the same way.
+            Err(e) if e.is_client_error() => {
+                tracing::warn!(%sub_id, "stripe refused the subscription read; event skipped: {e}");
+                return Ok(None);
             }
-            _ => None,
-        }
+            Err(e) => {
+                return Err(AppError::upstream(format!(
+                    "couldn't read subscription {sub_id} from Stripe: {e}"
+                )))
+            }
+        };
+        self.upsert_from_sub(store, &sub, uid.as_deref())
+            .await
+            .map_err(|e| AppError::Internal(format!("stripe mirror upsert failed: {e}")))
     }
 
     /// Ask Stripe for a server's subscriptions (matched on `guild_id` metadata)
@@ -979,37 +1058,42 @@ impl StripeClient {
     /// API on every read.
     pub async fn backfill_guild(&self, store: &StripeStore, guild_id: &str) {
         for sub in self.search_subscriptions_by_guild(guild_id).await {
-            self.upsert_from_sub(store, &sub, None).await;
+            if let Err(e) = self.upsert_from_sub(store, &sub, None).await {
+                tracing::warn!("stripe mirror upsert failed: {e}");
+            }
         }
         store.put_guild_checked(guild_id, unix_now());
     }
 
     /// Mirror one subscription, returning the `guild_id` it binds (for the
-    /// caller's reconcile). `None` when the sub isn't mirrorable or binds no
-    /// guild.
+    /// caller's reconcile). `Ok(None)` when the sub isn't mirrorable or binds
+    /// no guild; `Err` only when the mirror itself couldn't be written.
     async fn upsert_from_sub(
         &self,
         store: &StripeStore,
         sub: &Value,
         fallback_uid: Option<&str>,
-    ) -> Option<String> {
-        let (id, customer_id, price_id, status, period_end, cancel, guild_id) =
-            extract_sub_fields(sub)?;
+    ) -> Result<Option<String>, String> {
+        let Some((id, customer_id, price_id, status, period_end, cancel, guild_id)) =
+            extract_sub_fields(sub)
+        else {
+            return Ok(None);
+        };
         if price_id.is_empty() {
-            return None;
+            return Ok(None);
         }
         let uid = match self.resolve_user_id(sub, fallback_uid, &customer_id).await {
             Some(u) => u,
             None => {
                 tracing::warn!(%id, "stripe sub has no attributable discord user; skipping");
-                return None;
+                return Ok(None);
             }
         };
         if !customer_id.is_empty() {
             store.put_customer(&uid, &customer_id, unix_now());
         }
         let bound_guild = guild_id.clone();
-        if let Err(e) = store.upsert_subscription(&SubRow {
+        store.upsert_subscription(&SubRow {
             id,
             user_id: uid,
             customer_id,
@@ -1021,10 +1105,8 @@ impl StripeClient {
             // upsert_subscription's SQL never writes reassigned_at, so this is
             // ignored — an existing move-stamp is preserved across re-mirrors.
             reassigned_at: None,
-        }) {
-            tracing::warn!("stripe mirror upsert failed: {e}");
-        }
-        bound_guild
+        })?;
+        Ok(bound_guild)
     }
 
     async fn resolve_user_id(
@@ -1274,10 +1356,36 @@ impl StripeState {
 
     /// A **server's** entitlement slots: the mirror first, then a throttled lazy
     /// backfill for a server whose subscription predates (or missed) the webhook.
+    ///
+    /// A mirror row is only as current as the last event that reached us, so an
+    /// `active` row whose billing period ended well over a day ago missed its
+    /// renewal or its cancellation (a lost webhook, or none configured at all).
+    /// Those are re-read from Stripe, on the same throttle as the backfill —
+    /// without this a missed cancel granted premium forever, since every read
+    /// (and every reconcile) consulted the same stale row.
     pub async fn active_slots_for(&self, guild_id: &str) -> i64 {
         let slots = self.store.active_slots(guild_id, &self.price_slots);
         if slots > 0 {
-            return slots;
+            let lapsed = self
+                .store
+                .lapsed_active_ids(guild_id, unix_now() - LAPSED_PERIOD_GRACE_SECS);
+            if lapsed.is_empty() || !self.backfill_due(guild_id) {
+                return slots;
+            }
+            for sub_id in lapsed {
+                match self.client.retrieve_subscription(&sub_id).await {
+                    Ok(sub) => {
+                        if let Err(e) = self.client.upsert_from_sub(&self.store, &sub, None).await {
+                            tracing::warn!("stripe mirror upsert failed: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::info!(%sub_id, "couldn't re-check a lapsed subscription: {e}")
+                    }
+                }
+            }
+            self.store.put_guild_checked(guild_id, unix_now());
+            return self.store.active_slots(guild_id, &self.price_slots);
         }
         if self.backfill_due(guild_id) {
             self.client.backfill_guild(&self.store, guild_id).await;
@@ -1401,7 +1509,7 @@ pub async fn checkout(
     }
     // Only a manager of the server may buy premium for it (and it proves the
     // signed-in identity we attribute the sub to).
-    let session = crate::routes::authorize_member(&st, &jar, &guild).await?;
+    let session = crate::routes::authorize_manager(&st, &jar, &guild).await?;
     let tier = body.tier.trim().to_lowercase();
     if tier != "plus" && tier != "pro" {
         return Err(AppError::Status {
@@ -1525,7 +1633,7 @@ pub async fn sync(
             retry_after: None,
         });
     }
-    let session = crate::routes::authorize_member(&st, &jar, &guild).await?;
+    let session = crate::routes::authorize_manager(&st, &jar, &guild).await?;
     // Pull the buyer's subscriptions from Stripe and mirror them now — the sub
     // just created by checkout carries this guild in its metadata, so this binds
     // it to the server regardless of webhook timing.
@@ -1621,7 +1729,7 @@ pub async fn reassign(
         });
     }
     // Must manage the destination server (also resolves the signed-in identity).
-    let session = crate::routes::authorize_member(&st, &jar, &new_guild).await?;
+    let session = crate::routes::authorize_manager(&st, &jar, &new_guild).await?;
     // Must own the subscription being moved.
     let sub = match stripe.store.get_subscription(&sub_id) {
         Some(s) if s.user_id == session.uid => s,
@@ -1708,8 +1816,10 @@ pub async fn portal(
 }
 
 /// `POST /api/stripe/webhook` — Stripe → us. No user auth; authenticity is the
-/// signature (verified against `STRIPE_WEBHOOK_SECRET`). Errors surface as 4xx so
-/// Stripe retries only on our genuine failures (handlers are idempotent).
+/// signature (verified against `STRIPE_WEBHOOK_SECRET`). A bad signature is a
+/// 4xx; an event we couldn't apply is a 5xx, which is what makes Stripe retry
+/// it (handlers are idempotent) — Stripe not answering our read is marked as
+/// its fault and logs at warn, a mirror we couldn't write is ours and pages.
 pub async fn webhook(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -1738,7 +1848,7 @@ pub async fn webhook(
     // Mirror the event, then reconcile the affected server's suspended slots so a
     // downgrade/cancel pauses over-cap items (and a renewal/upgrade revives them)
     // without waiting out the entitlement cache.
-    if let Some(guild) = stripe.client.handle_event(&stripe.store, &event).await {
+    if let Some(guild) = stripe.client.handle_event(&stripe.store, &event).await? {
         crate::reconcile::reconcile_guild(&st, &guild).await;
     }
     Ok(Json(json!({ "received": true })).into_response())
@@ -1801,6 +1911,37 @@ mod tests {
             .upsert_subscription(&row("s1", "u1", "g1", "p_medium", "canceled"))
             .unwrap();
         assert_eq!(store.active_slots("g1", &slots), 130);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn only_an_active_row_past_its_period_reads_as_lapsed() {
+        let (store, path) = temp_store("lapsed");
+        let now = unix_now();
+        let with_end = |id: &str, status: &str, end: i64| SubRow {
+            current_period_end: end,
+            ..row(id, "u1", "g1", "p_medium", status)
+        };
+        // Renewal or cancel never reached us: the period ended two days ago.
+        store
+            .upsert_subscription(&with_end("lapsed", "active", now - 2 * 86_400))
+            .unwrap();
+        // Current, cancelled, unrecorded (0) and another server's rows are not.
+        store
+            .upsert_subscription(&with_end("current", "active", now + 86_400))
+            .unwrap();
+        store
+            .upsert_subscription(&with_end("gone", "canceled", now - 2 * 86_400))
+            .unwrap();
+        store
+            .upsert_subscription(&with_end("unknown", "active", 0))
+            .unwrap();
+        let before = now - LAPSED_PERIOD_GRACE_SECS;
+        assert_eq!(
+            store.lapsed_active_ids("g1", before),
+            vec!["lapsed".to_string()]
+        );
+        assert!(store.lapsed_active_ids("g2", before).is_empty());
         let _ = std::fs::remove_file(path);
     }
 
@@ -2236,5 +2377,15 @@ mod tests {
         // Stale timestamp.
         let stale = format!("t={},v1={v1}", ts - 10_000);
         assert!(client.verify_webhook(payload, &stale).is_err());
+        // Mid secret-roll Stripe sends one v1 per active secret: ours may come
+        // first, last, or in between — and a header of only foreign ones fails.
+        let other = "a".repeat(v1.len());
+        let first = format!("t={ts},v1={v1},v1={other}");
+        let last = format!("t={ts},v1={other},v1={v1}");
+        assert!(client.verify_webhook(payload, &first).is_ok());
+        assert!(client.verify_webhook(payload, &last).is_ok());
+        let foreign = format!("t={ts},v1={other},v1={}", "b".repeat(v1.len()));
+        assert!(client.verify_webhook(payload, &foreign).is_err());
+        assert!(client.verify_webhook(payload, &format!("t={ts}")).is_err());
     }
 }

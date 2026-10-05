@@ -20,6 +20,7 @@ use axum_extra::extract::cookie::PrivateCookieJar;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::config::Config;
 use crate::discord::TokenResponse;
 use crate::error::AppError;
 use crate::routes::{current_session, AppState, UsableGuild};
@@ -124,7 +125,7 @@ pub async fn custom_bot_webhook_start(
     axum::extract::Path((guild, application_id)): axum::extract::Path<(String, String)>,
 ) -> Result<Response, AppError> {
     let cfg = &st.config;
-    crate::routes::authorize_member(&st, &jar, &guild).await?;
+    crate::routes::authorize_manager(&st, &jar, &guild).await?;
     if !crate::routes::is_snowflake(&application_id) {
         return Err(AppError::Status {
             status: axum::http::StatusCode::BAD_REQUEST,
@@ -359,12 +360,21 @@ pub async fn callback(
     }
 
     // CSRF: the round-tripped `state` must equal the one we stored at /login.
+    // A mismatch (most often a state cookie that expired during a long stay on
+    // Discord's consent screen) lands back on the builder with the flow's
+    // error marker, so the popup relays the failure and closes — a raw JSON
+    // body left it stranded with the opener never told.
     let expected = jar.get(STATE_COOKIE).map(|c| c.value().to_string());
     let provided = q.state.unwrap_or_default();
     if provided.is_empty() || expected.as_deref() != Some(provided.as_str()) {
-        return Err(AppError::Unauthorized(
-            "Login could not be verified (state mismatch). Please try again.".into(),
-        ));
+        let flow = if provided.is_empty() {
+            expected.as_deref().unwrap_or_default()
+        } else {
+            provided.as_str()
+        };
+        let marker = flow_error_marker(flow);
+        let err = AppError::Unauthorized("Login could not be verified (state mismatch).".into());
+        return Ok(fail_to_builder(cfg, jar, marker, &err));
     }
 
     let code = q.code.unwrap_or_default();
@@ -411,7 +421,7 @@ pub async fn callback(
     // with the created webhook's URL in the fragment. No session is minted — this
     // authorization is just for the one webhook, independent of being signed in.
     if provided.starts_with(WEBHOOK_STATE_PREFIX) {
-        let token = st
+        let token = match st
             .discord
             .exchange_code(
                 &cfg.client_id,
@@ -419,13 +429,17 @@ pub async fn callback(
                 &code,
                 &cfg.oauth_redirect_url,
             )
-            .await?;
+            .await
+        {
+            Ok(token) => token,
+            Err(e) => return Ok(fail_to_builder(cfg, jar, "dweeb_webhook=error", &e)),
+        };
         let jar = jar.add(clear_state_cookie(cfg));
         let target = build_webhook_redirect(&st, &cfg.frontend_url, &token).await;
         return Ok((jar, Redirect::to(&target)).into_response());
     }
 
-    let token = st
+    let token = match st
         .discord
         .exchange_code(
             &cfg.client_id,
@@ -433,7 +447,11 @@ pub async fn callback(
             &code,
             &cfg.oauth_redirect_url,
         )
-        .await?;
+        .await
+    {
+        Ok(token) => token,
+        Err(e) => return Ok(fail_to_builder(cfg, jar, "dweeb_login=error", &e)),
+    };
     // Identity and guild membership are independent Discord routes. Resolve
     // them together so login cache warming costs one network round-trip instead
     // of two sequential ones; an OAuth-exchanged token is expected to be valid
@@ -442,7 +460,10 @@ pub async fn callback(
         st.discord.current_user(&token.access_token),
         st.discord.current_user_guilds(&token.access_token),
     );
-    let user = user?;
+    let user = match user {
+        Ok(user) => user,
+        Err(e) => return Ok(fail_to_builder(cfg, jar, "dweeb_login=error", &e)),
+    };
 
     let display = user
         .global_name
@@ -465,6 +486,7 @@ pub async fn callback(
             .filter(|g| !require || g.can_manage())
             .map(|g| UsableGuild {
                 can_manage_webhooks: g.can_manage_webhooks(),
+                can_manage: g.can_manage(),
                 id: g.id,
                 name: g.name,
                 icon: g.icon,
@@ -489,6 +511,35 @@ pub async fn callback(
         Redirect::to(&format!("{}#dweeb_login=ok", cfg.frontend_url)),
     )
         .into_response())
+}
+
+/// The fragment marker the opener's popup flow recognises for a failed run of
+/// the flow `state` names (`core/oauth/flows.ts`).
+fn flow_error_marker(state: &str) -> &'static str {
+    if state.starts_with(WEBHOOK_STATE_PREFIX) || state.starts_with(CUSTOM_WEBHOOK_STATE_PREFIX) {
+        "dweeb_webhook=error"
+    } else {
+        "dweeb_login=error"
+    }
+}
+
+/// Finish a callback that couldn't complete by sending the browser back to
+/// the builder with the flow's error marker: the popup relays the failure and
+/// closes, and a full-page return strips the marker. Left as an error body,
+/// the popup showed raw JSON and the opener never learned how it ended. What
+/// went wrong is logged at the level its fault deserves — a failure of ours
+/// (our credential rejected, Discord unreachable from this host) keeps paging.
+fn fail_to_builder(cfg: &Config, jar: PrivateCookieJar, marker: &str, err: &AppError) -> Response {
+    match err {
+        AppError::BadGateway(_) | AppError::Internal(_) => {
+            tracing::error!(target: "auth", %err, "sign-in callback failed")
+        }
+        _ => tracing::info!(target: "auth", %err, "sign-in callback failed"),
+    }
+    let jar = jar
+        .add(clear_state_cookie(cfg))
+        .add(clear_custom_app_cookie(cfg));
+    (jar, Redirect::to(&format!("{}#{marker}", cfg.frontend_url))).into_response()
 }
 
 /// `POST /auth/logout` — drop the session cookie.

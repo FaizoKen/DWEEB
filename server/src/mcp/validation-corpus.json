@@ -509,7 +509,7 @@
                 "components": [
                   {
                     "type": 10,
-                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own."
+                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live, and the host draws a fair winner when it closes."
                   }
                 ],
                 "accessory": {
@@ -4003,6 +4003,35 @@
       "warnings": []
     },
     {
+      "name": "component-id-out-of-range",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "a",
+            "id": 3000000000
+          },
+          {
+            "type": 10,
+            "content": "b",
+            "id": -1
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_ID_RANGE",
+          "path": "components[0]"
+        },
+        {
+          "code": "COMPONENT_ID_RANGE",
+          "path": "components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
       "name": "link-plugin-url-unfinished",
       "message": {
         "components": [
@@ -4776,7 +4805,8 @@
             "items": [
               {
                 "media": {
-                  "attachment_id": "abc"
+                  "attachment_id": "abc",
+                  "url": ""
                 }
               }
             ]

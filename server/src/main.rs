@@ -639,6 +639,12 @@ async fn run() {
             get(mcp::oauth::authorization_server),
         )
         .route("/oauth/authorize", get(mcp::oauth::authorize))
+        // The user's Allow/Deny on DWEEB's own consent page, which follows
+        // Discord's and names the app asking (see `mcp::oauth::consent`).
+        .route(
+            "/oauth/consent",
+            post(mcp::oauth::consent).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
         .route(
             "/oauth/register",
             post(mcp::oauth::register).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
@@ -1066,6 +1072,9 @@ async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, Strin
 /// making several sequential Discord calls, each already capped by the reqwest
 /// client) with headroom.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+// The AI relay's provider attempts must finish (or give up) before the request
+// timeout cuts them off — see `ai::START_BUDGET`.
+const _: () = assert!(ai::START_BUDGET.as_secs() < REQUEST_TIMEOUT.as_secs());
 
 /// The tracing span every request runs inside, so a failure says *which* request
 /// failed.

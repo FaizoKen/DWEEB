@@ -159,6 +159,14 @@ services:
       # client and live grant would vanish on the next deploy.
       MCP_ENABLED: ${MCP_ENABLED:-false}
       MCP_DB_PATH: ${MCP_DB_PATH:-/data/mcp.db}
+      # The local Stripe subscription mirror (only opened when STRIPE_SECRET_KEY
+      # is set) and the first-party ratings (only when RATINGS_ENABLED=true).
+      # Set unconditionally for the same reason as MCP_DB_PATH: left unset they
+      # resolve to bare filenames in the container's working directory — `/`,
+      # which uid 1000 can't write, so the proxy wouldn't boot (and under
+      # STRICT_DB_PATHS refuses to) the day the feature is switched on.
+      STRIPE_DB_PATH: ${STRIPE_DB_PATH:-/data/stripe.db}
+      RATINGS_DB_PATH: ${RATINGS_DB_PATH:-/data/ratings.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

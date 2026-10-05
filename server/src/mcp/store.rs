@@ -42,9 +42,28 @@ pub const CODE_TTL_SECS: i64 = 600;
 /// Ceiling on an access token's life, before the Discord-token cap applies.
 pub const TOKEN_TTL_SECS: i64 = 7 * 24 * 3600;
 
+/// How long a user has to answer the consent page that follows Discord's.
+pub const CONSENT_TTL_SECS: i64 = 600;
+
 /// Registered clients are created by anonymous dynamic registration, so the
-/// table needs a bound. Well past any real number of MCP clients.
+/// table needs a bound. Well past any real number of MCP clients — and since a
+/// scanner (or organic churn) would otherwise fill it for good, the sweep
+/// retires registrations nobody uses: see [`McpStore::sweep`].
 const MAX_CLIENTS: i64 = 5_000;
+
+/// A registration that never completed an authorization within a day is
+/// abandoned — a connector that is really being added authorizes within
+/// minutes of registering.
+const UNUSED_CLIENT_TTL_SECS: i64 = 24 * 3600;
+
+/// A registration idle this long has no live token (tokens live at most
+/// [`TOKEN_TTL_SECS`]); a connector that comes back simply registers again.
+const IDLE_CLIENT_TTL_SECS: i64 = 30 * 24 * 3600;
+
+/// At the cap, a never-used registration at least this old may be evicted to
+/// make room. Older than an authorization round trip can take, so a connector
+/// whose user is still on a consent screen is never the one evicted.
+const EVICTABLE_UNUSED_SECS: i64 = 600;
 
 /// A client registered through RFC 7591 dynamic registration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,9 +141,37 @@ impl McpStore {
                      expires_at    INTEGER NOT NULL,
                      created_at    INTEGER NOT NULL
                  );
-                 CREATE INDEX IF NOT EXISTS mcp_tokens_expires ON mcp_tokens(expires_at);",
+                 CREATE INDEX IF NOT EXISTS mcp_tokens_expires ON mcp_tokens(expires_at);
+                 CREATE TABLE IF NOT EXISTS mcp_consents (
+                     ticket_hash    TEXT PRIMARY KEY,
+                     client_id      TEXT NOT NULL,
+                     redirect_uri   TEXT NOT NULL,
+                     code_challenge TEXT NOT NULL,
+                     client_state   TEXT,
+                     discord_token  TEXT NOT NULL,
+                     discord_user   TEXT NOT NULL,
+                     discord_exp    INTEGER NOT NULL,
+                     expires_at     INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS mcp_consents_expires ON mcp_consents(expires_at);",
             )
             .map_err(|e| format!("schema: {e}"))?;
+            // Migrate stores created before registrations recorded their last
+            // use (SQLite has no ADD COLUMN IF NOT EXISTS). Existing rows start
+            // as never-used, so the first sweep retires the abandoned ones
+            // among them a day after they registered — and an in-use client
+            // re-stamps itself on its next authorization.
+            let has_last_used: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('mcp_clients') WHERE name = 'last_used_at'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has_last_used == 0 {
+                conn.execute_batch("ALTER TABLE mcp_clients ADD COLUMN last_used_at INTEGER;")
+                    .map_err(|e| format!("migrate last_used_at: {e}"))?;
+            }
         }
         let clients: i64 = pool
             .get()
@@ -146,18 +193,36 @@ impl McpStore {
 
     /// Register a client. `secret` is `None` for a public (PKCE-only) client,
     /// which is what every MCP client using dynamic registration should be.
+    ///
+    /// At the cap, the oldest registration that never completed an
+    /// authorization makes room; only when there is none is the caller turned
+    /// away with [`RegisterError::Full`] — a capacity answer, never a failure.
     pub fn register_client(
         &self,
         redirect_uris: &[String],
         client_name: Option<&str>,
         secret: Option<&str>,
-    ) -> Result<Client, String> {
-        if self.clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
-            return Err("too many registered clients".into());
-        }
+    ) -> Result<Client, RegisterError> {
         let client_id = format!("dweeb-mcp-{}", random_hex(16));
-        let uris = serde_json::to_string(redirect_uris).map_err(|e| e.to_string())?;
+        let uris = serde_json::to_string(redirect_uris)
+            .map_err(|e| RegisterError::Storage(e.to_string()))?;
         let conn = self.pool.get();
+        if self.clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
+            let evicted = conn
+                .execute(
+                    "DELETE FROM mcp_clients WHERE client_id = (
+                         SELECT client_id FROM mcp_clients
+                         WHERE last_used_at IS NULL AND created_at <= ?1
+                         ORDER BY created_at LIMIT 1
+                     )",
+                    [now() - EVICTABLE_UNUSED_SECS],
+                )
+                .map_err(|e| RegisterError::Storage(format!("evict: {e}")))?;
+            if evicted == 0 {
+                return Err(RegisterError::Full);
+            }
+            self.clients.fetch_sub(evicted as i64, Ordering::Relaxed);
+        }
         conn.execute(
             "INSERT INTO mcp_clients (client_id, secret_hash, redirect_uris, client_name, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -169,7 +234,7 @@ impl McpStore {
                 now(),
             ],
         )
-        .map_err(|e| format!("register: {e}"))?;
+        .map_err(|e| RegisterError::Storage(format!("register: {e}")))?;
         self.clients.fetch_add(1, Ordering::Relaxed);
         Ok(Client {
             client_id,
@@ -252,11 +317,19 @@ impl McpStore {
             ],
         )
         .map_err(|e| format!("create code: {e}"))?;
+        // A completed authorization is what "in use" means for a registration;
+        // the sweep retires the ones that never get here.
+        let _ = conn.execute(
+            "UPDATE mcp_clients SET last_used_at = ?2 WHERE client_id = ?1",
+            rusqlite::params![client_id, now()],
+        );
         Ok(code)
     }
 
     /// Redeem a code. Single-use: the row is deleted whether or not the checks
-    /// pass, so a leaked code cannot be retried against a different verifier.
+    /// pass, so a leaked code cannot be retried against a different verifier —
+    /// and the read *is* the delete (`DELETE … RETURNING`), so two concurrent
+    /// redemptions of one code cannot both see the row (RFC 6749 §4.1.2).
     pub fn redeem_code(
         &self,
         code: &str,
@@ -267,8 +340,8 @@ impl McpStore {
         let hashed = hash(code);
         let row = conn
             .query_row(
-                "SELECT client_id, redirect_uri, code_challenge, discord_token, discord_user, discord_exp, expires_at
-                 FROM mcp_codes WHERE code_hash = ?1",
+                "DELETE FROM mcp_codes WHERE code_hash = ?1
+                 RETURNING client_id, redirect_uri, code_challenge, discord_token, discord_user, discord_exp, expires_at",
                 [&hashed],
                 |row| {
                     Ok((
@@ -283,8 +356,6 @@ impl McpStore {
                 },
             )
             .ok();
-        // Burn it regardless of the outcome.
-        let _ = conn.execute("DELETE FROM mcp_codes WHERE code_hash = ?1", [&hashed]);
 
         let Some((stored_client, stored_uri, challenge, sealed, user, discord_exp, expires_at)) =
             row
@@ -307,6 +378,89 @@ impl McpStore {
             discord_user: user,
             discord_exp,
         })
+    }
+
+    /* ── Consent tickets ─────────────────────────────────────────────── */
+
+    /// Park an authorization Discord has completed until the user answers
+    /// DWEEB's own consent page. Returns the single-use ticket that page's
+    /// form carries; nothing else about the grant — least of all the Discord
+    /// token — is ever put in the page.
+    pub fn create_consent(&self, pending: &PendingConsent) -> Result<String, String> {
+        let ticket = random_hex(32);
+        let sealed = seal::seal_mcp(&self.key, &pending.discord_token)
+            .ok_or_else(|| "could not seal the Discord token".to_string())?;
+        let conn = self.pool.get();
+        conn.execute(
+            "INSERT INTO mcp_consents
+                 (ticket_hash, client_id, redirect_uri, code_challenge, client_state, discord_token, discord_user, discord_exp, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                hash(&ticket),
+                pending.client_id,
+                pending.redirect_uri,
+                pending.code_challenge,
+                pending.client_state,
+                sealed,
+                pending.discord_user,
+                pending.discord_exp,
+                now() + CONSENT_TTL_SECS,
+            ],
+        )
+        .map_err(|e| format!("create consent: {e}"))?;
+        Ok(ticket)
+    }
+
+    /// Take a consent ticket — at most once, whatever the answer: the read is
+    /// the delete. `Ok(None)` for an unknown, used, or expired ticket.
+    pub fn take_consent(&self, ticket: &str) -> Result<Option<PendingConsent>, String> {
+        let conn = self.pool.get();
+        let row = conn
+            .query_row(
+                "DELETE FROM mcp_consents WHERE ticket_hash = ?1
+                 RETURNING client_id, redirect_uri, code_challenge, client_state, discord_token, discord_user, discord_exp, expires_at",
+                [hash(ticket)],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                    ))
+                },
+            )
+            .ok();
+        let Some((
+            client_id,
+            redirect_uri,
+            code_challenge,
+            client_state,
+            sealed,
+            user,
+            exp,
+            expires_at,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        if now() >= expires_at {
+            return Ok(None);
+        }
+        let discord_token = seal::open_mcp(&self.key, &sealed)
+            .ok_or_else(|| "could not open a stored consent".to_string())?;
+        Ok(Some(PendingConsent {
+            client_id,
+            redirect_uri,
+            code_challenge,
+            client_state,
+            discord_token,
+            discord_user: user,
+            discord_exp: exp,
+        }))
     }
 
     /* ── Access tokens ───────────────────────────────────────────────── */
@@ -365,7 +519,12 @@ impl McpStore {
         })
     }
 
-    /// Delete expired codes and tokens. Called on a timer from `main`.
+    /// Delete expired codes, tokens and consent tickets, and retire the
+    /// registrations nobody uses — never-used ones after a day, idle ones
+    /// after a month, and never one that still has a live token or code
+    /// behind it. Without that last part the table only ever grew, and once it
+    /// reached the cap every registration failed for good. Called on a timer
+    /// from `main`.
     pub fn sweep(&self) -> Result<usize, String> {
         let conn = self.pool.get();
         let now = now();
@@ -375,8 +534,66 @@ impl McpStore {
         let tokens = conn
             .execute("DELETE FROM mcp_tokens WHERE expires_at <= ?1", [now])
             .map_err(|e| format!("sweep tokens: {e}"))?;
-        Ok(codes + tokens)
+        let consents = conn
+            .execute("DELETE FROM mcp_consents WHERE expires_at <= ?1", [now])
+            .map_err(|e| format!("sweep consents: {e}"))?;
+        let clients = conn
+            .execute(
+                "DELETE FROM mcp_clients
+                 WHERE ((last_used_at IS NULL AND created_at <= ?1) OR last_used_at <= ?2)
+                   AND NOT EXISTS (SELECT 1 FROM mcp_tokens t
+                                   WHERE t.client_id = mcp_clients.client_id AND t.expires_at > ?3)
+                   AND NOT EXISTS (SELECT 1 FROM mcp_codes c
+                                   WHERE c.client_id = mcp_clients.client_id AND c.expires_at > ?3)
+                   AND NOT EXISTS (SELECT 1 FROM mcp_consents k
+                                   WHERE k.client_id = mcp_clients.client_id AND k.expires_at > ?3)",
+                rusqlite::params![
+                    now - UNUSED_CLIENT_TTL_SECS,
+                    now - IDLE_CLIENT_TTL_SECS,
+                    now
+                ],
+            )
+            .map_err(|e| format!("sweep clients: {e}"))?;
+        // Re-count rather than subtract: the cap must reflect the table, even
+        // after a registration raced the sweep.
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM mcp_clients", [], |r| r.get(0))
+            .map_err(|e| format!("count clients: {e}"))?;
+        self.clients.store(count, Ordering::Relaxed);
+        Ok(codes + tokens + consents + clients)
     }
+}
+
+/// Why a registration was not stored.
+#[derive(Debug)]
+pub enum RegisterError {
+    /// The table is at its cap and nothing in it is abandoned yet — a
+    /// capacity answer for the caller, not a failure of ours.
+    Full,
+    /// The database refused the write.
+    Storage(String),
+}
+
+impl std::fmt::Display for RegisterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegisterError::Full => f.write_str("too many registered clients"),
+            RegisterError::Storage(e) => f.write_str(e),
+        }
+    }
+}
+
+/// An authorization Discord completed, waiting on the user's answer to the
+/// consent page.
+#[derive(Debug, Clone)]
+pub struct PendingConsent {
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub code_challenge: String,
+    pub client_state: Option<String>,
+    pub discord_token: String,
+    pub discord_user: String,
+    pub discord_exp: i64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -573,6 +790,156 @@ mod tests {
         assert!(store.client_secret_matches(&confidential.client_id, Some("s3cret")));
         assert!(!store.client_secret_matches(&confidential.client_id, Some("wrong")));
         assert!(!store.client_secret_matches(&confidential.client_id, None));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Backdate a registration, as if it had been made `secs` ago.
+    fn age_client(store: &McpStore, client_id: &str, secs: i64) {
+        store
+            .pool
+            .get()
+            .execute(
+                "UPDATE mcp_clients SET created_at = ?2 WHERE client_id = ?1",
+                rusqlite::params![client_id, now() - secs],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_code_redeemed_concurrently_is_honoured_exactly_once() {
+        let (store, path) = temp_store("code-race");
+        let store = std::sync::Arc::new(store);
+        for _ in 0..20 {
+            let code = store
+                .create_code(
+                    "c",
+                    "https://claude.ai/cb",
+                    "challenge",
+                    "t",
+                    "42",
+                    now() + 3600,
+                )
+                .unwrap();
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let store = std::sync::Arc::clone(&store);
+                    let code = code.clone();
+                    std::thread::spawn(move || {
+                        store
+                            .redeem_code(&code, "c", "https://claude.ai/cb")
+                            .is_ok()
+                    })
+                })
+                .collect();
+            let honoured = handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .filter(|ok| *ok)
+                .count();
+            assert_eq!(honoured, 1, "one code minted {honoured} tokens");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_consent_ticket_is_single_use_and_carries_the_grant() {
+        let (store, path) = temp_store("consent");
+        let pending = PendingConsent {
+            client_id: "c".into(),
+            redirect_uri: "https://claude.ai/cb".into(),
+            code_challenge: "challenge".into(),
+            client_state: Some("st".into()),
+            discord_token: "discord-token".into(),
+            discord_user: "42".into(),
+            discord_exp: now() + 3600,
+        };
+        let ticket = store.create_consent(&pending).unwrap();
+        let taken = store.take_consent(&ticket).unwrap().expect("first answer");
+        assert_eq!(taken.discord_token, "discord-token");
+        assert_eq!(taken.client_state.as_deref(), Some("st"));
+        // A replayed form — a double click, a back button — finds nothing.
+        assert!(store.take_consent(&ticket).unwrap().is_none());
+        assert!(store.take_consent("not-a-ticket").unwrap().is_none());
+        // And the page never needed the Discord token: the database holds it
+        // sealed, not in the clear.
+        let raw = std::fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&raw).contains("discord-token"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_expired_consent_ticket_answers_nothing() {
+        let (store, path) = temp_store("consent-expired");
+        let pending = PendingConsent {
+            client_id: "c".into(),
+            redirect_uri: "https://claude.ai/cb".into(),
+            code_challenge: "challenge".into(),
+            client_state: None,
+            discord_token: "t".into(),
+            discord_user: "42".into(),
+            discord_exp: now() + 3600,
+        };
+        let ticket = store.create_consent(&pending).unwrap();
+        store
+            .pool
+            .get()
+            .execute("UPDATE mcp_consents SET expires_at = ?1", [now() - 1])
+            .unwrap();
+        assert!(store.take_consent(&ticket).unwrap().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sweeping_retires_abandoned_registrations_and_keeps_live_ones() {
+        let (store, path) = temp_store("sweep-clients");
+        let uris = ["https://claude.ai/cb".to_string()];
+        let abandoned = store.register_client(&uris, None, None).unwrap();
+        age_client(&store, &abandoned.client_id, UNUSED_CLIENT_TTL_SECS + 1);
+        let fresh = store.register_client(&uris, None, None).unwrap();
+        let in_use = store.register_client(&uris, None, None).unwrap();
+        age_client(&store, &in_use.client_id, UNUSED_CLIENT_TTL_SECS + 1);
+        // An authorization stamps it as used and leaves a live token behind.
+        store
+            .create_code(
+                &in_use.client_id,
+                &uris[0],
+                "challenge",
+                "t",
+                "42",
+                now() + 3600,
+            )
+            .unwrap();
+        store
+            .create_token(&in_use.client_id, "t", "42", now() + 3600)
+            .unwrap();
+
+        store.sweep().unwrap();
+        assert!(store.client(&abandoned.client_id).is_none());
+        assert!(store.client(&fresh.client_id).is_some());
+        assert!(store.client(&in_use.client_id).is_some());
+        // The cap counts what is really there.
+        assert_eq!(store.clients.load(Ordering::Relaxed), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn at_the_cap_an_abandoned_registration_makes_room_and_otherwise_it_is_a_capacity_answer() {
+        let (store, path) = temp_store("cap");
+        let uris = ["https://claude.ai/cb".to_string()];
+        let old = store.register_client(&uris, None, None).unwrap();
+        age_client(&store, &old.client_id, EVICTABLE_UNUSED_SECS + 1);
+        store.clients.store(MAX_CLIENTS, Ordering::Relaxed);
+        // The oldest never-used registration goes; the new one gets in.
+        let newcomer = store.register_client(&uris, None, None).expect("room made");
+        assert!(store.client(&old.client_id).is_none());
+        assert!(store.client(&newcomer.client_id).is_some());
+        // Nothing evictable left (the newcomer is seconds old): turned away
+        // with a capacity answer, not a storage failure.
+        store.clients.store(MAX_CLIENTS, Ordering::Relaxed);
+        assert!(matches!(
+            store.register_client(&uris, None, None),
+            Err(RegisterError::Full)
+        ));
         let _ = std::fs::remove_file(&path);
     }
 

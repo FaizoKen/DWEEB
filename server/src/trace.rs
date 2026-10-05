@@ -82,7 +82,13 @@ impl ClassifyResponse for FaultClassifier {
         res: &Response<B>,
     ) -> ClassifiedResponse<RequestFailure, Self::ClassifyEos> {
         let status = res.status();
-        if !status.is_server_error() {
+        // 501 is this deployment saying a feature is switched off (MCP, the AI
+        // relay, ratings, feedback, custom apps without a dispatcher) — a
+        // configuration, not a fault. Logged as a failure it paged on every
+        // scanner probing a disabled endpoint. A feature switched off by
+        // mistake is caught by the monitors that watch it (Gatus checks the MCP
+        // discovery document), not by this line.
+        if !status.is_server_error() || status == StatusCode::NOT_IMPLEMENTED {
             return ClassifiedResponse::Ready(Ok(()));
         }
         let failure = match res.extensions().get::<Fault>() {
@@ -158,6 +164,16 @@ mod tests {
         // A handler answering a bare status carries no marker: ours.
         let bare = StatusCode::INTERNAL_SERVER_ERROR.into_response();
         assert!(classify(&bare).unwrap_err().pages());
+
+        // A feature switched off on this deployment answers 501 — a
+        // configuration, so a scanner probing it is not a failure at all.
+        let off = AppError::Status {
+            status: StatusCode::NOT_IMPLEMENTED,
+            message: "MCP is not enabled on this server.".into(),
+            retry_after: None,
+        }
+        .into_response();
+        assert!(classify(&off).is_ok());
 
         // Nothing below 500 is a failure at all.
         for status in [

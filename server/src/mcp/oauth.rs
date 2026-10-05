@@ -14,6 +14,15 @@
 //! app and the Activity already go through. There is no ambient bot authority
 //! to leak.
 //!
+//! **DWEEB asks for consent itself, after Discord does.** Discord's consent
+//! screen can only name DWEEB, while the client asking was registered
+//! anonymously, with any redirect URI it liked. Handing the code straight to
+//! that redirect would let anyone who gets a user to click one authorize link
+//! receive a token that posts as them — the MCP spec's "confused deputy". So
+//! the Discord step ends on a DWEEB page naming the client and where it will be
+//! sent back to; the grant waits server-side behind a single-use ticket, and
+//! the authorization code exists only once the user presses **Allow**.
+//!
 //! **The authorization request rides in `state`, sealed.** The browser doing
 //! the Discord round trip belongs to the connector, so it carries none of our
 //! cookies — the same problem the Activity's connect flow has, solved the same
@@ -47,7 +56,7 @@ use crate::routes::AppState;
 use crate::seal;
 use crate::session::now;
 
-use super::store::{CodeError, McpStore, TokenIdentity};
+use super::store::{CodeError, McpStore, PendingConsent, RegisterError, TokenIdentity};
 
 /// The single scope this resource defines. Named for what it lets a caller do,
 /// because that string is what the user is shown when they authorize.
@@ -180,16 +189,27 @@ pub async fn register(
         .is_some_and(|m| m != "none");
     let secret = wants_secret.then(|| super::store::random_hex(32));
 
-    let name = body
-        .client_name
-        .as_deref()
-        .map(|n| n.chars().take(120).collect::<String>());
-    let client = store
-        .register_client(&uris, name.as_deref(), secret.as_deref())
-        .map_err(|e| {
-            // Registration failing is our problem, not the caller's.
-            AppError::Internal(format!("could not register the client: {e}"))
-        })?;
+    let name = body.client_name.as_deref().and_then(clean_client_name);
+    let client = match store.register_client(&uris, name.as_deref(), secret.as_deref()) {
+        Ok(client) => client,
+        // Every registration slot is held by a client that is (or may yet be)
+        // in use. That is capacity, not a fault of ours, so it must not page —
+        // and the honest answer is "later", once the sweep has run.
+        Err(RegisterError::Full) => {
+            return Err(AppError::Status {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                message: "This server isn't accepting new connections right now. Try again later."
+                    .into(),
+                retry_after: Some(3600.0),
+            })
+        }
+        // The database refusing the write is our problem, not the caller's.
+        Err(RegisterError::Storage(e)) => {
+            return Err(AppError::Internal(format!(
+                "could not register the client: {e}"
+            )))
+        }
+    };
 
     tracing::info!(
         target: "mcp_oauth",
@@ -209,11 +229,28 @@ pub async fn register(
     });
     if let Some(secret) = secret {
         out["client_secret"] = json!(secret);
+        // Required alongside a secret (RFC 7591 §3.2.1); 0 = never expires.
+        out["client_secret_expires_at"] = json!(0);
     }
     if let Some(name) = name {
         out["client_name"] = json!(name);
     }
     Ok((StatusCode::CREATED, Json(out)).into_response())
+}
+
+/// A registration's display name as it is stored, logged and shown on the
+/// consent page. The registration is anonymous, so the name is attacker text:
+/// a newline in it would forge a whole line in the proxy's log (and the log is
+/// what pages), so control characters become spaces — the same rule
+/// `telemetry::clamp_field` applies. Bounded, trimmed, and absent when blank.
+fn clean_client_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(120)
+        .collect();
+    let trimmed = cleaned.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 fn registration_error(code: &str, description: &str) -> Response {
@@ -236,10 +273,14 @@ fn is_acceptable_redirect(raw: &str) -> bool {
     }
     match parsed.scheme() {
         "https" => true,
-        "http" => matches!(
-            parsed.host_str(),
-            Some("localhost") | Some("127.0.0.1") | Some("::1")
-        ),
+        // Compared on the parsed host: `host_str()` spells an IPv6 literal
+        // with its brackets (`[::1]`), so a string match never let one in.
+        "http" => match parsed.host() {
+            Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        },
         _ => false,
     }
 }
@@ -346,10 +387,16 @@ pub async fn authorize(
     Ok(Redirect::to(&url).into_response())
 }
 
-/// Finish the flow after Discord calls `/auth/callback` back with an `mcp_`
+/// Continue the flow after Discord calls `/auth/callback` back with an `mcp_`
 /// state. Called from `auth::callback`, which owns the code exchange.
 ///
-/// Returns the redirect that hands the connector its authorization code.
+/// Returns DWEEB's own consent page, not the code. Discord's consent screen
+/// names only *DWEEB*, while the client asking — registered anonymously, with
+/// whatever redirect URI it liked — is someone else: handing the code straight
+/// to that redirect would let anyone who gets a user to click one link walk
+/// away with a token that posts as them (the MCP spec's "confused deputy").
+/// So the user is shown which app is asking and where it will be sent back
+/// to, and the code is minted only on **Allow** (see [`consent`]).
 pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &str) -> Response {
     let Some(store) = st.mcp.as_ref() else {
         return error_page(
@@ -415,13 +462,95 @@ pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &s
 
     // Discord's `expires_in` is the ceiling on everything downstream.
     let discord_exp = now() + token.expires_in.max(0);
+    let parked = PendingConsent {
+        client_id: pending.client_id.clone(),
+        redirect_uri: pending.redirect_uri.clone(),
+        code_challenge: pending.challenge.clone(),
+        client_state: pending.client_state.clone(),
+        discord_token: token.access_token,
+        discord_user: user.id.clone(),
+        discord_exp,
+    };
+    let ticket = match store.create_consent(&parked) {
+        Ok(ticket) => ticket,
+        Err(e) => {
+            tracing::error!(target: "mcp_oauth", error = %e, "could not store the pending consent");
+            return redirect_error(
+                &pending.redirect_uri,
+                "server_error",
+                "Could not complete the authorization.",
+                pending.client_state.as_deref(),
+            );
+        }
+    };
+
+    let client_name = store
+        .client(&pending.client_id)
+        .and_then(|c| c.client_name)
+        .unwrap_or_default();
+    let signed_in_as = user
+        .global_name
+        .clone()
+        .unwrap_or_else(|| user.username.clone());
+    consent_page(&client_name, &pending.redirect_uri, &signed_in_as, &ticket)
+}
+
+#[derive(Deserialize)]
+pub struct ConsentForm {
+    #[serde(default)]
+    ticket: String,
+    #[serde(default)]
+    decision: String,
+}
+
+/// `POST /oauth/consent` — the user's answer to the consent page.
+///
+/// The ticket is single-use whatever the answer, and it is the only thing the
+/// page carried: the grant itself waited server-side. Only **Allow** mints the
+/// authorization code; anything else is reported to the client as a refusal at
+/// its (already verified) redirect URI.
+pub async fn consent(State(st): State<AppState>, Form(form): Form<ConsentForm>) -> Response {
+    let Some(store) = st.mcp.as_ref() else {
+        return not_enabled();
+    };
+    let pending = match store.take_consent(form.ticket.trim()) {
+        Ok(Some(pending)) => pending,
+        Ok(None) => {
+            return error_page(
+                "That approval has expired",
+                "Nothing was connected. Start the connection again from your MCP client.",
+            )
+        }
+        Err(e) => {
+            tracing::error!(target: "mcp_oauth", error = %e, "could not open a pending consent");
+            return error_page(
+                "That approval couldn't be read",
+                "Nothing was connected. Start the connection again from your MCP client.",
+            );
+        }
+    };
+    if form.decision != "allow" {
+        tracing::info!(
+            target: "mcp_oauth",
+            client_id = %pending.client_id,
+            user = %pending.discord_user,
+            "declined an MCP client"
+        );
+        return redirect_error(
+            &pending.redirect_uri,
+            "access_denied",
+            "The authorization was declined.",
+            pending.client_state.as_deref(),
+        );
+    }
+
     let code = match store.create_code(
         &pending.client_id,
         &pending.redirect_uri,
-        &pending.challenge,
-        &token.access_token,
-        &user.id,
-        discord_exp,
+        &pending.code_challenge,
+        &pending.discord_token,
+        &pending.discord_user,
+        pending.discord_exp,
     ) {
         Ok(code) => code,
         Err(e) => {
@@ -438,15 +567,95 @@ pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &s
     tracing::info!(
         target: "mcp_oauth",
         client_id = %pending.client_id,
-        user = %user.id,
+        user = %pending.discord_user,
         "authorized an MCP client"
     );
 
-    let mut url = format!("{}?code={}", pending.redirect_uri, urlencode(&code));
-    if let Some(client_state) = &pending.client_state {
-        url.push_str(&format!("&state={}", urlencode(client_state)));
+    let mut params = vec![("code", code.as_str())];
+    if let Some(client_state) = pending.client_state.as_deref() {
+        params.push(("state", client_state));
     }
-    Redirect::to(&url).into_response()
+    Redirect::to(&with_query(&pending.redirect_uri, &params)).into_response()
+}
+
+/// The page that asks the user to approve one client. Everything shown is
+/// escaped (the client name is anonymous registration text), the page can't be
+/// framed (so its Allow button can't be clickjacked), and it is never cached
+/// (it carries a live ticket).
+fn consent_page(
+    client_name: &str,
+    redirect_uri: &str,
+    signed_in_as: &str,
+    ticket: &str,
+) -> Response {
+    let app = if client_name.trim().is_empty() {
+        "An app that didn't give its name".to_string()
+    } else {
+        format!("“{}”", escape_html(client_name))
+    };
+    let destination = url::Url::parse(redirect_uri)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+        .filter(|o| o != "null")
+        .unwrap_or_else(|| redirect_uri.to_string());
+    let html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <meta name=\"robots\" content=\"noindex\">\
+         <title>Connect an app to DWEEB</title>\
+         <style>body{{background:#1a1a1e;color:#dbdee1;font:16px/1.5 system-ui,sans-serif;\
+         display:grid;place-items:center;min-height:100vh;margin:0;padding:24px}}\
+         main{{max-width:30rem}}h1{{font-size:1.25rem;margin:0 0 .75rem}}\
+         p{{margin:0 0 .75rem;color:#b5bac1}}strong{{color:#f2f3f5}}\
+         .where{{font-family:ui-monospace,monospace;word-break:break-all;color:#f2f3f5}}\
+         form{{display:flex;gap:.75rem;margin-top:1.25rem}}\
+         button{{font:inherit;padding:.6rem 1.2rem;border-radius:8px;border:0;cursor:pointer}}\
+         .allow{{background:#5865f2;color:#fff}}.deny{{background:#4e5058;color:#fff}}</style>\
+         </head><body><main>\
+         <h1>{app} wants to use DWEEB as you</h1>\
+         <p>Signed in to Discord as <strong>{who}</strong>. If you allow it, this app can \
+         post and edit messages through DWEEB in the servers where you can manage webhooks, \
+         for up to 7 days.</p>\
+         <p>It will be sent back to <span class=\"where\">{destination}</span></p>\
+         <p>Only allow this if you just started connecting this app yourself.</p>\
+         <form method=\"post\" action=\"/oauth/consent\">\
+         <input type=\"hidden\" name=\"ticket\" value=\"{ticket}\">\
+         <button class=\"allow\" type=\"submit\" name=\"decision\" value=\"allow\">Allow</button>\
+         <button class=\"deny\" type=\"submit\" name=\"decision\" value=\"deny\">Deny</button>\
+         </form></main></body></html>",
+        who = escape_html(signed_in_as),
+        destination = escape_html(&destination),
+        ticket = escape_html(ticket),
+    );
+    (
+        StatusCode::OK,
+        [
+            (header::X_FRAME_OPTIONS, "DENY"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+            ),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        Html(html),
+    )
+        .into_response()
+}
+
+fn escape_html(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// The page a user lands on when they decline Discord's consent screen (or
@@ -587,19 +796,24 @@ pub fn authenticate(st: &AppState, headers: &HeaderMap) -> Result<TokenIdentity,
                     .into_response(),
             )),
         };
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
-
-    let Some(token) = token else {
+    let Some(token) = bearer_token(headers) else {
         return Err(Box::new(unauthorized(st, "Authorization required.")));
     };
     store
         .resolve_token(token)
         .ok_or_else(|| Box::new(unauthorized(st, "That access token is expired or unknown.")))
+}
+
+/// The token from an `Authorization: Bearer …` header. The auth scheme is
+/// case-insensitive (RFC 9110 §11.1): `bearer x` is as valid as `Bearer x`.
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| token.trim())
+        .filter(|t| !t.is_empty())
 }
 
 fn unauthorized(st: &AppState, message: &str) -> Response {
@@ -695,15 +909,39 @@ fn redirect_error(
     description: &str,
     client_state: Option<&str>,
 ) -> Response {
-    let mut url = format!(
-        "{redirect_uri}?error={}&error_description={}",
-        urlencode(code),
-        urlencode(description)
-    );
+    let mut params = vec![("error", code), ("error_description", description)];
     if let Some(state) = client_state {
-        url.push_str(&format!("&state={}", urlencode(state)));
+        params.push(("state", state));
     }
-    Redirect::to(&url).into_response()
+    Redirect::to(&with_query(redirect_uri, &params)).into_response()
+}
+
+/// `redirect_uri` with `params` added to its query. A registered redirect URI
+/// may carry a query of its own (RFC 6749 §3.1.2 keeps it), so parameters are
+/// appended to it rather than glued on after a second `?`, which would leave
+/// the client unable to read `code` or `error` at all.
+fn with_query(redirect_uri: &str, params: &[(&str, &str)]) -> String {
+    match url::Url::parse(redirect_uri) {
+        Ok(mut url) => {
+            {
+                let mut query = url.query_pairs_mut();
+                for (key, value) in params {
+                    query.append_pair(key, value);
+                }
+            }
+            url.to_string()
+        }
+        // Unreachable for a registered URI (registration parses each one), but
+        // never worth a panic.
+        Err(_) => {
+            let joined = params
+                .iter()
+                .map(|(k, v)| format!("{k}={}", urlencode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            format!("{redirect_uri}?{joined}")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -748,6 +986,114 @@ mod tests {
         assert!(!is_acceptable_redirect("https://example.test/cb#frag"));
         assert!(!is_acceptable_redirect("javascript:alert(1)"));
         assert!(!is_acceptable_redirect("not a url"));
+    }
+
+    #[test]
+    fn an_ipv6_loopback_redirect_is_accepted_like_any_other_loopback() {
+        // `host_str()` spells it `[::1]`, which the old string match never hit.
+        assert!(is_acceptable_redirect("http://[::1]:8080/cb"));
+        assert!(is_acceptable_redirect("http://LOCALHOST:6274/cb"));
+        assert!(!is_acceptable_redirect("http://[2001:db8::1]/cb"));
+        assert!(!is_acceptable_redirect("http://localhost.evil.test/cb"));
+    }
+
+    fn location(resp: &Response) -> url::Url {
+        let raw = resp
+            .headers()
+            .get(header::LOCATION)
+            .expect("a redirect")
+            .to_str()
+            .unwrap();
+        url::Url::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn a_redirect_uri_with_its_own_query_still_receives_readable_parameters() {
+        let resp = redirect_error(
+            "https://client.example/cb?tenant=a",
+            "access_denied",
+            "nope",
+            Some("st"),
+        );
+        let pairs: Vec<(String, String)> = location(&resp).query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("tenant".into(), "a".into()),
+                ("error".into(), "access_denied".into()),
+                ("error_description".into(), "nope".into()),
+                ("state".into(), "st".into()),
+            ]
+        );
+        // And a plain URI gets a plain query.
+        assert_eq!(
+            with_query("https://claude.ai/cb", &[("code", "abc")]),
+            "https://claude.ai/cb?code=abc"
+        );
+    }
+
+    #[test]
+    fn a_client_name_can_never_forge_a_log_line() {
+        let forged = "x\n2026-10-05T00:00:00.000000Z ERROR dweeb_proxy::routes: forged page";
+        let cleaned = clean_client_name(forged).unwrap();
+        assert!(!cleaned.contains('\n'), "{cleaned:?}");
+        assert!(cleaned.chars().all(|c| !c.is_control()));
+        assert_eq!(clean_client_name(" \t\r\n "), None);
+        assert_eq!(clean_client_name(&"a".repeat(500)).unwrap().len(), 120);
+    }
+
+    #[test]
+    fn the_consent_page_cannot_be_framed_or_cached() {
+        let resp = consent_page(
+            "<script>alert(1)</script> Claude",
+            "https://evil.example/cb?x=1",
+            "Faizo",
+            "ticket123",
+        );
+        assert_eq!(resp.status(), StatusCode::OK);
+        let headers = resp.headers();
+        assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert!(headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'"));
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
+    }
+
+    #[tokio::test]
+    async fn the_consent_page_escapes_what_it_shows() {
+        let resp = consent_page(
+            "<script>alert(1)</script>",
+            "https://evil.example/cb?x=1",
+            "<b>me</b>",
+            "ticket123",
+        );
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<b>me</b>"));
+        // The destination is shown as an origin — where the code really goes.
+        assert!(html.contains("https://evil.example"));
+        assert!(html.contains("value=\"ticket123\""));
+        assert!(html.contains("value=\"allow\"") && html.contains("value=\"deny\""));
+    }
+
+    #[test]
+    fn the_bearer_scheme_is_matched_case_insensitively() {
+        let mut headers = HeaderMap::new();
+        for value in ["Bearer abc", "bearer abc", "BEARER  abc "] {
+            headers.insert(header::AUTHORIZATION, value.parse().unwrap());
+            assert_eq!(bearer_token(&headers), Some("abc"), "{value}");
+        }
+        headers.insert(header::AUTHORIZATION, "Basic abc".parse().unwrap());
+        assert_eq!(bearer_token(&headers), None);
+        headers.insert(header::AUTHORIZATION, "Bearer ".parse().unwrap());
+        assert_eq!(bearer_token(&headers), None);
     }
 
     #[test]

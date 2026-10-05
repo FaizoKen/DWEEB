@@ -45,6 +45,19 @@ use serde_json::{Map, Value};
 pub const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15;
 /// Silent send — delivered, but no notification.
 pub const FLAG_SUPPRESS_NOTIFICATIONS: u64 = 1 << 12;
+/// No link previews.
+pub const FLAG_SUPPRESS_EMBEDS: u64 = 1 << 2;
+/// The largest component `id` Discord accepts — a signed 32-bit integer
+/// (mirrors `COMPONENT_ID_MAX` in src/core/schema/validation.ts).
+const COMPONENT_ID_MAX: f64 = 2_147_483_647.0;
+
+/// The flag bits a sender may set. Everything else on a message is Discord's
+/// own bookkeeping (HAS_THREAD, CROSSPOSTED, EPHEMERAL, …) — a payload read
+/// back from a posted message carries those, and re-sending them is at best
+/// ignored and at worst refused.
+pub fn sendable_flags(flags: u64) -> u64 {
+    flags & (FLAG_IS_COMPONENTS_V2 | FLAG_SUPPRESS_NOTIFICATIONS | FLAG_SUPPRESS_EMBEDS)
+}
 
 /// Component `type` discriminators.
 pub mod component_type {
@@ -538,14 +551,15 @@ fn empty_media() -> Value {
 }
 
 /// The body Discord receives: the caller's payload with `IS_COMPONENTS_V2`
-/// forced on, preserving any other flag bits (silent send) they set.
+/// forced on, keeping only the other bits a sender may choose (silent send,
+/// no link previews) — see [`sendable_flags`].
 pub fn to_wire(message: &Value) -> Value {
     let mut out = message.clone();
     let existing = out.get("flags").and_then(Value::as_u64).unwrap_or(0);
     if let Some(map) = out.as_object_mut() {
         map.insert(
             "flags".into(),
-            Value::from(existing | FLAG_IS_COMPONENTS_V2),
+            Value::from(sendable_flags(existing) | FLAG_IS_COMPONENTS_V2),
         );
     }
     out
@@ -875,12 +889,25 @@ fn validate_node(node: &Value, path: &str, slot: Slot, data: &SchemaData, issues
     let limits = &data.limits;
 
     if let Some(id) = node.get("id") {
-        if !id.is_null() && id.as_i64().is_none() {
-            issues.push(Issue::error(
-                "COMPONENT_ID_NOT_INTEGER",
-                Some(path.to_string()),
-                "Component `id` must be a 32-bit integer.",
-            ));
+        if !id.is_null() {
+            // Judged as a JSON number, like the web validator's `Number.isInteger`,
+            // so a whole number past i64 reads as out of range on both sides.
+            match id.as_f64() {
+                Some(n) if n.fract() == 0.0 => {
+                    if !(0.0..=COMPONENT_ID_MAX).contains(&n) {
+                        issues.push(Issue::error(
+                            "COMPONENT_ID_RANGE",
+                            Some(path.to_string()),
+                            "Component `id` must be between 0 and 2147483647.",
+                        ));
+                    }
+                }
+                _ => issues.push(Issue::error(
+                    "COMPONENT_ID_NOT_INTEGER",
+                    Some(path.to_string()),
+                    "Component `id` must be a 32-bit integer.",
+                )),
+            }
         }
     }
 
@@ -1697,11 +1724,13 @@ pub const THREAD_ONLY_CHANNEL_TYPES: [u64; 2] = [15, 16];
 /// The `thread_name` rule cuts both ways: a forum/media destination requires
 /// one (it is the post's title), and every other channel kind rejects a post
 /// that carries one. Checked separately from [`validate`], which is
-/// destination-agnostic.
+/// destination-agnostic. A reply into an existing forum post (`thread_id`)
+/// starts nothing, so it needs no title.
 pub fn validate_destination(
     message: &Value,
     channel_type: Option<u64>,
     channel_name: Option<&str>,
+    thread_id_provided: bool,
 ) -> Vec<Issue> {
     let Some(channel_type) = channel_type else {
         return Vec::new();
@@ -1712,7 +1741,7 @@ pub fn validate_destination(
         .unwrap_or_else(|| "this channel".into());
 
     if THREAD_ONLY_CHANNEL_TYPES.contains(&channel_type) {
-        if has_title {
+        if has_title || thread_id_provided {
             return Vec::new();
         }
         let kind = if channel_type == 16 { "media" } else { "forum" };
@@ -1944,17 +1973,45 @@ mod tests {
         let titled = serde_json::json!({ "components": [], "thread_name": "Patch notes" });
         let plain = serde_json::json!({ "components": [] });
 
-        assert!(validate_destination(&titled, Some(15), None).is_empty());
+        assert!(validate_destination(&titled, Some(15), None, false).is_empty());
         assert_eq!(
-            validate_destination(&plain, Some(15), Some("help"))[0].code,
+            validate_destination(&plain, Some(15), Some("help"), false)[0].code,
             "THREAD_NAME_REQUIRED"
         );
-        assert!(validate_destination(&plain, Some(0), None).is_empty());
+        assert!(validate_destination(&plain, Some(0), None, false).is_empty());
         assert_eq!(
-            validate_destination(&titled, Some(0), None)[0].code,
+            validate_destination(&titled, Some(0), None, false)[0].code,
             "THREAD_NAME_FORBIDDEN"
         );
         // No destination known: nothing to say.
-        assert!(validate_destination(&titled, None, None).is_empty());
+        assert!(validate_destination(&titled, None, None, false).is_empty());
+    }
+
+    #[test]
+    fn a_reply_into_an_existing_forum_post_needs_no_title() {
+        // `thread_id` names the post; Discord accepts the reply without a
+        // `thread_name`, so refusing it blocked replying in forums at all.
+        let plain = serde_json::json!({ "components": [] });
+        assert!(validate_destination(&plain, Some(15), Some("help"), true).is_empty());
+        assert!(validate_destination(&plain, Some(16), Some("media"), true).is_empty());
+    }
+
+    #[test]
+    fn only_the_flags_a_sender_may_choose_reach_discord() {
+        // HAS_THREAD (1 << 5) and CROSSPOSTED (1 << 0) ride on a fetched
+        // message; neither may be sent back.
+        let fetched = serde_json::json!({
+            "components": [],
+            "flags": FLAG_IS_COMPONENTS_V2 | FLAG_SUPPRESS_NOTIFICATIONS | (1 << 5) | 1
+        });
+        assert_eq!(
+            to_wire(&fetched)["flags"],
+            Value::from(FLAG_IS_COMPONENTS_V2 | FLAG_SUPPRESS_NOTIFICATIONS)
+        );
+        let quiet = serde_json::json!({ "components": [], "flags": FLAG_SUPPRESS_EMBEDS });
+        assert_eq!(
+            to_wire(&quiet)["flags"],
+            Value::from(FLAG_IS_COMPONENTS_V2 | FLAG_SUPPRESS_EMBEDS)
+        );
     }
 }

@@ -70,12 +70,13 @@ claude.ai ──1─▶ /mcp                     401 + WWW-Authenticate: …reso
           ──4─▶ POST /oauth/register                     → client_id (public, no secret)
   browser ──5─▶ GET /oauth/authorize  ──▶ discord.com/oauth2/authorize
                                       ◀── /auth/callback?state=mcp_<sealed>
-          ◀─6──  302 back to the client with ?code=…
-          ──7─▶ POST /oauth/token  (+ PKCE verifier)     → access token
-          ──8─▶ /mcp  Authorization: Bearer …
+          ◀─6──  DWEEB consent page (names the client + redirect origin)
+          ──7─▶ POST /oauth/consent (Allow)  → 302 back to the client with ?code=…
+          ──8─▶ POST /oauth/token  (+ PKCE verifier)     → access token
+          ──9─▶ /mcp  Authorization: Bearer …
 ```
 
-Five things about that flow are deliberate:
+Six things about that flow are deliberate:
 
 - **Discord is the identity provider.** Nothing in DWEEB authenticates a person;
   step 5 hands the browser to Discord and comes back with *your* Discord access
@@ -98,6 +99,11 @@ Five things about that flow are deliberate:
 - **Errors before the redirect URI is verified render as a page, never a
   redirect.** Redirecting an error to an unverified URI is how an open redirector
   gets built.
+- **DWEEB asks for consent after Discord does.** Discord's screen can only name
+  DWEEB, while the client asking registered anonymously with any redirect URI.
+  So the Discord step ends on a DWEEB page naming the client and where it will
+  be sent back; the grant waits server-side behind a single-use ticket, the
+  code exists only after **Allow**, and the page can't be framed.
 
 ## Tools
 
@@ -110,14 +116,21 @@ caller to hold:
 | Tool | What it does |
 | --- | --- |
 | `list_servers` | Your Discord servers, with whether the DWEEB bot is present and whether you hold Manage Webhooks. Posting needs both. |
-| `list_channels` | The channels in one server, with the kind of each — a forum or media channel needs the message to carry a post title, and every other kind rejects one. |
+| `list_channels` | The channels in one server (you need Manage Webhooks there), with the kind of each — a forum or media channel needs the message to carry a post title, and every other kind rejects one. |
 | `send_message` | Post to a channel. Validated against Discord's rules *and* against that channel's kind before anything is sent. |
 | `fetch_message` | Read back a message DWEEB posted, as an editable payload. |
 | `update_message` | Replace a message DWEEB posted. Complete replacement, not a merge. |
 
 `send_message` resolves (or creates) DWEEB's own webhook in the channel — the
 same one the Activity posts through — so components bound to DWEEB plugins work,
-and no webhook URL ever reaches the client.
+and no webhook URL ever reaches the client. The channel must belong to the server
+named; `fetch_message` and `update_message` never create a webhook.
+
+`send_message` returns `thread_id` when the message landed in a thread or a new
+forum post — pass it to `fetch_message`/`update_message`. A `thread_id` reply into
+an existing forum post needs no `thread_name`. The write tools share a
+per-account budget (10, then one per 15 s), and a JSON-RPC batch is capped at 10
+messages.
 
 ## Storage and lifetime
 
@@ -126,7 +139,9 @@ codes, and access tokens. Nothing bearer-shaped is stored in the clear: codes,
 tokens, and client secrets are kept as SHA-256 digests, and the Discord access
 token behind a grant is AES-GCM **sealed** under the proxy's key — it has to be
 readable, since every call replays it against Discord. A leak of the file alone
-lets nobody call anything. Expired codes and tokens are swept hourly.
+lets nobody call anything. Expired codes, tokens and consent tickets are swept
+hourly, as are registrations that never completed an authorization within a day
+or have been idle for 30 days (never one with a live token).
 
 ## Operating it
 

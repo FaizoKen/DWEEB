@@ -17,11 +17,15 @@
 //!  3. Failure is data (`isError: true`), not a protocol error — the model
 //!     reading it is the one who can fix it. Only a bug returns an error.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::Instant;
+
 use serde_json::{json, Map, Value};
 
 use crate::error::AppError;
 use crate::routes::{
-    authorize_activity_webhooks, authorize_member_session, bot_guild_set, fetch_channels,
+    authorize_activity_webhooks, bot_guild_set, ensure_channel_in_guild, fetch_channels,
     is_snowflake, member_guilds, AppState,
 };
 use crate::session::Session;
@@ -32,6 +36,7 @@ use super::render;
 use super::store::TokenIdentity;
 
 /// What a tool hands back. Mirrors MCP's `CallToolResult`.
+#[derive(Debug)]
 pub struct ToolOutcome {
     pub text: String,
     pub structured: Value,
@@ -202,7 +207,9 @@ pub fn descriptors() -> Vec<Value> {
             }, "required": ["server_id", "channel_id", "message"], "additionalProperties": false }),
             json!({ "type": "object", "properties": {
                 "ok": { "type": "boolean" }, "error": { "type": "string" },
-                "message_id": { "type": "string" }, "link": { "type": "string" }, "report": { "type": "object" }
+                "message_id": { "type": "string" }, "link": { "type": "string" },
+                "thread_id": { "type": "string", "description": "Set when the message landed in a thread or a new forum post — pass it to `fetch_message` / `update_message`." },
+                "report": { "type": "object" }
             }, "required": ["ok"] }),
             false,
             true,
@@ -274,6 +281,60 @@ fn tool(
     })
 }
 
+/* ── Write budget ────────────────────────────────────────────────────── */
+
+/// Writes — share links, posts, edits — one Discord account may make through
+/// the connector: a burst, then one every [`WRITE_REFILL_SECS`]. The per-IP
+/// limit counts HTTP requests, and a model drives this endpoint from one
+/// connection, so without a per-account budget nothing stopped one account
+/// filling the site-wide short-link store or flooding a channel.
+const WRITE_BURST: f64 = 10.0;
+const WRITE_REFILL_SECS: f64 = 15.0;
+/// Bound on the buckets held at once; a full bucket carries no state worth
+/// keeping, so those are what get dropped.
+const MAX_WRITE_BUCKETS: usize = 10_000;
+
+static WRITE_BUCKETS: LazyLock<Mutex<HashMap<String, (f64, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn is_write(tool: &str) -> bool {
+    matches!(
+        tool,
+        "create_share_link" | "send_message" | "update_message"
+    )
+}
+
+/// Spend one write from `user`'s budget, or say how many seconds until one is
+/// back.
+fn take_write(user: &str) -> Result<(), u64> {
+    let now = Instant::now();
+    let mut buckets = match WRITE_BUCKETS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if buckets.len() >= MAX_WRITE_BUCKETS {
+        let refill_all = WRITE_BURST * WRITE_REFILL_SECS;
+        buckets.retain(|_, (_, last)| now.duration_since(*last).as_secs_f64() < refill_all);
+    }
+    let bucket = buckets
+        .entry(user.to_string())
+        .or_insert((WRITE_BURST, now));
+    spend(bucket, now)
+}
+
+/// Token-bucket arithmetic, separated so it is testable without a clock.
+fn spend(bucket: &mut (f64, Instant), now: Instant) -> Result<(), u64> {
+    let elapsed = now.saturating_duration_since(bucket.1).as_secs_f64();
+    bucket.0 = (bucket.0 + elapsed / WRITE_REFILL_SECS).min(WRITE_BURST);
+    bucket.1 = now;
+    if bucket.0 >= 1.0 {
+        bucket.0 -= 1.0;
+        Ok(())
+    } else {
+        Err(((1.0 - bucket.0) * WRITE_REFILL_SECS).ceil() as u64)
+    }
+}
+
 /// Dispatch a `tools/call`. `None` means no such tool, which the protocol layer
 /// reports as a JSON-RPC error rather than a tool failure.
 pub async fn call(
@@ -282,6 +343,13 @@ pub async fn call(
     name: &str,
     args: &Value,
 ) -> Option<ToolOutcome> {
+    if is_write(name) {
+        if let Err(wait) = take_write(&identity.discord_user) {
+            return Some(fail(format!(
+                "Slow down — this connection has used its writes for now. Try again in {wait}s."
+            )));
+        }
+    }
     let outcome = match name {
         "describe_schema" => describe_schema(args),
         "list_templates" => list_templates(args),
@@ -310,6 +378,17 @@ fn string_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 fn object_arg<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
     args.get(key).filter(|v| v.is_object())
+}
+
+/// The optional `thread_id`, which must be a snowflake when given: it is put in
+/// Discord's query string, where anything else (`1&wait=false`) would change
+/// the request itself.
+fn thread_arg(args: &Value) -> Result<Option<&str>, ToolOutcome> {
+    match string_arg(args, "thread_id") {
+        None => Ok(None),
+        Some(thread) if is_snowflake(thread) => Ok(Some(thread)),
+        Some(_) => Err(fail("`thread_id` must be a Discord thread id.")),
+    }
 }
 
 /// Resolve the `message` argument through the import boundary.
@@ -546,7 +625,11 @@ fn validate_message(args: &Value) -> ToolOutcome {
         Ok(m) => m,
         Err(e) => return e,
     };
-    let report = report(&message, string_arg(args, "thread_id").is_some());
+    let thread_id = match thread_arg(args) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let report = report(&message, thread_id.is_some());
     ok(report.text.clone(), json!({ "report": report.value }))
 }
 
@@ -688,7 +771,11 @@ async fn list_channels(st: &AppState, identity: &TokenIdentity, args: &Value) ->
         Ok(s) => s,
         Err(e) => return from_error(e),
     };
-    if let Err(e) = authorize_member_session(st, session, guild).await {
+    // The same gate as posting (and as `list_servers`' `can_post`): listing a
+    // server's channels exists to pick a destination, so a server the tools
+    // would refuse to post to must not look postable here — nor be refused
+    // here while the posting tools accept it.
+    if let Err(e) = authorize_activity_webhooks(st, session, guild).await {
         return from_error(e);
     }
     let channels = match fetch_channels(st, guild, false).await {
@@ -753,13 +840,30 @@ fn channel_kind(kind: u64) -> &'static str {
     }
 }
 
+/// What a channel-acting tool may do to find DWEEB's webhook there.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WebhookUse {
+    /// Posting: reuse DWEEB's webhook in the channel, or create one.
+    Post,
+    /// Reading or editing a posted message: only a webhook that already exists
+    /// can have posted it, so nothing is ever created for this.
+    Existing,
+}
+
 /// Shared preamble for the three tools that act on a channel: authorize the
-/// user for the guild's webhooks, then resolve the DWEEB webhook there.
+/// user for the guild's webhooks, confirm the channel really is in that guild,
+/// then resolve the DWEEB webhook there.
+///
+/// The channel check is the whole authorization for *where*: the gate above
+/// only proves the user may post in `guild`, and the bot token can reach any
+/// channel of any server it is in — so without it, a channel id from someone
+/// else's server was accepted and a webhook minted and posted through there.
 async fn webhook_for(
     st: &AppState,
     identity: &TokenIdentity,
     guild: &str,
     channel: &str,
+    usage: WebhookUse,
 ) -> Result<(String, String), ToolOutcome> {
     if !is_snowflake(guild) || !is_snowflake(channel) {
         return Err(fail(
@@ -770,9 +874,31 @@ async fn webhook_for(
     let session = authorize_activity_webhooks(st, session, guild)
         .await
         .map_err(from_error)?;
-    crate::activity::require_dweeb_webhook(st, &session.uid, guild, channel)
+    ensure_channel_in_guild(st, guild, channel)
         .await
-        .map_err(from_error)
+        .map_err(from_error)?;
+    match usage {
+        WebhookUse::Post => {
+            crate::activity::require_dweeb_webhook(st, &session.uid, guild, channel)
+                .await
+                .map_err(from_error)
+        }
+        WebhookUse::Existing => {
+            match crate::activity::dweeb_webhook_in_channel(st, guild, channel, None)
+                .await
+                .map_err(from_error)?
+            {
+                Some(found) => Ok(found),
+                None => Err(fail(
+                    "DWEEB has no webhook in that channel, so nothing it posted there can be read or edited. Only messages sent through DWEEB can be.",
+                )),
+            }
+        }
+    }
+}
+
+fn channel_not_in_server() -> ToolOutcome {
+    fail("That channel isn't in that server — see `list_channels` for the ones you can use.")
 }
 
 async fn send_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> ToolOutcome {
@@ -786,17 +912,27 @@ async fn send_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> 
     ) else {
         return fail("`server_id` and `channel_id` are required.");
     };
-    let thread_id = string_arg(args, "thread_id");
+    if !is_snowflake(guild) || !is_snowflake(channel) {
+        return fail(
+            "`server_id` and `channel_id` must be Discord ids — see `list_servers` and `list_channels`.",
+        );
+    }
+    let thread_id = match thread_arg(args) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
 
     // The check the message-only validator cannot make: a forum or media
     // channel needs the message to carry a post title, and every other kind
     // rejects one. Discord answers both with a 400 naming neither the channel
     // nor the field, so catching it here is the difference between a fixable
     // answer and a puzzle.
-    let destination = match destination_issues(st, identity, guild, channel, &message).await {
-        Ok(issues) => issues,
-        Err(outcome) => return outcome,
-    };
+    let destination =
+        match destination_issues(st, identity, guild, channel, &message, thread_id.is_some()).await
+        {
+            Ok(issues) => issues,
+            Err(outcome) => return outcome,
+        };
     if !destination.is_empty() {
         let detail = destination
             .iter()
@@ -826,10 +962,11 @@ async fn send_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> 
         };
     }
 
-    let (webhook_id, token) = match webhook_for(st, identity, guild, channel).await {
-        Ok(w) => w,
-        Err(e) => return e,
-    };
+    let (webhook_id, token) =
+        match webhook_for(st, identity, guild, channel, WebhookUse::Post).await {
+            Ok(w) => w,
+            Err(e) => return e,
+        };
     let payload = components::to_wire(&message);
     let posted = match st
         .discord
@@ -845,10 +982,19 @@ async fn send_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> 
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let link = format!("https://discord.com/channels/{guild}/{channel}/{message_id}");
+    // A post into a thread — an existing one, or the new post a forum or media
+    // channel starts — lives in that thread, not in the channel: the link must
+    // name it, and every later fetch/update must carry its id.
+    let thread = posted_thread(channel, &posted);
+    let link = message_link(guild, thread.as_deref().unwrap_or(channel), &message_id);
     let mut lines = vec![format!("Posted to <#{channel}>.")];
     if !message_id.is_empty() {
         lines.push(format!("  message id: {message_id}"));
+        if let Some(thread) = &thread {
+            lines.push(format!(
+                "  thread id:  {thread} (pass it as `thread_id` to read or edit this message)"
+            ));
+        }
         lines.push(format!("  link:       {link}"));
     }
     let has_notes = |key: &str| {
@@ -860,42 +1006,79 @@ async fn send_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> 
         lines.push(String::new());
         lines.push(report.text.clone());
     }
-    ok(
-        lines.join("\n"),
-        json!({ "message_id": message_id, "link": link, "report": report.value }),
-    )
+    let mut structured = json!({ "message_id": message_id, "link": link, "report": report.value });
+    if let Some(thread) = thread {
+        structured["thread_id"] = json!(thread);
+    }
+    ok(lines.join("\n"), structured)
 }
 
-/// Look the destination channel up in the guild's (cached) channel list and
-/// check the message against its kind. An unknown channel yields no issues —
-/// the post itself will fail with Discord's own answer, which is better than
-/// refusing on a stale cache.
+/// The thread a posted message landed in, from the message Discord echoed
+/// back: its `channel_id` is the channel itself for an ordinary post, and the
+/// thread's id when the message lives in one.
+fn posted_thread(requested_channel: &str, posted: &Value) -> Option<String> {
+    posted
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && *c != requested_channel)
+        .map(str::to_string)
+}
+
+fn message_link(guild: &str, channel_or_thread: &str, message_id: &str) -> String {
+    format!("https://discord.com/channels/{guild}/{channel_or_thread}/{message_id}")
+}
+
+/// Look the destination channel up in the guild's channel list and check the
+/// message against its kind. A channel that isn't in the guild at all — after
+/// a fresh read, so a just-created channel still counts — is refused here:
+/// the bot token could reach it, but the user's permission was only checked
+/// for *this* server.
 async fn destination_issues(
     st: &AppState,
     identity: &TokenIdentity,
     guild: &str,
     channel: &str,
     message: &Value,
+    thread_id_provided: bool,
 ) -> Result<Vec<components::Issue>, ToolOutcome> {
     let session = session_of(st, identity).await.map_err(from_error)?;
-    authorize_member_session(st, session, guild)
+    authorize_activity_webhooks(st, session, guild)
         .await
         .map_err(from_error)?;
-    let channels = fetch_channels(st, guild, false).await.map_err(from_error)?;
-    let found = channels
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-        .iter()
-        .find(|c| c.get("id").and_then(Value::as_str) == Some(channel));
-    let Some(found) = found else {
-        return Ok(Vec::new());
+    let cached = fetch_channels(st, guild, false).await.map_err(from_error)?;
+    let found = match find_channel(&cached, channel) {
+        Some(found) => found,
+        None => {
+            let fresh = fetch_channels(st, guild, true).await.map_err(from_error)?;
+            match find_channel(&fresh, channel) {
+                Some(found) => found,
+                None => return Err(channel_not_in_server()),
+            }
+        }
     };
     Ok(components::validate_destination(
         message,
-        found.get("type").and_then(Value::as_u64),
-        found.get("name").and_then(Value::as_str),
+        found.kind,
+        found.name.as_deref(),
+        thread_id_provided,
     ))
+}
+
+/// One channel's entry in a guild's channel list.
+struct FoundChannel {
+    kind: Option<u64>,
+    name: Option<String>,
+}
+
+fn find_channel(channels: &Value, channel: &str) -> Option<FoundChannel> {
+    channels
+        .as_array()?
+        .iter()
+        .find(|c| c.get("id").and_then(Value::as_str) == Some(channel))
+        .map(|c| FoundChannel {
+            kind: c.get("type").and_then(Value::as_u64),
+            name: c.get("name").and_then(Value::as_str).map(str::to_string),
+        })
 }
 
 async fn fetch_message(st: &AppState, identity: &TokenIdentity, args: &Value) -> ToolOutcome {
@@ -909,13 +1092,18 @@ async fn fetch_message(st: &AppState, identity: &TokenIdentity, args: &Value) ->
     if !is_snowflake(message_id) {
         return fail("`message_id` must be a Discord message id.");
     }
-    let (webhook_id, token) = match webhook_for(st, identity, guild, channel).await {
-        Ok(w) => w,
+    let thread_id = match thread_arg(args) {
+        Ok(t) => t,
         Err(e) => return e,
     };
+    let (webhook_id, token) =
+        match webhook_for(st, identity, guild, channel, WebhookUse::Existing).await {
+            Ok(w) => w,
+            Err(e) => return e,
+        };
     let fetched = match st
         .discord
-        .webhook_message(&webhook_id, &token, message_id, string_arg(args, "thread_id"))
+        .webhook_message(&webhook_id, &token, message_id, thread_id)
         .await
     {
         Ok(Some(v)) => v,
@@ -952,7 +1140,10 @@ async fn update_message(st: &AppState, identity: &TokenIdentity, args: &Value) -
     if !is_snowflake(message_id) {
         return fail("`message_id` must be a Discord message id.");
     }
-    let thread_id = string_arg(args, "thread_id");
+    let thread_id = match thread_arg(args) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
     let report = report(&message, thread_id.is_some());
     if !report.ok {
         return ToolOutcome {
@@ -964,23 +1155,29 @@ async fn update_message(st: &AppState, identity: &TokenIdentity, args: &Value) -
             is_error: true,
         };
     }
-    let (webhook_id, token) = match webhook_for(st, identity, guild, channel).await {
-        Ok(w) => w,
-        Err(e) => return e,
-    };
+    let (webhook_id, token) =
+        match webhook_for(st, identity, guild, channel, WebhookUse::Existing).await {
+            Ok(w) => w,
+            Err(e) => return e,
+        };
+    // The thread goes with the edit: a message in a thread or forum post is
+    // only addressable through it — without it Discord answers 404 and the
+    // edit reads as "that message no longer exists".
     if let Err(e) = st
         .discord
-        .edit_webhook_message(
+        .edit_webhook_message_with_files(
             &webhook_id,
             &token,
             message_id,
-            components::to_wire(&message),
+            &components::to_wire(&message),
+            Vec::new(),
+            thread_id,
         )
         .await
     {
         return from_error(e);
     }
-    let link = format!("https://discord.com/channels/{guild}/{channel}/{message_id}");
+    let link = message_link(guild, thread_id.unwrap_or(channel), message_id);
     ok(
         format!("Updated message {message_id}.\n  link: {link}"),
         json!({ "message_id": message_id, "link": link, "report": report.value }),
@@ -993,7 +1190,7 @@ fn strip_wire_extras(mut fetched: Value) -> Value {
     let Some(map) = fetched.as_object_mut() else {
         return fetched;
     };
-    let keep: Map<String, Value> = map
+    let mut keep: Map<String, Value> = map
         .iter()
         .filter(|(k, _)| {
             matches!(
@@ -1003,6 +1200,15 @@ fn strip_wire_extras(mut fetched: Value) -> Value {
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // A posted message's flags include bits only Discord sets (HAS_THREAD,
+    // CROSSPOSTED, …); hand back only the ones a sender may choose, so an
+    // edit built from this payload doesn't try to re-send them.
+    if let Some(flags) = keep.get("flags").and_then(Value::as_u64) {
+        keep.insert(
+            "flags".into(),
+            Value::from(components::sendable_flags(flags)),
+        );
+    }
     Value::Object(keep)
 }
 
@@ -1181,6 +1387,95 @@ mod tests {
         assert!(components::THREAD_ONLY_CHANNEL_TYPES.contains(&15));
         assert!(components::THREAD_ONLY_CHANNEL_TYPES.contains(&16));
         assert!(!components::THREAD_ONLY_CHANNEL_TYPES.contains(&0));
+    }
+
+    #[test]
+    fn the_write_budget_allows_a_burst_then_one_per_refill() {
+        let start = Instant::now();
+        let mut bucket = (WRITE_BURST, start);
+        for i in 0..WRITE_BURST as usize {
+            assert!(spend(&mut bucket, start).is_ok(), "write {i} of the burst");
+        }
+        // The burst is spent: the answer says how long until the next one.
+        let wait = spend(&mut bucket, start).expect_err("over budget");
+        assert_eq!(wait, WRITE_REFILL_SECS as u64);
+        // One refill period later, exactly one more write is allowed.
+        let later = start + std::time::Duration::from_secs_f64(WRITE_REFILL_SECS);
+        assert!(spend(&mut bucket, later).is_ok());
+        assert!(spend(&mut bucket, later).is_err());
+    }
+
+    #[test]
+    fn only_share_links_posts_and_edits_spend_the_write_budget() {
+        for tool in ["create_share_link", "send_message", "update_message"] {
+            assert!(is_write(tool), "{tool}");
+        }
+        for tool in [
+            "validate_message",
+            "list_servers",
+            "fetch_message",
+            "get_template",
+        ] {
+            assert!(!is_write(tool), "{tool}");
+        }
+    }
+
+    #[test]
+    fn a_thread_id_must_be_a_snowflake_before_it_reaches_a_query_string() {
+        assert!(thread_arg(&json!({})).unwrap().is_none());
+        assert_eq!(
+            thread_arg(&json!({ "thread_id": "1234567890123456789" })).unwrap(),
+            Some("1234567890123456789")
+        );
+        // `1&wait=false` would turn a successful post into a 204 the tool then
+        // reports as a failure — and a retry posts it twice.
+        assert!(thread_arg(&json!({ "thread_id": "1&wait=false" })).is_err());
+        assert!(
+            validate_message(&json!({
+                "message": { "components": [{ "type": 10, "content": "hi" }] },
+                "thread_id": "nope"
+            }))
+            .is_error
+        );
+    }
+
+    #[test]
+    fn a_post_that_landed_in_a_thread_is_linked_and_reported_through_it() {
+        // An ordinary post echoes the channel itself…
+        assert_eq!(posted_thread("100", &json!({ "channel_id": "100" })), None);
+        // …a forum post or a thread reply echoes the thread.
+        assert_eq!(
+            posted_thread("100", &json!({ "channel_id": "200" })),
+            Some("200".into())
+        );
+        assert_eq!(posted_thread("100", &json!({})), None);
+        assert_eq!(
+            message_link("1", "200", "300"),
+            "https://discord.com/channels/1/200/300"
+        );
+    }
+
+    #[test]
+    fn a_channel_is_found_only_in_its_own_servers_list() {
+        let channels = json!([
+            { "id": "10", "type": 0, "name": "general" },
+            { "id": "11", "type": 15, "name": "help" }
+        ]);
+        let forum = find_channel(&channels, "11").expect("listed");
+        assert_eq!(forum.kind, Some(15));
+        assert_eq!(forum.name.as_deref(), Some("help"));
+        // A channel id from another server is simply not in this list — the
+        // case the posting tools used to accept and mint a webhook for.
+        assert!(find_channel(&channels, "99").is_none());
+        assert!(find_channel(&json!({}), "10").is_none());
+    }
+
+    #[test]
+    fn a_fetched_messages_discord_only_flags_are_dropped() {
+        let stripped = strip_wire_extras(json!({
+            "components": [], "flags": 32768 | 4096 | (1 << 5)
+        }));
+        assert_eq!(stripped["flags"], json!(32768 | 4096));
     }
 
     #[test]

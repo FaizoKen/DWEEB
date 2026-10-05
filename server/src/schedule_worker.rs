@@ -196,6 +196,18 @@ async fn process(
     job: ClaimedJob,
     now: i64,
 ) {
+    // A run cap at or below the runs already made means the series is over:
+    // finish it without posting again. Checked here, at fire time, because the
+    // cap can be lowered after this occurrence was scheduled — `compute_next`
+    // only applies it after a send, which would be one post too many.
+    if job.max_runs.is_some_and(|max| job.runs_count >= max) {
+        let s = Arc::clone(store);
+        let id = job.id.clone();
+        let res = tokio::task::spawn_blocking(move || s.complete_without_send(&id, now)).await;
+        log_db("complete_without_send", res);
+        return;
+    }
+
     // Decrypt the message payload — needed on every path. A failure here means
     // the key changed (SESSION_SECRET rotated) or the row was tampered — neither
     // will ever succeed, so it's permanent.
@@ -226,6 +238,12 @@ async fn process(
     //    upstream blip retries.
     //  - A DWEEB (or web) schedule rides its channel-bound sealed URL, which
     //    can't drift, so it's authoritative.
+    // Held across the move and the post so a concurrent use of this bot's
+    // roaming webhook can't move it away in between (see `lock_custom_hook`).
+    let _hook_guard = match (&job.application_id, &job.guild_id) {
+        (Some(app), Some(guild)) => Some(crate::activity::lock_custom_hook(guild, app).await),
+        _ => None,
+    };
     let post_url = match (&job.application_id, &job.guild_id, &job.channel_id) {
         (Some(app), Some(guild), Some(channel)) => {
             match crate::activity::resolve_custom_hook_for_channel(state, guild, app, channel).await

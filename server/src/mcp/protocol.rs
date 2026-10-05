@@ -105,27 +105,54 @@ pub async fn endpoint_unsupported() -> Response {
 
 /* ── Dispatch ────────────────────────────────────────────────────────── */
 
+/// Most messages one batch may carry. Batching was permitted through
+/// 2025-03-26 and removed in 2025-06-18, so it is kept for older clients — but
+/// bounded: unbounded, one 256 KiB POST ran about two thousand tool calls,
+/// enough to fill the site-wide short-link store within a couple of dozen
+/// requests, every one of them inside the per-IP rate limit.
+const MAX_BATCH: usize = 10;
+
 /// Handle one parsed JSON-RPC message. `None` means "say nothing" — the message
 /// was a notification, or a response to a request we never made.
 pub async fn handle(st: &AppState, identity: &TokenIdentity, message: Value) -> Option<Value> {
-    // Batching was permitted through 2025-03-26 and removed in 2025-06-18.
     if let Some(batch) = message.as_array() {
-        if batch.is_empty() {
-            return Some(error_response(
-                Value::Null,
-                INVALID_REQUEST,
-                "An empty batch is not a request.",
-            ));
+        if let Some(refusal) = refuse_batch(batch) {
+            return Some(refusal);
         }
+        // Each entry is handled as a single message, so a batch nested inside
+        // a batch is answered as the malformed message it is rather than
+        // multiplying the bound.
         let mut answers = Vec::new();
         for entry in batch {
-            if let Some(answer) = Box::pin(handle(st, identity, entry.clone())).await {
+            if let Some(answer) = handle_one(st, identity, entry.clone()).await {
                 answers.push(answer);
             }
         }
         return (!answers.is_empty()).then_some(Value::Array(answers));
     }
+    handle_one(st, identity, message).await
+}
 
+/// The answer to a batch this server won't run, if it is one.
+fn refuse_batch(batch: &[Value]) -> Option<Value> {
+    if batch.is_empty() {
+        return Some(error_response(
+            Value::Null,
+            INVALID_REQUEST,
+            "An empty batch is not a request.",
+        ));
+    }
+    (batch.len() > MAX_BATCH).then(|| {
+        error_response(
+            Value::Null,
+            INVALID_REQUEST,
+            format!("A batch may carry at most {MAX_BATCH} messages; send the rest separately."),
+        )
+    })
+}
+
+/// Handle one JSON-RPC message that is not a batch.
+async fn handle_one(st: &AppState, identity: &TokenIdentity, message: Value) -> Option<Value> {
     let Some(object) = message.as_object() else {
         return Some(error_response(
             Value::Null,
@@ -605,6 +632,26 @@ mod tests {
 
         let answer = ask(json!({ "jsonrpc": "2.0", "id": 4, "method": 5 })).expect("answer");
         assert_eq!(answer["error"]["code"], INVALID_REQUEST);
+    }
+
+    #[test]
+    fn a_batch_is_bounded_so_one_request_cannot_run_thousands_of_tools() {
+        let call = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" });
+        assert!(refuse_batch(&vec![call.clone(); MAX_BATCH]).is_none());
+        let refused = refuse_batch(&vec![call; MAX_BATCH + 1]).expect("refused");
+        assert_eq!(refused["error"]["code"], INVALID_REQUEST);
+        // One answer for the whole batch, not one per entry.
+        assert!(refused.is_object());
+        let empty = refuse_batch(&[]).expect("refused");
+        assert_eq!(empty["error"]["code"], INVALID_REQUEST);
+    }
+
+    #[test]
+    fn a_batch_nested_in_a_batch_is_a_malformed_message() {
+        // Entries go through the single-message path, where an array is not an
+        // object — so nesting can't multiply the batch bound.
+        let answer = ask(json!([{ "jsonrpc": "2.0", "id": 1, "method": "ping" }]));
+        assert_eq!(answer.expect("answer")["error"]["code"], INVALID_REQUEST);
     }
 
     #[test]

@@ -31,7 +31,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::PrivateCookieJar;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -41,7 +41,7 @@ use crate::routes::{authorize_activity_webhooks, current_session, AppState};
 use crate::schedule_rule::{next_after, Recurrence};
 use crate::schedule_validate::{
     is_snowflake, parse_tz, validate_dest_label, validate_payload, validate_recurrence,
-    validate_title, validate_webhook, webhook_id,
+    validate_title, validate_webhook, webhook_id, webhook_token,
 };
 use crate::seal;
 use crate::session::Session;
@@ -146,6 +146,43 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         application_id: r.get(27)?,
         channel_id: r.get(28)?,
     })
+}
+
+/// The worker-owned state of a row as a handler read it — what
+/// [`ScheduleStore::replace_mutable`] requires to be unchanged before it
+/// writes. Every worker transition (claim, success, retry, failure) and every
+/// plan reconcile moves at least one of these.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowVersion {
+    pub status: String,
+    pub next_run_at: i64,
+    pub runs_count: i64,
+    pub attempts: i64,
+}
+
+impl Row {
+    pub fn version(&self) -> RowVersion {
+        RowVersion {
+            status: self.status.clone(),
+            next_run_at: self.next_run_at,
+            runs_count: self.runs_count,
+            attempts: self.attempts,
+        }
+    }
+}
+
+/// How a [`ScheduleStore::replace_mutable`] write went.
+#[derive(Debug, PartialEq)]
+pub enum Replace {
+    Saved,
+    /// The worker (or another edit) changed the row after the caller read it.
+    Changed,
+    /// The row no longer exists (canceled, or swept after finishing).
+    Gone,
+    /// Reviving a finished row would exceed the per-webhook cap.
+    PerWebhookFull,
+    /// Reviving a finished row would exceed the server's cap (carried).
+    PerGuildFull(i64),
 }
 
 /// The fields a worker needs to fire one occurrence.
@@ -284,7 +321,8 @@ impl ScheduleStore {
                  make_permanent    INTEGER NOT NULL DEFAULT 0,
                  last_channel_id   TEXT,
                  application_id    TEXT,
-                 channel_id        TEXT
+                 channel_id        TEXT,
+                 paused_before_suspend INTEGER NOT NULL DEFAULT 0
              );
              CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, next_run_at);
              CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_posts(owner_user_id);
@@ -364,6 +402,24 @@ impl ScheduleStore {
             conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN channel_id TEXT;")
                 .map_err(|e| format!("migrate channel_id: {e}"))?;
         }
+        // Migrate DBs created before `paused_before_suspend`: a plan suspension
+        // remembers whether the owner had paused the row, so the re-upgrade hands
+        // it back as they left it instead of quietly un-pausing it.
+        let has_paused_flag: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') \
+                 WHERE name = 'paused_before_suspend'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_paused_flag == 0 {
+            conn.execute_batch(
+                "ALTER TABLE scheduled_posts \
+                 ADD COLUMN paused_before_suspend INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(|e| format!("migrate paused_before_suspend: {e}"))?;
+        }
         // Scrub webhook tokens out of `last_error`. Until 2026-09-13 the worker
         // recorded a post's transport failure as the reqwest error verbatim, whose
         // `Display` ends ` for url (<execute URL>)` — the token this row keeps
@@ -428,7 +484,13 @@ impl ScheduleStore {
             return Err(CreateError::Full);
         }
         let per_guild_cap = limit_override.unwrap_or(self.max_per_guild);
-        let conn = self.lock();
+        // Count and insert under one write lock: the pool hands out several
+        // connections, so two creates racing between a count and an insert could
+        // otherwise both pass a cap that only one of them fits under.
+        let mut guard = self.lock();
+        let conn = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| CreateError::Storage(e.to_string()))?;
         let active: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM scheduled_posts \
@@ -486,6 +548,8 @@ impl ScheduleStore {
             ],
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
+        conn.commit()
+            .map_err(|e| CreateError::Storage(e.to_string()))?;
         self.count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -495,12 +559,15 @@ impl ScheduleStore {
     /// the mirror of the dispatcher's slot reconcile, and the anti-abuse point
     /// for schedules. Only user-owned live rows move (`active`/`paused` ↔
     /// `suspended`); an in-flight (`sending`) or terminal (`done`/`failed`) row
-    /// is left alone. A revived row keeps its original run time if still in the
-    /// future, else fires on the next tick — one catch-up post, exactly the
-    /// worker's existing catch-up policy. Idempotent: same cap ⇒ same state, so
-    /// it serves both the downgrade and the re-upgrade. Suspended rows don't
-    /// count toward the create quota (see `create_with_limit`), so a server can
-    /// always fill up to `cap` live schedules. Returns `(active, suspended)`.
+    /// is left alone. A suspension remembers whether the owner had paused the
+    /// row (`paused_before_suspend`), and the revival hands it back exactly so:
+    /// a paused row comes back paused, untouched; an active one keeps its
+    /// original run time if still in the future, else fires on the next tick —
+    /// one catch-up post, exactly the worker's existing catch-up policy.
+    /// Idempotent: same cap ⇒ same state, so it serves both the downgrade and
+    /// the re-upgrade. Suspended rows don't count toward the create quota (see
+    /// `create_with_limit`), so a server can always fill up to `cap` live
+    /// schedules. Returns `(active, suspended)`.
     pub fn reconcile_guild(&self, guild: &str, cap: i64) -> Result<(i64, i64), String> {
         let conn = self.lock();
         let now = unix_now();
@@ -508,8 +575,10 @@ impl ScheduleStore {
         // Suspend everything ranked at/after the cap. Ranking spans all live
         // rows (active/paused/suspended) so the kept set is stable no matter the
         // current suspension state; `-1` LIMIT = "all rows past the offset".
+        // SET reads the row as it was, so `status='paused'` is the old status.
         conn.execute(
-            "UPDATE scheduled_posts SET status='suspended', updated_at=?1 \
+            "UPDATE scheduled_posts SET status='suspended', \
+             paused_before_suspend=(status='paused'), updated_at=?1 \
              WHERE guild_id=?2 AND status IN ('active','paused') AND id IN ( \
                  SELECT id FROM scheduled_posts \
                  WHERE guild_id=?2 AND status IN ('active','paused','suspended') \
@@ -517,11 +586,16 @@ impl ScheduleStore {
             params![now, guild, cap],
         )
         .map_err(e2s)?;
-        // Revive the oldest `cap` that were suspended. next_run_at = max(old, now)
-        // keeps a future run on time and lets a lapsed one fire next tick.
+        // Revive the oldest `cap` that were suspended, each as its owner left it.
+        // For an active row, next_run_at = max(old, now) keeps a future run on
+        // time and lets a lapsed one fire next tick.
         conn.execute(
-            "UPDATE scheduled_posts SET status='active', attempts=0, \
-             next_run_at=MAX(next_run_at, ?1), updated_at=?1 \
+            "UPDATE scheduled_posts SET \
+             status=CASE WHEN paused_before_suspend=1 THEN 'paused' ELSE 'active' END, \
+             attempts=0, \
+             next_run_at=CASE WHEN paused_before_suspend=1 THEN next_run_at \
+                              ELSE MAX(next_run_at, ?1) END, \
+             paused_before_suspend=0, updated_at=?1 \
              WHERE guild_id=?2 AND status='suspended' AND id IN ( \
                  SELECT id FROM scheduled_posts \
                  WHERE guild_id=?2 AND status IN ('active','paused','suspended') \
@@ -590,15 +664,64 @@ impl ScheduleStore {
     }
 
     /// Overwrite the user-mutable columns of an existing row (never the lease,
-    /// run counters, or last-* result fields, which only the worker owns).
-    pub fn replace_mutable(&self, r: &Row) -> Result<bool, String> {
-        let conn = self.lock();
-        let n = conn
+    /// run counters, or last-* result fields, which only the worker owns) — but
+    /// only if the worker-owned state is still what the caller read (`seen`).
+    ///
+    /// A PATCH reads the row, awaits identity and authorization checks, then
+    /// writes; the worker may fire the row in between. Writing back the status
+    /// and run time the handler *read* would undo the worker: a posted one-time
+    /// post re-armed, a recurring occurrence replayed, a row mid-send flipped
+    /// back to `active` and claimed again. So the write is a compare-and-swap on
+    /// that state, and a lost race answers [`Replace::Changed`] for the caller
+    /// to report instead of silently posting twice.
+    ///
+    /// `reviving` carries the server's live-schedule cap when the edit brings a
+    /// finished (`done`/`failed`) row back to life: the row then counts again,
+    /// so the caps are re-checked inside the same write lock as the update.
+    pub fn replace_mutable(
+        &self,
+        r: &Row,
+        seen: &RowVersion,
+        reviving: Option<i64>,
+    ) -> Result<Replace, String> {
+        let mut guard = self.lock();
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(e2s)?;
+        if let Some(per_guild_cap) = reviving {
+            let per_webhook: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM scheduled_posts WHERE webhook_id = ?1 AND id <> ?2 \
+                     AND status IN ('active','sending','paused')",
+                    params![r.webhook_id, r.id],
+                    |row| row.get(0),
+                )
+                .map_err(e2s)?;
+            if per_webhook >= self.max_per_webhook {
+                return Ok(Replace::PerWebhookFull);
+            }
+            if let Some(guild) = &r.guild_id {
+                let in_guild: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM scheduled_posts WHERE guild_id = ?1 AND id <> ?2 \
+                         AND status IN ('active','sending','paused')",
+                        params![guild, r.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(e2s)?;
+                if in_guild >= per_guild_cap {
+                    return Ok(Replace::PerGuildFull(per_guild_cap));
+                }
+            }
+        }
+        let n = tx
             .execute(
                 "UPDATE scheduled_posts SET \
                  webhook_id=?2, webhook_sealed=?3, thread_id=?4, payload_sealed=?5, title=?6, \
                  dest_label=?7, tz=?8, recurrence_json=?9, next_run_at=?10, status=?11, \
-                 attempts=?12, end_at=?13, max_runs=?14, updated_at=?15 WHERE id=?1",
+                 attempts=?12, end_at=?13, max_runs=?14, updated_at=?15, guild_id=?16 \
+                 WHERE id=?1 AND status=?17 AND next_run_at=?18 AND runs_count=?19 \
+                 AND attempts=?20",
                 params![
                     r.id,
                     r.webhook_id,
@@ -615,10 +738,47 @@ impl ScheduleStore {
                     r.end_at,
                     r.max_runs,
                     unix_now(),
+                    r.guild_id,
+                    seen.status,
+                    seen.next_run_at,
+                    seen.runs_count,
+                    seen.attempts,
                 ],
             )
             .map_err(e2s)?;
-        Ok(n > 0)
+        let outcome = if n > 0 {
+            Replace::Saved
+        } else {
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM scheduled_posts WHERE id = ?1",
+                    [&r.id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(e2s)?
+                .is_some();
+            if exists {
+                Replace::Changed
+            } else {
+                Replace::Gone
+            }
+        };
+        tx.commit().map_err(e2s)?;
+        Ok(outcome)
+    }
+
+    /// Finish a series without posting again: its run cap was lowered to (or
+    /// below) the runs it already made. Leaves the last-run fields as they were.
+    pub fn complete_without_send(&self, id: &str, now: i64) -> Result<(), String> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE scheduled_posts SET status='done', lease_until=NULL, attempts=0, \
+             updated_at=?2 WHERE id=?1",
+            params![id, now],
+        )
+        .map_err(e2s)?;
+        Ok(())
     }
 
     pub fn delete(&self, id: &str) -> Result<bool, String> {
@@ -825,20 +985,59 @@ pub struct CreateBody {
     pub guild_id: Option<String>,
     /// Keep this post's interactive components from expiring: the worker spends
     /// one of the guild's never-expire slots on the message once it's posted.
-    /// Only honoured when `guild_id` is set (no guild → nowhere to spend a slot).
+    /// Only honoured when the destination guild is known.
     #[serde(default)]
     pub make_permanent: bool,
-    /// Post as one of the destination server's registered custom bots (its app
-    /// id) instead of DWEEB. Set only by the Activity's server-side schedule path;
-    /// requires `guild_id` + `channel_id` so the worker can re-home the bot's
-    /// roaming webhook at fire time. `None` = DWEEB.
+}
+
+/// What `POST /api/schedules` actually deserializes: the shared body, plus the
+/// two custom-bot fields captured only so they can be **refused**. Posting as a
+/// server's custom bot re-homes that bot's webhook into a channel at fire time,
+/// so its target must come from a path that authorized the caller for that
+/// server — the Activity's [`ScheduleTarget::Activity`] — never from a body the
+/// browser wrote. A web body naming either is turned away rather than silently
+/// ignored, so a crafted request learns it can't.
+#[derive(Deserialize)]
+pub struct WebCreateBody {
+    #[serde(flatten)]
+    body: CreateBody,
     #[serde(default)]
-    pub application_id: Option<String>,
-    /// Destination channel — where a custom-bot schedule re-homes the bot's
-    /// webhook before firing. `None` for a DWEEB/web schedule (channel is implied
-    /// by the webhook URL).
+    application_id: Option<Value>,
     #[serde(default)]
-    pub channel_id: Option<String>,
+    channel_id: Option<Value>,
+}
+
+impl WebCreateBody {
+    /// The shared body, once neither custom-bot field carries a value.
+    fn into_body(self) -> Result<CreateBody, AppError> {
+        let named = |v: &Option<Value>| match v {
+            None | Some(Value::Null) => false,
+            Some(Value::String(s)) => !s.trim().is_empty(),
+            Some(_) => true,
+        };
+        if named(&self.application_id) || named(&self.channel_id) {
+            return Err(bad_request(
+                "Posting as a server's custom bot is scheduled from inside the Activity, not here.",
+            ));
+        }
+        Ok(self.body)
+    }
+}
+
+/// Where a new schedule posts, as decided by the server — never by the body.
+pub(crate) enum ScheduleTarget {
+    /// The web app: whatever webhook URL the browser holds. The destination
+    /// server is learned from Discord at create time; a `guild_id` in the body is
+    /// only checked against it.
+    Webhook,
+    /// The Activity: a webhook resolved server-side inside `guild_id`, which the
+    /// caller was already authorized for — optionally as one of that server's
+    /// custom bots, whose roaming webhook the worker re-homes to `channel_id`.
+    Activity {
+        guild_id: String,
+        channel_id: String,
+        application_id: Option<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -889,14 +1088,15 @@ pub(crate) struct Created {
 pub async fn schedule_create(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
-    Json(body): Json<CreateBody>,
+    Json(body): Json<WebCreateBody>,
 ) -> Result<Response, AppError> {
     // Scheduling requires a Discord login: the schedule is owned by the account
     // (manageable across devices, and counts against the per-server quota under a
     // real identity). Checked up front so an anonymous request fails fast.
     let session = current_session(&jar)
         .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to schedule a post.".into()))?;
-    let created = create_for_owner(&st, session.uid, body).await?;
+    let body = body.into_body()?;
+    let created = create_for_owner(&st, session, body, ScheduleTarget::Webhook).await?;
     Ok((
         StatusCode::CREATED,
         [(header::CACHE_CONTROL, "no-store")],
@@ -910,14 +1110,16 @@ pub async fn schedule_create(
         .into_response())
 }
 
-/// Validate + store a new schedule owned by `owner_uid` — the shared core of
-/// the web handler above and the embedded Activity's `/api/activity/schedule`
+/// Validate + store a new schedule owned by `session` — the shared core of the
+/// web handler above and the embedded Activity's `/api/activity/schedule`
 /// (which resolves the webhook server-side and authorizes with a bearer, so it
-/// can't ride the cookie-only handler).
+/// can't ride the cookie-only handler). `target` says which of the two it is;
+/// see [`ScheduleTarget`] for what each may and may not decide.
 pub(crate) async fn create_for_owner(
     st: &AppState,
-    owner_uid: String,
+    session: Session,
     body: CreateBody,
+    target: ScheduleTarget,
 ) -> Result<Created, AppError> {
     let store = store(st)?;
 
@@ -985,33 +1187,57 @@ pub(crate) async fn create_for_owner(
     let token = random_base62(TOKEN_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
     let id = random_base62(ID_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
 
-    let guild_id = body.guild_id.filter(|g| !g.is_empty());
+    // The destination server decides the per-server quota, the never-expire
+    // slots a fire may spend, the shared history the post is recorded into, and
+    // which managers may list and edit the row. So it is never taken from the
+    // body: the web path asks Discord which server the webhook posts into (a
+    // body `guild_id` is only checked against that), and the Activity path
+    // already resolved its webhook inside a server the caller is authorized for.
+    let claimed_guild = body.guild_id.filter(|g| !g.is_empty());
+    let from_web = matches!(target, ScheduleTarget::Webhook);
+    let (guild_id, channel_id, application_id) = match target {
+        ScheduleTarget::Webhook => {
+            let actual = webhook_guild(st, &body.webhook_url, &wid).await?;
+            check_claimed_guild(claimed_guild.as_deref(), actual.as_deref())?;
+            (actual, None, None)
+        }
+        ScheduleTarget::Activity {
+            guild_id,
+            channel_id,
+            application_id,
+        } => {
+            if !is_snowflake(&guild_id) || !is_snowflake(&channel_id) {
+                return Err(bad_request("That server or channel ID looks wrong."));
+            }
+            if application_id.as_deref().is_some_and(|a| !is_snowflake(a)) {
+                return Err(bad_request("That application ID looks wrong."));
+            }
+            (Some(guild_id), Some(channel_id), application_id)
+        }
+    };
     // A never-expire slot can only be spent against a known guild — drop the flag
     // when the destination guild is unknown so the worker never tries, and the
-    // row honestly records that it won't keep the message permanent.
+    // row honestly records that it won't keep the message permanent. Spending one
+    // is a manager's call, exactly as granting one by hand is (`permanent_add`'s
+    // gate): holding a webhook URL lets someone post, not spend the server's paid
+    // slots. The Activity path checked its caller before resolving the webhook.
     let make_permanent = body.make_permanent && guild_id.is_some();
-
-    // Custom-bot identity + destination channel (Activity schedules only). Both
-    // must be snowflakes when present, and posting as a custom bot needs the
-    // guild + channel so the worker can re-home the bot's roaming webhook at fire
-    // time — reject the incoherent case rather than silently dropping to DWEEB.
-    let channel_id = body.channel_id.filter(|c| !c.is_empty());
-    if let Some(c) = &channel_id {
-        if !is_snowflake(c) {
-            return Err(bad_request("That channel ID looks wrong."));
+    if make_permanent && from_web {
+        if let Some(guild) = &guild_id {
+            match crate::routes::authorize_manager_session(st, session.clone(), guild).await {
+                Ok(_) => {}
+                Err(AppError::Forbidden(_)) => {
+                    return Err(AppError::Forbidden(
+                        "Keeping a scheduled post from expiring spends one of the server's \
+                         never-expire slots, which only its managers can do."
+                            .into(),
+                    ))
+                }
+                Err(other) => return Err(other),
+            }
         }
     }
-    let application_id = body.application_id.filter(|a| !a.is_empty());
-    if let Some(a) = &application_id {
-        if !is_snowflake(a) {
-            return Err(bad_request("That application ID looks wrong."));
-        }
-        if guild_id.is_none() || channel_id.is_none() {
-            return Err(bad_request(
-                "Posting as a custom bot needs a destination server and channel.",
-            ));
-        }
-    }
+    let owner_uid = session.uid;
 
     // The destination server's plan tier caps how many scheduled posts it may
     // hold (per-server premium). `None` when entitlement is disabled, or when the
@@ -1190,6 +1416,14 @@ pub async fn schedule_patch(
     if !authorize_row(&st, session.as_ref(), token.as_deref(), &row).await {
         return Err(forbidden());
     }
+    // What the worker owns, as read — the write below only lands if it still
+    // holds (see `ScheduleStore::replace_mutable`).
+    let seen = row.version();
+    if row.status == "sending" {
+        return Err(changed_conflict(
+            "This post is being sent right now — give it a moment, then try again.",
+        ));
+    }
 
     let now = unix_now();
     let mut timing_changed = false;
@@ -1217,6 +1451,22 @@ pub async fn schedule_patch(
     if let Some(url) = body.webhook_url {
         validate_webhook(&url).map_err(bad_request_s)?;
         let wid = webhook_id(&url).ok_or_else(|| bad_request("That webhook URL is malformed."))?;
+        // The row's server is its quota, slots, history and managers (see
+        // `create_for_owner`) — a new webhook must post into that same server,
+        // as Discord says, or the row would be filed under one server while
+        // posting into another. A legacy row that never knew its server learns
+        // it here.
+        let actual = webhook_guild(&st, &url, &wid).await?;
+        match (&row.guild_id, actual) {
+            (Some(stored), Some(new)) if *stored != new => {
+                return Err(bad_request(
+                    "That webhook posts into a different server. Cancel this post and schedule \
+                     it there instead.",
+                ));
+            }
+            (None, Some(new)) => row.guild_id = Some(new),
+            _ => {}
+        }
         row.webhook_sealed = seal::seal(&st.key, url.trim())
             .ok_or_else(|| AppError::Internal("seal webhook".into()))?;
         row.webhook_id = wid;
@@ -1264,6 +1514,15 @@ pub async fn schedule_patch(
         }
     }
 
+    // A run cap at or below the runs already made leaves the series nothing to
+    // do: finish it now, rather than letting its next occurrence post once more
+    // past the cap (the worker would only notice after sending).
+    if row.max_runs.is_some_and(|max| row.runs_count >= max)
+        && matches!(row.status.as_str(), "active" | "paused")
+    {
+        row.status = "done".into();
+    }
+
     if timing_changed && row.status == "active" {
         let rec: Recurrence = serde_json::from_str(&row.recurrence_json)
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1286,15 +1545,51 @@ pub async fn schedule_patch(
         }
     }
 
+    // Bringing a finished post back makes it count against the caps again, so
+    // they're re-checked with the write (a resumed pause already counted).
+    let reviving = if matches!(seen.status.as_str(), "done" | "failed") && row.status == "active" {
+        let cap = match &row.guild_id {
+            Some(g) => st
+                .entitlements
+                .schedule_limit(g)
+                .await
+                .unwrap_or(store.max_per_guild()),
+            None => store.max_per_guild(),
+        };
+        Some(cap)
+    } else {
+        None
+    };
+
     let owned = is_owner(session.as_ref(), &row);
     let view_value = view(&row, owned);
     let rowc = row.clone();
-    let found = tokio::task::spawn_blocking(move || store.replace_mutable(&rowc))
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(AppError::Internal)?;
-    if !found {
-        return Err(not_found());
+    let outcome =
+        tokio::task::spawn_blocking(move || store.replace_mutable(&rowc, &seen, reviving))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .map_err(AppError::Internal)?;
+    match outcome {
+        Replace::Saved => {}
+        Replace::Gone => return Err(not_found()),
+        Replace::Changed => {
+            return Err(changed_conflict(
+                "This post changed while you were editing — it may have just been sent. Reload \
+                 it and try again.",
+            ))
+        }
+        Replace::PerWebhookFull => {
+            return Err(changed_conflict(&format!(
+                "That webhook already has the maximum of {} active schedules.",
+                st.config.schedule_max_per_webhook
+            )))
+        }
+        Replace::PerGuildFull(limit) => {
+            return Err(changed_conflict(&format!(
+                "This server already has the maximum of {limit} scheduled posts — cancel one to \
+                 resume this one."
+            )))
+        }
     }
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(view_value)).into_response())
 }
@@ -1343,6 +1638,35 @@ async fn load(store: &Arc<ScheduleStore>, id: &str) -> Result<Row, AppError> {
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?;
     row.ok_or_else(not_found)
+}
+
+/// The server a webhook posts into, asked of Discord with the webhook's own
+/// token — no bot permission involved, and not something the caller can
+/// dictate. A pair Discord no longer honours (a deleted webhook, a mistyped
+/// URL) is refused now rather than discovered when the post comes due. Discord
+/// not answering keeps `webhook_by_token`'s own mapping (a 502 marked as
+/// Discord's, or a 429 the caller can wait out).
+async fn webhook_guild(st: &AppState, url: &str, wid: &str) -> Result<Option<String>, AppError> {
+    let token = webhook_token(url).ok_or_else(|| bad_request("That webhook URL is malformed."))?;
+    match st.discord.webhook_by_token(wid, &token).await? {
+        Some(hook) => Ok(hook.guild_id.filter(|g| is_snowflake(g))),
+        None => Err(bad_request(
+            "Discord doesn't recognise that webhook — it may have been deleted, or the URL is \
+             incomplete.",
+        )),
+    }
+}
+
+/// A body's `guild_id` is a claim; Discord's answer is the fact. Disagreeing
+/// means the post was set up against the wrong server, which the user should
+/// hear about rather than have the row quietly filed under another server.
+fn check_claimed_guild(claimed: Option<&str>, actual: Option<&str>) -> Result<(), AppError> {
+    match (claimed, actual) {
+        (Some(c), Some(a)) if c != a => Err(bad_request(
+            "That webhook posts into a different server than the one this post was set up for.",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The caller's identity from either surface: the web session cookie, or the
@@ -1463,6 +1787,16 @@ fn not_found() -> AppError {
     AppError::Status {
         status: StatusCode::NOT_FOUND,
         message: "No such schedule (it may have been canceled or completed and removed).".into(),
+        retry_after: None,
+    }
+}
+
+/// A 409: the edit can't land as asked, for a reason the caller can act on
+/// (reload, wait out a send, free a slot).
+fn changed_conflict(message: &str) -> AppError {
+    AppError::Status {
+        status: StatusCode::CONFLICT,
+        message: message.into(),
         retry_after: None,
     }
 }
@@ -1858,6 +2192,291 @@ mod tests {
             store.get("plain").unwrap().unwrap().last_error.as_deref(),
             Some("Discord returned 404: gone")
         );
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    const DAILY: &str = r#"{"kind":"daily","time":{"hour":9,"minute":0}}"#;
+    const ONCE: &str = r#"{"kind":"once"}"#;
+
+    fn with_recurrence(id: &str, webhook_id: &str, recurrence: &str, next: i64) -> NewSchedule {
+        let mut s = sample(id, webhook_id, next);
+        s.recurrence_json = recurrence.into();
+        s
+    }
+
+    /// Write `edit` back as a PATCH does, against the version it read.
+    fn patch(store: &ScheduleStore, read: &Row, edit: impl FnOnce(&mut Row)) -> Replace {
+        let mut row = read.clone();
+        edit(&mut row);
+        store.replace_mutable(&row, &read.version(), None).unwrap()
+    }
+
+    /// A paused schedule suspended by a downgrade comes back paused on the
+    /// re-upgrade — not active, and not firing at once on a lapsed run time.
+    #[test]
+    fn reconcile_hands_a_user_paused_schedule_back_paused() {
+        let (store, path) = temp_store_caps("unpause", 100, 100);
+        for (i, id) in ["s0", "s1", "s2"].iter().enumerate() {
+            let mut s = with_recurrence(id, &format!("10{i}"), DAILY, 5000);
+            s.created_at = 1000 + i as i64;
+            store.create(&s).unwrap();
+        }
+        let read = store.get("s2").unwrap().unwrap();
+        assert_eq!(
+            patch(&store, &read, |r| r.status = "paused".into()),
+            Replace::Saved
+        );
+
+        store.reconcile_guild("guild-9", 2).unwrap(); // downgrade
+        assert_eq!(store.get("s2").unwrap().unwrap().status, "suspended");
+        store.reconcile_guild("guild-9", 10).unwrap(); // re-upgrade
+        let row = store.get("s2").unwrap().unwrap();
+        assert_eq!(
+            row.status, "paused",
+            "the user's pause was lost across a plan change"
+        );
+        assert_eq!(
+            row.next_run_at, 5000,
+            "a paused row's run time isn't touched"
+        );
+        // An active row still revives active, as before.
+        assert_eq!(store.get("s1").unwrap().unwrap().status, "active");
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A PATCH that read the row before the worker fired it can't re-arm the
+    /// one-time post the worker just marked `done`.
+    #[test]
+    fn a_stale_patch_cannot_re_arm_a_fired_one_time_post() {
+        let (store, path) = temp_store("stale");
+        store
+            .create(&with_recurrence("o", "111", ONCE, 100))
+            .unwrap();
+        let stale = store.get("o").unwrap().unwrap(); // the PATCH handler's read
+        assert_eq!(store.claim_due(200, 60, 10).unwrap().len(), 1); // worker claims…
+        store
+            .record_success("o", 201, Some("m1"), Some("c1"), 200, None, None)
+            .unwrap(); // …and posts it
+        let outcome = patch(&store, &stale, |r| r.title = Some("renamed".into()));
+        assert_eq!(outcome, Replace::Changed);
+        assert_eq!(store.get("o").unwrap().unwrap().status, "done");
+        assert!(store.claim_due(210, 60, 10).unwrap().is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Same race against a recurring series: the stale write can't put the old,
+    /// due run time back, so the occurrence that just posted isn't replayed.
+    #[test]
+    fn a_stale_patch_cannot_replay_a_recurring_occurrence() {
+        let (store, path) = temp_store("stale-rec");
+        store
+            .create(&with_recurrence("r", "111", DAILY, 100))
+            .unwrap();
+        let stale = store.get("r").unwrap().unwrap();
+        assert_eq!(store.claim_due(200, 60, 10).unwrap().len(), 1);
+        store
+            .record_success("r", 201, Some("m1"), Some("c1"), 200, Some(86_500), None)
+            .unwrap();
+        let outcome = patch(&store, &stale, |r| r.dest_label = Some("#general".into()));
+        assert_eq!(outcome, Replace::Changed);
+        assert_eq!(store.get("r").unwrap().unwrap().next_run_at, 86_500);
+        assert!(store.claim_due(210, 60, 10).unwrap().is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// While the worker holds the lease (`sending`), a PATCH that read the row
+    /// just before the claim can't flip it back to `active` for a second send.
+    #[test]
+    fn a_stale_patch_cannot_drop_the_workers_lease() {
+        let (store, path) = temp_store("stale-lease");
+        store
+            .create(&with_recurrence("l", "111", ONCE, 100))
+            .unwrap();
+        let stale = store.get("l").unwrap().unwrap();
+        assert_eq!(store.claim_due(200, 600, 10).unwrap().len(), 1); // in flight
+        assert_eq!(patch(&store, &stale, |_| {}), Replace::Changed);
+        assert_eq!(store.get("l").unwrap().unwrap().status, "sending");
+        assert!(store.claim_due(205, 600, 10).unwrap().is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_uncontested_patch_saves_and_a_vanished_row_reports_gone() {
+        let (store, path) = temp_store("patch-ok");
+        store
+            .create(&with_recurrence("p", "111", DAILY, 5000))
+            .unwrap();
+        let read = store.get("p").unwrap().unwrap();
+        assert_eq!(
+            patch(&store, &read, |r| r.title = Some("New".into())),
+            Replace::Saved
+        );
+        assert_eq!(
+            store.get("p").unwrap().unwrap().title.as_deref(),
+            Some("New")
+        );
+        let read = store.get("p").unwrap().unwrap();
+        store.delete("p").unwrap();
+        assert_eq!(patch(&store, &read, |_| {}), Replace::Gone);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Resuming a finished post brings it back under the caps, checked with the
+    /// write — the per-webhook cap here, which the live rows already fill.
+    #[test]
+    fn reviving_a_finished_post_rechecks_the_caps() {
+        let (store, path) = temp_store_caps("revive", 1, 100);
+        store
+            .create(&with_recurrence("old", "111", ONCE, 100))
+            .unwrap();
+        let _ = store.claim_due(200, 60, 10).unwrap();
+        store
+            .record_success("old", 201, Some("m"), Some("c"), 200, None, None)
+            .unwrap();
+        // The webhook's one live slot is taken by a newer post.
+        store
+            .create(&with_recurrence("new", "111", ONCE, 9_000))
+            .unwrap();
+        let read = store.get("old").unwrap().unwrap();
+        let mut revived = read.clone();
+        revived.status = "active".into();
+        revived.next_run_at = 9_500;
+        assert_eq!(
+            store
+                .replace_mutable(&revived, &read.version(), Some(100))
+                .unwrap(),
+            Replace::PerWebhookFull
+        );
+        assert_eq!(store.get("old").unwrap().unwrap().status, "done");
+        // Once the slot frees up, the same revival goes through.
+        store.delete("new").unwrap();
+        assert_eq!(
+            store
+                .replace_mutable(&revived, &read.version(), Some(100))
+                .unwrap(),
+            Replace::Saved
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_series_whose_cap_was_reached_finishes_without_sending() {
+        let (store, path) = temp_store("capped");
+        store
+            .create(&with_recurrence("c", "111", DAILY, 100))
+            .unwrap();
+        let _ = store.claim_due(200, 60, 10).unwrap();
+        store.complete_without_send("c", 250).unwrap();
+        let row = store.get("c").unwrap().unwrap();
+        assert_eq!(row.status, "done");
+        assert_eq!(row.runs_count, 0, "nothing was posted");
+        assert!(store.claim_due(300, 60, 10).unwrap().is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Creates racing on separate pool connections: count and insert are one
+    /// transaction, so the per-server quota holds.
+    #[test]
+    fn concurrent_creates_never_overrun_the_server_quota() {
+        let (store, path) = temp_store_caps("create-race", 100, 3);
+        let store = Arc::new(store);
+        let handles: Vec<_> = (0..12)
+            .map(|i| {
+                let s = Arc::clone(&store);
+                std::thread::spawn(move || {
+                    s.create(&with_recurrence(
+                        &format!("r{i}"),
+                        &format!("2{i:02}"),
+                        DAILY,
+                        100,
+                    ))
+                })
+            })
+            .collect();
+        let created = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(Result::is_ok)
+            .count();
+        assert_eq!(created, 3);
+        assert_eq!(store.list_for_guild("guild-9", 100).unwrap().len(), 3);
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn status_of(e: AppError) -> u16 {
+        e.into_response().status().as_u16()
+    }
+
+    /// The web body can't set the custom-bot target: posting as a server's bot
+    /// re-homes its webhook into a channel at fire time, so that target comes
+    /// only from the Activity's authorized path. Naming it is refused.
+    #[test]
+    fn a_web_create_naming_a_custom_bot_is_refused() {
+        let base = serde_json::json!({
+            "webhook_url": "https://discord.com/api/webhooks/123456789012345678/anything",
+            "payload": { "content": "hi" },
+            "tz": "UTC",
+            "recurrence": { "kind": "once" },
+            "start_at": 1,
+            "guild_id": "111111111111111111",
+            "make_permanent": true
+        });
+        let with = |extra: serde_json::Value| {
+            let mut v = base.clone();
+            v.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<WebCreateBody>(v).unwrap()
+        };
+        let refused = with(serde_json::json!({ "application_id": "222222222222222222" }))
+            .into_body()
+            .err()
+            .expect("an application id is refused");
+        assert_eq!(status_of(refused), 400);
+        let refused = with(serde_json::json!({ "channel_id": "333333333333333333" }))
+            .into_body()
+            .err()
+            .expect("a channel id is refused");
+        assert_eq!(status_of(refused), 400);
+        // What the web app actually sends — and an empty/null field — passes.
+        let body = with(serde_json::json!({}))
+            .into_body()
+            .ok()
+            .expect("the web app's body passes");
+        assert_eq!(body.guild_id.as_deref(), Some("111111111111111111"));
+        assert!(body.make_permanent);
+        assert!(
+            with(serde_json::json!({ "application_id": "", "channel_id": null }))
+                .into_body()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_claimed_server_must_be_the_webhooks_own() {
+        assert!(check_claimed_guild(Some("1"), Some("1")).is_ok());
+        assert!(check_claimed_guild(None, Some("1")).is_ok());
+        assert!(check_claimed_guild(Some("1"), None).is_ok());
+        let e = check_claimed_guild(Some("1"), Some("2")).unwrap_err();
+        assert_eq!(status_of(e), 400);
+    }
+
+    #[test]
+    fn migrates_db_without_the_paused_flag() {
+        let (store, path) = temp_store("flag-migrate");
+        drop(store);
+        {
+            // Drop the column the way a pre-migration database lacks it.
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("ALTER TABLE scheduled_posts DROP COLUMN paused_before_suspend;")
+                .unwrap();
+        }
+        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3, 100).unwrap();
+        store
+            .create(&with_recurrence("m", "111", DAILY, 5000))
+            .unwrap();
+        assert_eq!(store.reconcile_guild("guild-9", 0).unwrap(), (0, 1));
         drop(store);
         let _ = std::fs::remove_file(path);
     }

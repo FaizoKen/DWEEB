@@ -73,6 +73,13 @@ struct EntitlementCache {
     max_entries: usize,
     sweep_interval: i64,
     next_sweep: i64,
+    /// Bumped by every invalidation. A fill records it before reading the
+    /// mirror and stores its answer only if it is unchanged: otherwise a read
+    /// that began before a purchase/cancel webhook landed would store the old
+    /// tier just after the webhook dropped it, and the reconcile that follows
+    /// (which waits on the same fill) would act on that stale tier for the
+    /// whole cache window.
+    epoch: u64,
 }
 
 impl EntitlementCache {
@@ -83,6 +90,7 @@ impl EntitlementCache {
             max_entries: max_entries.max(1),
             sweep_interval,
             next_sweep: now.saturating_add(sweep_interval),
+            epoch: 0,
         }
     }
 
@@ -119,6 +127,7 @@ impl EntitlementCache {
 
     fn invalidate(&mut self, guild: &str) {
         self.entries.remove(guild);
+        self.epoch = self.epoch.wrapping_add(1);
     }
 }
 
@@ -295,11 +304,14 @@ impl Entitlement {
         let Ok(_permit) = self.miss_sem.acquire().await else {
             return 0;
         };
+        let epoch = self.cache.lock().map(|c| c.epoch).unwrap_or(0);
         // Reads the local mirror (network-free); a stale/missing entry may trigger
         // one throttled Stripe backfill inside `active_slots_for`.
         let slots = stripe.active_slots_for(guild).await;
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(guild, slots, unix_now(), self.cache_secs);
+            if cache.epoch == epoch {
+                cache.insert(guild, slots, unix_now(), self.cache_secs);
+            }
         }
         slots
     }
@@ -342,17 +354,25 @@ pub async fn guild_plan(
     let session = authorize_member(&st, &jar, &guild).await?;
     // Auto-apply an existing subscriber's floating premium (e.g. a RoleLogic sub
     // with no server binding yet) to this server — one-server premium, granted
-    // automatically on first use. Safe: the user manages this server (gated
-    // above), and it's a no-op once the server has premium or the user has no
-    // unbound sub. Only meaningful when billing is configured.
+    // automatically on first use. Safe: only a read by someone who manages this
+    // server claims (checked below), and it's a no-op once the server has
+    // premium or the user has no unbound sub. Only meaningful when billing is
+    // configured.
     if let Some(stripe) = &st.stripe {
-        if stripe.claim_legacy_for_guild(&session.uid, &guild).await {
+        // Binding premium to a server is a manager's call; with the read gate
+        // switched off a mere member reaches this read too.
+        let may_claim = crate::routes::authorize_manager_session(&st, session.clone(), &guild)
+            .await
+            .is_ok();
+        if may_claim && stripe.claim_legacy_for_guild(&session.uid, &guild).await {
             // The server just gained floating premium — reconcile now to revive
             // any items suspended under a lower tier (also invalidates the cache).
             crate::reconcile::reconcile_guild(&st, &guild).await;
         } else {
             // Otherwise a throttled safety-net pass, self-healing a missed webhook
-            // (e.g. a downgrade that never reached us) without blocking this read.
+            // without blocking this read. A cancel or downgrade that never reached
+            // us is only visible once the stale row's billing period has lapsed —
+            // `StripeState::active_slots_for` re-reads such rows from Stripe.
             crate::reconcile::reconcile_guild_lazy(&st, &guild);
         }
     }
@@ -510,6 +530,27 @@ mod tests {
         cache.insert("a", 130, 101, 300);
         assert_eq!(cache.get("a", 101, 300), Some(130));
         assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn a_fill_that_straddles_an_invalidation_is_not_cached() {
+        // The `slots_for` protocol: note the epoch, read the mirror, store only
+        // if no invalidation landed in between.
+        let mut cache = EntitlementCache::new(10, 300, 100);
+        let started = cache.epoch;
+        // A cancel webhook lands mid-read and drops the server's tier…
+        cache.invalidate("g1");
+        // …so the read that began before it must not be stored.
+        if cache.epoch == started {
+            cache.insert("g1", 36, 101, 300);
+        }
+        assert_eq!(cache.get("g1", 101, 300), None);
+        // A fill that began after it stores normally.
+        let fresh = cache.epoch;
+        if cache.epoch == fresh {
+            cache.insert("g1", 0, 102, 300);
+        }
+        assert_eq!(cache.get("g1", 102, 300), Some(0));
     }
 
     #[test]

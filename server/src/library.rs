@@ -58,7 +58,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::{Key, PrivateCookieJar};
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -302,6 +302,23 @@ impl LibraryStore {
                 conn.execute_batch("ALTER TABLE library_messages ADD COLUMN application_id TEXT;")
                     .map_err(|e| format!("migrate application_id: {e}"))?;
             }
+            // One posted row per message in a server. `upsert` checks and
+            // inserts under one write lock, so new duplicates can't arise; this
+            // index makes it the schema's guarantee too. A database that already
+            // holds duplicates (recorded before that lock) keeps working without
+            // it: creating it is skipped with a warning rather than deleting
+            // anyone's rows at boot.
+            if let Err(e) = conn.execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_library_posted_msg \
+                 ON library_messages(guild_id, message_id) \
+                 WHERE label = 'posted' AND message_id IS NOT NULL;",
+            ) {
+                tracing::warn!(
+                    target: "library",
+                    error = %e,
+                    "couldn't add the one-posted-row-per-message index (duplicates already stored?)"
+                );
+            }
         }
         let count: i64 = pool
             .get()
@@ -362,6 +379,11 @@ impl LibraryStore {
     /// — never evicted, and not consuming its slots — so marking a message
     /// never-expire also pins its history record. Only consulted on posted
     /// inserts; pass an empty set for drafts.
+    ///
+    /// The whole check-then-write runs under one write lock (an IMMEDIATE
+    /// transaction): the pool hands out several connections, so two records of
+    /// one message could otherwise both miss each other and insert twice, and
+    /// two draft saves could both pass a cap only one of them fits under.
     pub fn upsert(
         &self,
         n: &NewEntry,
@@ -370,7 +392,10 @@ impl LibraryStore {
         limit_override: Option<i64>,
         protected: &HashSet<String>,
     ) -> Result<String, CreateError> {
-        let conn = self.lock();
+        let mut guard = self.lock();
+        let conn = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| CreateError::Storage(e.to_string()))?;
         if n.label == "posted" {
             if let Some(mid) = &n.message_id {
                 let existing: Option<String> = conn
@@ -410,6 +435,8 @@ impl LibraryStore {
                         ],
                     )
                     .map_err(|e| CreateError::Storage(e.to_string()))?;
+                    conn.commit()
+                        .map_err(|e| CreateError::Storage(e.to_string()))?;
                     return Ok(id);
                 }
             }
@@ -453,7 +480,7 @@ impl LibraryStore {
             ],
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
-        self.count.fetch_add(1, Ordering::Relaxed);
+        let mut evicted: usize = 0;
         if n.label == "posted" {
             let window = limit_override.unwrap_or(self.posted_per_guild);
             if window < i64::MAX {
@@ -479,7 +506,6 @@ impl LibraryStore {
                         .map_err(|e| CreateError::Storage(e.to_string()))?
                 };
                 let mut kept: i64 = 0;
-                let mut evicted: usize = 0;
                 for (id, mid) in rows {
                     if mid.is_some_and(|m| protected.contains(&m)) {
                         continue;
@@ -491,10 +517,14 @@ impl LibraryStore {
                             .map_err(|e| CreateError::Storage(e.to_string()))?;
                     }
                 }
-                if evicted > 0 {
-                    self.count.fetch_sub(evicted as i64, Ordering::Relaxed);
-                }
             }
+        }
+        conn.commit()
+            .map_err(|e| CreateError::Storage(e.to_string()))?;
+        // The counter follows what was committed, never a rolled-back attempt.
+        self.count.fetch_add(1, Ordering::Relaxed);
+        if evicted > 0 {
+            self.count.fetch_sub(evicted as i64, Ordering::Relaxed);
         }
         Ok(n_id.to_string())
     }
@@ -604,30 +634,43 @@ impl LibraryStore {
         .map_err(e2s)
     }
 
-    /// Persist a handler's read-modify-write of `row` (everything editable).
-    pub fn save(&self, row: &Row, now: i64) -> Result<(), String> {
+    /// Apply an edit to one entry, writing **only** the columns it names —
+    /// `title` (`Some(None)` clears it) and/or the sealed payload — and return
+    /// the row as it now stands (`None` when it's gone).
+    ///
+    /// Never a whole-row write-back: a handler reads the row, awaits its
+    /// authorization and quota checks, then edits — and a posted entry may be
+    /// refreshed by its message's next send in between. Writing back the row as
+    /// read would put the old message content back under a mere rename.
+    pub fn patch(
+        &self,
+        guild: &str,
+        id: &str,
+        title: Option<Option<String>>,
+        payload_sealed: Option<String>,
+        now: i64,
+    ) -> Result<Option<Row>, String> {
         let conn = self.lock();
-        conn.execute(
-            "UPDATE library_messages SET label=?2, title=?3, payload_sealed=?4, \
-             webhook_sealed=?5, webhook_id=?6, application_id=?7, channel_id=?8, \
-             message_id=?9, thread_id=?10, dest_label=?11, updated_at=?12 WHERE id=?1",
-            params![
-                row.id,
-                row.label,
-                row.title,
-                row.payload_sealed,
-                row.webhook_sealed,
-                row.webhook_id,
-                row.application_id,
-                row.channel_id,
-                row.message_id,
-                row.thread_id,
-                row.dest_label,
-                now
-            ],
+        let set_title = title.is_some();
+        let n = conn
+            .execute(
+                "UPDATE library_messages SET \
+                 title = CASE WHEN ?3 THEN ?4 ELSE title END, \
+                 payload_sealed = COALESCE(?5, payload_sealed), updated_at = ?6 \
+                 WHERE guild_id = ?1 AND id = ?2",
+                params![guild, id, set_title, title.flatten(), payload_sealed, now],
+            )
+            .map_err(e2s)?;
+        if n == 0 {
+            return Ok(None);
+        }
+        conn.query_row(
+            &format!("SELECT {COLS} FROM library_messages WHERE guild_id=?1 AND id=?2"),
+            params![guild, id],
+            row_from,
         )
-        .map_err(e2s)?;
-        Ok(())
+        .optional()
+        .map_err(e2s)
     }
 
     /// Delete one entry (guild-scoped). True when a row was removed.
@@ -1208,7 +1251,9 @@ pub async fn library_patch(
     let g = guild.clone();
     let i = id.clone();
     let s = Arc::clone(&store);
-    let mut row = tokio::task::spawn_blocking(move || s.get(&g, &i))
+    // Read once for the label (fixed at creation, so safe to check on this
+    // snapshot); the edit itself is applied column by column below.
+    let row = tokio::task::spawn_blocking(move || s.get(&g, &i))
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?
@@ -1241,27 +1286,34 @@ pub async fn library_patch(
         }
     }
 
-    if let Some(title) = body.title {
-        validate_title(&title).map_err(bad_request_s)?;
-        row.title = Some(title).filter(|t| !t.trim().is_empty());
-    }
-    if let Some(payload) = body.payload {
-        validate_payload(&payload).map_err(bad_request_s)?;
-        let s = serde_json::to_string(&payload).map_err(|e| AppError::Internal(e.to_string()))?;
-        row.payload_sealed =
-            seal::seal(&st.key, &s).ok_or_else(|| AppError::Internal("seal payload".into()))?;
-    }
+    let title = match body.title {
+        Some(title) => {
+            validate_title(&title).map_err(bad_request_s)?;
+            Some(Some(title).filter(|t| !t.trim().is_empty()))
+        }
+        None => None,
+    };
+    let payload_sealed = match body.payload {
+        Some(payload) => {
+            validate_payload(&payload).map_err(bad_request_s)?;
+            let s =
+                serde_json::to_string(&payload).map_err(|e| AppError::Internal(e.to_string()))?;
+            Some(seal::seal(&st.key, &s).ok_or_else(|| AppError::Internal("seal payload".into()))?)
+        }
+        None => None,
+    };
 
     let now = unix_now();
-    let saved = row.clone();
-    tokio::task::spawn_blocking(move || store.save(&saved, now))
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(AppError::Internal)?;
-    row.updated_at = now;
+    let current = tokio::task::spawn_blocking(move || {
+        store.patch(&guild, &row.id, title, payload_sealed, now)
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
+    .map_err(AppError::Internal)?
+    .ok_or_else(not_found)?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(view(&st.key, &row)),
+        Json(view(&st.key, &current)),
     )
         .into_response())
 }
@@ -1920,22 +1972,113 @@ mod tests {
     }
 
     #[test]
-    fn save_updates_everything_editable() {
-        let (store, path) = temp_store("save", 100, 10, 10);
-        let id = upsert(
-            &store,
-            &entry("g1", "posted", Some("m1")),
-            "id-a",
-            1_000,
-            None,
-        )
-        .unwrap();
-        let mut row = store.get("g1", &id).unwrap().unwrap();
-        row.title = Some("Renamed".into());
-        store.save(&row, 2_000).unwrap();
-        let back = store.get("g1", &id).unwrap().unwrap();
+    fn patch_writes_only_the_columns_it_names() {
+        let (store, path) = temp_store("patch", 100, 10, 10);
+        let id = upsert(&store, &entry("g1", "draft", None), "id-a", 1_000, None).unwrap();
+        // A rename leaves the content alone…
+        let back = store
+            .patch("g1", &id, Some(Some("Renamed".into())), None, 2_000)
+            .unwrap()
+            .unwrap();
         assert_eq!(back.title.as_deref(), Some("Renamed"));
+        assert_eq!(back.payload_sealed, "sealed-payload");
         assert_eq!(back.updated_at, 2_000);
+        // …new content leaves the title alone, and `Some(None)` clears it.
+        let back = store
+            .patch("g1", &id, None, Some("sealed-v2".into()), 3_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(back.title.as_deref(), Some("Renamed"));
+        assert_eq!(back.payload_sealed, "sealed-v2");
+        let back = store
+            .patch("g1", &id, Some(None), None, 4_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(back.title, None);
+        // Guild-scoped, and a missing row is `None`.
+        assert!(store
+            .patch("g2", &id, Some(Some("x".into())), None, 5_000)
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A rename used to write the whole row back as the handler read it, so a
+    /// posted refresh (the message's next send) landing in between was undone
+    /// and the entry showed the old content under its new name.
+    #[test]
+    fn a_rename_keeps_a_concurrent_posted_refresh() {
+        let (store, path) = temp_store("lost-update", 100, 10, 10);
+        let mut first = entry("g1", "posted", Some("m1"));
+        first.payload_sealed = "v1".into();
+        let id = upsert(&store, &first, "aaaaaaaaaa", 1_000, None).unwrap();
+        let _stale = store.get("g1", &id).unwrap().unwrap(); // the PATCH handler's read
+        let mut refresh = entry("g1", "posted", Some("m1"));
+        refresh.payload_sealed = "v2".into();
+        upsert(&store, &refresh, "bbbbbbbbbb", 2_000, None).unwrap(); // the send's refresh
+        let back = store
+            .patch("g1", &id, Some(Some("Renamed".into())), None, 3_000)
+            .unwrap()
+            .unwrap(); // the rename lands
+        let _ = std::fs::remove_file(path);
+        assert_eq!(
+            back.payload_sealed, "v2",
+            "the rename wrote the stale content back"
+        );
+        assert_eq!(back.title.as_deref(), Some("Renamed"));
+    }
+
+    /// Two saves racing on separate pool connections: the count-then-insert is
+    /// one transaction, so a full shelf stays full.
+    #[test]
+    fn concurrent_draft_saves_never_overrun_the_cap() {
+        let (store, path) = temp_store("draft-race", 1000, 3, 10);
+        let store = std::sync::Arc::new(store);
+        let handles: Vec<_> = (0..12)
+            .map(|i| {
+                let s = std::sync::Arc::clone(&store);
+                std::thread::spawn(move || {
+                    upsert(
+                        &s,
+                        &entry("g1", "draft", None),
+                        &format!("id-race-{i:03}"),
+                        1,
+                        None,
+                    )
+                })
+            })
+            .collect();
+        for h in handles {
+            let _ = h.join().unwrap();
+        }
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (0, 3));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Concurrent records of one message — the same send recorded twice — land
+    /// as one posted row, not two.
+    #[test]
+    fn concurrent_records_of_one_message_make_one_row() {
+        let (store, path) = temp_store("posted-race", 1000, 10, 50);
+        let store = std::sync::Arc::new(store);
+        let handles: Vec<_> = (0..12)
+            .map(|i| {
+                let s = std::sync::Arc::clone(&store);
+                std::thread::spawn(move || {
+                    upsert(
+                        &s,
+                        &entry("g1", "posted", Some("m1")),
+                        &format!("id-post-{i:03}"),
+                        1,
+                        None,
+                    )
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (1, 0));
         let _ = std::fs::remove_file(path);
     }
 }

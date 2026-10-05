@@ -757,6 +757,15 @@ fn terminal_error(failure: UpstreamFailure, retry_hint: Option<f64>) -> AppError
     }
 }
 
+/// One attempt's wait for the provider's response headers.
+const ATTEMPT_HEADER_TIMEOUT: Duration = Duration::from_secs(20);
+/// Every attempt together has to answer well inside the proxy's 60 s request
+/// timeout (`REQUEST_TIMEOUT` in main.rs): three 20 s header waits plus the
+/// retry pauses came to ~60.6 s, so the `TimeoutLayer` cut the request first
+/// and the caller got a bare 408 — none of the honest errors below, and none of
+/// the log lines either.
+pub(crate) const START_BUDGET: Duration = Duration::from_secs(45);
+
 /// Start the provider stream: primary model, one retry, then the fallback
 /// model (when configured). Transient/capacity failures (network, 429, 413,
 /// 5xx) are retried and fall through to the fallback model; a model the
@@ -785,12 +794,18 @@ async fn start_stream(
     // Models the provider says it no longer serves. Permanent and ours to fix,
     // so it is reported once at the end rather than per attempt.
     let mut retired: Vec<&str> = Vec::new();
+    let started = Instant::now();
     for (i, model) in attempts.iter().enumerate() {
         if exhausted == Some(*model) {
             continue;
         }
         if i > 0 {
             tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        let remaining = START_BUDGET.saturating_sub(started.elapsed());
+        if remaining < Duration::from_secs(1) {
+            last_transient = "ran out of time waiting for the provider".into();
+            break;
         }
         let request = ai
             .http
@@ -806,7 +821,8 @@ async fn start_stream(
             .send();
         // Bound the time to response *headers*; the body stream has its own
         // deadline in the relay task.
-        let sent = match tokio::time::timeout(Duration::from_secs(20), request).await {
+        let sent = match tokio::time::timeout(ATTEMPT_HEADER_TIMEOUT.min(remaining), request).await
+        {
             Ok(Ok(res)) => res,
             Ok(Err(e)) => {
                 last_transient = format!("network: {e}");

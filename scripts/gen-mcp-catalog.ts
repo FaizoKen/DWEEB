@@ -598,6 +598,12 @@ function buildCorpus(): CorpusCase[] {
   cases.push(
     record("component-id-not-integer", { components: [{ ...text("a"), id: 1.5 }] }),
   );
+  // Past Discord's signed 32-bit id, and negative: whole numbers, still refused.
+  cases.push(
+    record("component-id-out-of-range", {
+      components: [{ ...text("a"), id: 3_000_000_000 }, { ...text("b"), id: -1 }],
+    }),
+  );
 
   // An unfinished link-plugin URL: the template prefix is real, the token is
   // one only the server owner can fill in.

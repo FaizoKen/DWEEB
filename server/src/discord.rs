@@ -292,6 +292,50 @@ pub struct DiscordUser {
     pub avatar: Option<String>,
 }
 
+/// `GET /oauth2/@me` — the authorization behind a user bearer token.
+#[derive(Deserialize)]
+pub struct CurrentAuthorization {
+    pub application: AuthorizedApplication,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Present when the token carries the `identify` scope.
+    #[serde(default)]
+    pub user: Option<DiscordUser>,
+}
+
+/// The (partial) application a bearer token was issued to.
+#[derive(Deserialize)]
+pub struct AuthorizedApplication {
+    pub id: String,
+}
+
+/// A live Discord Activity instance (`GET /applications/{app}/activity-instances/{id}`).
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct ActivityInstance {
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    #[serde(default)]
+    pub location: Option<ActivityLocation>,
+    /// The users currently in the instance.
+    #[serde(default)]
+    pub users: Vec<String>,
+}
+
+/// Where an Activity instance runs: `kind` `gc` (a guild channel) or `pc` (a
+/// DM / group DM), with `id` the stable `gc-<guild>-<channel>` / `pc-<channel>`
+/// context the instance id ends in.
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct ActivityLocation {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub guild_id: Option<String>,
+}
+
 /// A guild from the *user's* `GET /users/@me/guilds`. `permissions` is the
 /// user's computed permission bitfield in that guild, as a decimal string.
 #[derive(Deserialize)]
@@ -331,6 +375,59 @@ impl UserGuild {
             .parse::<u64>()
             .map(|p| p & ADMINISTRATOR != 0 || p & MANAGE_WEBHOOKS != 0)
             .unwrap_or(false)
+    }
+}
+
+/// What Discord publishes about an application. `verify_key` is the public
+/// half of the key Discord signs that app's interactions with — the only key
+/// a registration may name for it.
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct AppIdentity {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub verify_key: Option<String>,
+}
+
+impl AppIdentity {
+    /// The verify key as the dispatcher stores keys: trimmed, lowercase hex.
+    pub fn normalized_verify_key(&self) -> Option<String> {
+        self.verify_key
+            .as_deref()
+            .map(|k| k.trim().to_ascii_lowercase())
+            .filter(|k| !k.is_empty())
+    }
+}
+
+/// Outcome of an application lookup. `Unavailable` (Discord didn't answer,
+/// answered 5xx/429, or answered something unreadable) is kept apart from
+/// `Missing` (Discord answered and had nothing for us) because only the
+/// latter is worth asking the user to check what they typed.
+#[derive(Debug)]
+pub enum AppLookup {
+    Found(AppIdentity),
+    Missing,
+    Unavailable,
+}
+
+impl AppLookup {
+    /// The failure a non-success status stands for; `None` for a success.
+    fn classify(status: reqwest::StatusCode) -> Option<AppLookup> {
+        if status.is_success() {
+            None
+        } else if status.is_server_error() || status.as_u16() == 429 {
+            Some(AppLookup::Unavailable)
+        } else {
+            Some(AppLookup::Missing)
+        }
+    }
+
+    /// The app's verify key, when this lookup produced one.
+    pub fn verify_key(&self) -> Option<String> {
+        match self {
+            AppLookup::Found(identity) => identity.normalized_verify_key(),
+            _ => None,
+        }
     }
 }
 
@@ -374,6 +471,41 @@ impl Discord {
     // thread an optional audit-log reason; a 403 from any maps to an actionable
     // "re-add the bot" message (the permission bit isn't on the bot's role yet —
     // the server hasn't re-invited since the union was bumped).
+
+    /// `GET /applications/{app}/activity-instances/{instance}` (bot auth): the
+    /// live Activity instance Discord knows by that id — where it runs and who
+    /// is in it. `Ok(None)` when Discord has no such instance for this app.
+    pub async fn activity_instance(
+        &self,
+        application_id: &str,
+        instance_id: &str,
+    ) -> Result<Option<ActivityInstance>, AppError> {
+        let resp = self
+            .send_bot(
+                reqwest::Method::GET,
+                &format!("/applications/{application_id}/activity-instances/{instance_id}"),
+                None,
+                None,
+            )
+            .await?;
+        let status = resp.status();
+        if status.as_u16() == 404 {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            return Err(status_error(
+                status.as_u16(),
+                format!(
+                    "Discord error {} reading an Activity instance",
+                    status.as_u16()
+                ),
+            ));
+        }
+        resp.json::<ActivityInstance>()
+            .await
+            .map(Some)
+            .map_err(|e| body_error("unexpected Activity instance from Discord", e))
+    }
 
     /// Every webhook in a guild, across all its channels. The single Discord
     /// call that genuinely needs `MANAGE_WEBHOOKS`; the response includes each
@@ -602,10 +734,7 @@ impl Discord {
         thread_id: Option<&str>,
     ) -> Result<Option<Value>, AppError> {
         let mut url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
-        if let Some(thread) = thread_id {
-            url.push_str("?thread_id=");
-            url.push_str(thread);
-        }
+        push_thread_param(&mut url, '?', thread_id)?;
         let resp = send_with_retry(self.http.get(&url))
             .await
             .map_err(transport_error)?;
@@ -691,10 +820,7 @@ impl Discord {
     ) -> Result<Value, AppError> {
         let mut url =
             format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
-        if let Some(thread) = thread_id {
-            url.push_str("&thread_id=");
-            url.push_str(thread);
-        }
+        push_thread_param(&mut url, '&', thread_id)?;
         let resp = send_with_retry(self.http.post(&url).json(payload))
             .await
             .map_err(transport_error)?;
@@ -767,10 +893,7 @@ impl Discord {
         let mut url = format!(
             "{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}?with_components=true"
         );
-        if let Some(thread) = thread_id {
-            url.push_str("&thread_id=");
-            url.push_str(thread);
-        }
+        push_thread_param(&mut url, '&', thread_id)?;
         let req = if files.is_empty() {
             self.http.patch(&url).json(payload)
         } else {
@@ -843,52 +966,51 @@ impl Discord {
             .and_then(|g| g.name)
     }
 
-    /// Best-effort public application name, from `GET /applications/{id}/rpc`
-    /// — an endpoint Discord serves without credentials, so it works for apps
-    /// the DWEEB bot has no relationship with. A few (mostly ancient) apps
-    /// 404 there despite existing, so `None` means "couldn't resolve", not
-    /// "no such app"; never fails the caller.
-    pub async fn application_name(&self, application_id: &str) -> Option<String> {
-        #[derive(Deserialize)]
-        struct Named {
-            #[serde(default)]
-            name: Option<String>,
-        }
-        let resp = self
+    /// What Discord publishes about an application, from
+    /// `GET /applications/{id}/rpc` — an endpoint Discord serves without
+    /// credentials, so it works for apps the DWEEB bot has no relationship
+    /// with. A few (mostly ancient) apps 404 there despite existing, so
+    /// [`AppLookup::Missing`] means "Discord had nothing for us here", not
+    /// "no such app".
+    pub async fn application_identity(&self, application_id: &str) -> AppLookup {
+        let resp = match self
             .http
             .get(format!("{API_BASE}/applications/{application_id}/rpc"))
             .send()
             .await
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
+        {
+            Ok(resp) => resp,
+            Err(_) => return AppLookup::Unavailable,
+        };
+        match AppLookup::classify(resp.status()) {
+            Some(failed) => failed,
+            None => match resp.json::<AppIdentity>().await {
+                Ok(identity) => AppLookup::Found(identity),
+                Err(_) => AppLookup::Unavailable,
+            },
         }
-        resp.json::<Named>().await.ok()?.name
     }
 
-    /// Best-effort application name using the app's own credentials: a
-    /// client-credentials grant, then `GET /oauth2/@me`, whose response
-    /// always carries the application object. Covers the apps the public
-    /// lookup misses, for callers holding a client secret anyway.
-    pub async fn application_name_via_secret(
+    /// The same identity through the app's own credentials: a
+    /// client-credentials grant, then `GET /oauth2/@me`, whose response always
+    /// carries the application object. Covers the apps the public lookup
+    /// misses, for callers holding a client secret anyway — and the grant only
+    /// succeeds when the secret belongs to `client_id`, so what comes back is
+    /// that app's identity and no other's.
+    pub async fn application_identity_via_secret(
         &self,
         client_id: &str,
         client_secret: &str,
-    ) -> Option<String> {
+    ) -> AppLookup {
         #[derive(Deserialize)]
         struct Grant {
             access_token: String,
         }
         #[derive(Deserialize)]
-        struct AppInfo {
-            #[serde(default)]
-            name: Option<String>,
-        }
-        #[derive(Deserialize)]
         struct OauthMe {
-            application: AppInfo,
+            application: AppIdentity,
         }
-        let resp = self
+        let resp = match self
             .http
             .post(format!("{API_BASE}/oauth2/token"))
             .form(&[
@@ -899,22 +1021,33 @@ impl Discord {
             ])
             .send()
             .await
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
+        {
+            Ok(resp) => resp,
+            Err(_) => return AppLookup::Unavailable,
+        };
+        if let Some(failed) = AppLookup::classify(resp.status()) {
+            return failed;
         }
-        let grant = resp.json::<Grant>().await.ok()?;
-        let resp = self
+        let Ok(grant) = resp.json::<Grant>().await else {
+            return AppLookup::Unavailable;
+        };
+        let resp = match self
             .http
             .get(format!("{API_BASE}/oauth2/@me"))
             .header(AUTHORIZATION, format!("Bearer {}", grant.access_token))
             .send()
             .await
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
+        {
+            Ok(resp) => resp,
+            Err(_) => return AppLookup::Unavailable,
+        };
+        if let Some(failed) = AppLookup::classify(resp.status()) {
+            return failed;
         }
-        resp.json::<OauthMe>().await.ok()?.application.name
+        match resp.json::<OauthMe>().await {
+            Ok(me) => AppLookup::Found(me.application),
+            Err(_) => AppLookup::Unavailable,
+        }
     }
 
     /// Best-effort: install the DWEEB application-command set on an app using
@@ -1158,6 +1291,18 @@ impl Discord {
     /// `GET /users/@me` with the user's bearer token.
     pub async fn current_user(&self, access_token: &str) -> Result<DiscordUser, AppError> {
         self.get_json("/users/@me", &format!("Bearer {access_token}"), true)
+            .await
+    }
+
+    /// `GET /oauth2/@me` with a user's bearer token: which application the
+    /// token was issued to, its scopes, and (with `identify`) the user. Unlike
+    /// `/users/@me`, which answers for a token minted by ANY app, this names
+    /// the app — what lets a bearer gate refuse another app's token.
+    pub async fn current_authorization(
+        &self,
+        access_token: &str,
+    ) -> Result<CurrentAuthorization, AppError> {
+        self.get_json("/oauth2/@me", &format!("Bearer {access_token}"), true)
             .await
     }
 
@@ -1456,12 +1601,41 @@ fn status_error(status: u16, message: String) -> AppError {
 
 /// Translate Discord's status into something useful for the proxy's caller.
 ///
-/// For **bot-token** reads: 401/403 mean the proxy is misconfigured (bad token,
-/// or the bot isn't in the guild) — that's our problem, surfaced as 502. 404
-/// (unknown guild / bot not a member) and 429 (rate limit) pass through.
+/// For **bot-token** reads: 401 means the proxy is misconfigured (bad token) —
+/// that's our problem, surfaced as a paging 502. 403/404 (the bot isn't in that
+/// guild) and 429 (rate limit) pass through as 4xx.
 ///
 /// For **user-token** (bearer) calls a 401 means the user's session is expired
 /// or revoked, so it surfaces as 401 to make the browser re-authenticate.
+/// Append `thread_id` to a webhook URL whose query starts with `sep`. A thread
+/// id is a snowflake, so anything else is refused rather than encoded: spliced
+/// in raw, `1&wait=false` would switch off the echo and read a successful post
+/// as a failure — and a retry would then post it twice.
+fn push_thread_param(url: &mut String, sep: char, thread_id: Option<&str>) -> Result<(), AppError> {
+    let Some(thread) = thread_id else {
+        return Ok(());
+    };
+    if thread.is_empty() || thread.len() > 25 || !thread.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "thread_id must be a Discord thread ID.".into(),
+            retry_after: None,
+        });
+    }
+    url.push(sep);
+    url.push_str("thread_id=");
+    url.push_str(thread);
+    Ok(())
+}
+
+fn bot_not_in_guild() -> AppError {
+    AppError::Status {
+        status: StatusCode::NOT_FOUND,
+        message: "Server not found — make sure the DWEEB bot has been added to it.".into(),
+        retry_after: None,
+    }
+}
+
 fn map_discord_error(
     status: StatusCode,
     message: String,
@@ -1475,12 +1649,14 @@ fn map_discord_error(
         401 => {
             AppError::BadGateway("Discord rejected the bot token — check DISCORD_BOT_TOKEN".into())
         }
-        403 => AppError::BadGateway(format!("the bot lacks access to this guild ({message})")),
-        404 => AppError::Status {
-            status: StatusCode::NOT_FOUND,
-            message: "Server not found — make sure the DWEEB bot has been added to it.".into(),
-            retry_after: None,
-        },
+        // For a bot read, 403 (50001 Missing Access) means the bot isn't in that
+        // server — guild metadata is readable by any member. Someone reaches it
+        // by an ordinary action (restoring a message posted through a webhook of
+        // a server DWEEB's bot was never added to, which `webhook.incoming`
+        // allows), so it answers like the 404: a 4xx, never a page. A user
+        // token's 403 has no such reading and keeps the generic arm.
+        403 if !bearer => bot_not_in_guild(),
+        404 => bot_not_in_guild(),
         429 => AppError::Status {
             status: StatusCode::TOO_MANY_REQUESTS,
             message: "Rate limited by Discord — try again shortly.".into(),
@@ -1540,6 +1716,17 @@ async fn webhook_error_from(resp: reqwest::Response) -> AppError {
         400 => AppError::Status {
             status: StatusCode::BAD_REQUEST,
             message: format!("Discord rejected the request: {message}"),
+            retry_after: None,
+        },
+        // 40005: an upload past the destination server's file-size limit. The
+        // post/edit routes accept up to 32 MiB, Discord allows far less on an
+        // unboosted server, so this is the user's file — not our fault, and 5xx
+        // is the paging channel.
+        413 => AppError::Status {
+            status: StatusCode::PAYLOAD_TOO_LARGE,
+            message: "That file is larger than this server's Discord upload limit \
+                      (10 MB unless the server is boosted)."
+                .into(),
             retry_after: None,
         },
         other => status_error(other, format!("Discord error {other}: {message}")),
@@ -1710,6 +1897,51 @@ mod fault_tests {
         let resp = status_error(502, "Discord error 502: Discord returned an error".into())
             .into_response();
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    /// Restoring a message from a server the bot was never added to reads that
+    /// server's metadata with the bot token and gets 403. A user can do that by
+    /// ordinary means, so it must be a 4xx — it used to be a paging 502.
+    #[test]
+    fn a_bot_read_of_a_server_without_the_bot_is_a_4xx() {
+        let resp = map_discord_error(StatusCode::FORBIDDEN, "Missing Access".into(), None, false)
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        // A user token's 403 has no such meaning and stays on the generic arm.
+        let resp = map_discord_error(StatusCode::FORBIDDEN, "x".into(), None, true).into_response();
+        assert!(resp.status().is_server_error());
+    }
+
+    #[test]
+    fn a_thread_id_is_a_snowflake_or_refused_never_spliced_raw() {
+        let mut url = String::from("https://discord.test/webhooks/1/t?wait=true");
+        assert!(push_thread_param(&mut url, '&', Some("123456789012345678")).is_ok());
+        assert!(url.ends_with("?wait=true&thread_id=123456789012345678"));
+        for bad in ["1&wait=false", "", "12 3", "1".repeat(26).as_str()] {
+            let mut url = String::from("https://discord.test/x?wait=true");
+            let Err(err) = push_thread_param(&mut url, '&', Some(bad)) else {
+                panic!("{bad:?} was accepted");
+            };
+            assert_eq!(err.into_response().status(), StatusCode::BAD_REQUEST);
+            assert_eq!(url, "https://discord.test/x?wait=true");
+        }
+        let mut url = String::from("u");
+        assert!(push_thread_param(&mut url, '?', None).is_ok());
+        assert_eq!(url, "u");
+    }
+
+    /// An upload past the server's size limit is the user's file: a 413, not a
+    /// paging 502.
+    #[tokio::test]
+    async fn an_oversized_upload_is_the_users_413_not_our_502() {
+        let resp = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(413)
+                .body(r#"{"message":"Request entity too large","code":40005}"#)
+                .unwrap(),
+        );
+        let resp = webhook_error_from(resp).await.into_response();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     /// A fake server must consume the request before answering and closing:

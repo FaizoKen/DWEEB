@@ -62,6 +62,28 @@ pub fn webhook_id(url: &str) -> Option<String> {
     }
 }
 
+/// The token segment of a `…/api/webhooks/{id}/{token}` URL — the credential
+/// the create path presents to Discord to learn which server the webhook posts
+/// into. `None` for a malformed URL or a token outside Discord's URL-safe
+/// alphabet (so it can be placed in a request path as-is).
+pub fn webhook_token(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url.trim()).ok()?;
+    let mut segs = parsed.path_segments()?;
+    if segs.next()? != "api" || segs.next()? != "webhooks" {
+        return None;
+    }
+    let _id = segs.next()?;
+    let token = segs.next()?;
+    if token.is_empty()
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
+    Some(token.to_string())
+}
+
 /// Discord snowflakes are 17–20 digits today; accept a little slack.
 pub fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
@@ -197,6 +219,25 @@ mod tests {
             None
         );
         assert_eq!(webhook_id("https://discord.com/users/@me"), None);
+    }
+
+    #[test]
+    fn extracts_webhook_token() {
+        assert_eq!(
+            webhook_token("https://discord.com/api/webhooks/123456789012345678/abc-DEF_9"),
+            Some("abc-DEF_9".to_string())
+        );
+        // Query strings and fragments aren't part of the token.
+        assert_eq!(
+            webhook_token("https://discord.com/api/webhooks/123/tok?wait=true"),
+            Some("tok".to_string())
+        );
+        assert_eq!(webhook_token("https://discord.com/api/webhooks/123/"), None);
+        assert_eq!(webhook_token("https://discord.com/api/webhooks/123"), None);
+        assert_eq!(
+            webhook_token("https://discord.com/api/webhooks/123/a%2Fb"),
+            None
+        );
     }
 
     #[test]
