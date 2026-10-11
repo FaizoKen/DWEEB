@@ -81,12 +81,19 @@ export const PICK_DESTINATION_HINT = "Pick a channel or paste a webhook URL firs
 /** The Update tab lists webhooks, not channels — there is no channel to pick. */
 export const PICK_UPDATE_WEBHOOK_HINT =
   "Pick the webhook that posted this message, or paste its URL.";
+/** A forum/media channel takes no message outside a post: Discord refuses a
+ *  webhook post with neither a post to reply in nor a new post's title. */
+export const FORUM_POST_HINT = "Forum channel — pick a post, or give the message a post title.";
+/** The same rule, said in full where a click on Send/Schedule meets it. */
+export const FORUM_POST_ERROR =
+  "This is a forum channel, so every message lives in a post: pick an existing post above, or give the message a post title in Message options to start a new one.";
 
 /**
  * Why the primary button is disabled, when nothing else on screen says so.
  * Returns null while the panel is busy (the button reads "Sending…"), while a
  * destination *is* chosen (every remaining blocker renders its own callout,
- * and all of them need a parsed URL to be computed at all), while the
+ * and all of them need a parsed URL to be computed at all — except a forum
+ * with no post picked, which says so here), while the
  * validation callout is already explaining it, and while the primary isn't a
  * send at all — a signed-out schedule turns it into "Sign in to schedule",
  * which is enabled and speaks for itself.
@@ -101,9 +108,12 @@ export function sendDisabledHint(input: {
   busy: boolean;
   /** The primary button is the scheduling sign-in, not send/schedule. */
   primaryIsSignIn?: boolean;
+  /** The destination is a forum, and neither a post nor a post title is set —
+   *  the one blocker with a destination chosen that no callout explains. */
+  needsForumPost?: boolean;
 }): string | null {
-  if (input.busy || input.hasDestination || input.hasBlockingIssues) return null;
-  if (input.primaryIsSignIn) return null;
+  if (input.busy || input.hasBlockingIssues || input.primaryIsSignIn) return null;
+  if (input.hasDestination) return input.needsForumPost ? FORUM_POST_HINT : null;
   return input.mode === "update" ? PICK_UPDATE_WEBHOOK_HINT : PICK_DESTINATION_HINT;
 }
 

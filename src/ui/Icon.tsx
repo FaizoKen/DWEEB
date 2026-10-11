@@ -584,9 +584,17 @@ export const StageIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** A speech bubble branching off a line — a thread (or forum post). */
+export const ThreadIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M5 3v9a4 4 0 0 0 4 4h2" />
+    <path d="M14 11h6a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 20 19h-1v2.5L16 19h-2a1.5 1.5 0 0 1-1.5-1.5v-5A1.5 1.5 0 0 1 14 11z" />
+  </svg>
+);
+
 /**
  * The glyph Discord shows for a channel of the given `type`: announcement,
- * forum, media, voice, and stage each get their own icon; everything else
+ * forum, media, voice, stage, and thread each get their own icon; everything else
  * (text and any unknown type) falls back to the slanted hashtag. Used by the
  * channel pickers so a list isn't all `#`.
  */
@@ -600,6 +608,10 @@ export const ChannelTypeIcon = ({
       return <VoiceIcon size={size} {...rest} />;
     case 5:
       return <AnnouncementIcon size={size} {...rest} />;
+    case 10:
+    case 11:
+    case 12:
+      return <ThreadIcon size={size} {...rest} />;
     case 13:
       return <StageIcon size={size} {...rest} />;
     case 15:

@@ -4,7 +4,7 @@ import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 import { CODE_GUIDE_INPUTS } from "./code-guides";
 
-export const GUIDES_LASTMOD = "2026-09-23";
+export const GUIDES_LASTMOD = "2026-10-11";
 
 export interface GuideSection {
   heading: string;
@@ -1405,7 +1405,7 @@ X-RateLimit-Remaining: 0
     eyebrow: "Troubleshooting · Discord webhooks",
     lede: "Start with the operation that failed, the HTTP status and Discord's numeric error code. A missing webhook, a missing message and an invalid Components V2 layout need different repairs. The reference below quotes each common message exactly as Discord, discord.js and discord.py print it, so you can match the line in your logs and go straight to the fix.",
     published: "2026-09-11",
-    modified: "2026-09-23",
+    modified: "2026-10-11",
     keywords: [
       "discord webhook not working",
       "discord webhook errors",
@@ -1633,7 +1633,7 @@ discord.errors.Forbidden: 403 Forbidden (error code: 50013): Missing Permissions
             [
               "220001 / 220002",
               "Missing or conflicting forum destination",
-              "Choose a new post title OR an existing Thread ID",
+              "Choose a new post title OR an existing post to send into",
             ],
           ],
         },
@@ -1664,7 +1664,7 @@ discord.errors.Forbidden: 403 Forbidden (error code: 50013): Missing Permissions
         heading: "Diagnose restore and update separately from new sends",
         paragraphs: [
           "If sending a new message works but Restore fails, start with the message target. Copy its complete Discord link, select the webhook that originally posted it and inspect the optional Thread ID. Creating a new webhook does not transfer ownership of old posts. Follow the [restore and update workflow](/guides/edit-discord-webhook-message/) before deciding to repost.",
-          "For forum and media channels, distinguish a new post title from an existing post's channel ID. In DWEEB, the Forum post fields create a post; the Send panel's Thread ID addresses an existing one. The [forum and thread guide](/guides/discord-webhook-forum-threads/) walks through both paths.",
+          "For forum and media channels, distinguish a new post title from an existing post's channel ID. In DWEEB, the Forum post fields create a post; picking an existing post in the Send panel addresses that one. The [forum and thread guide](/guides/discord-webhook-forum-threads/) walks through both paths.",
         ],
       },
       {
@@ -1859,7 +1859,7 @@ discord.errors.Forbidden: 403 Forbidden (error code: 50013): Missing Permissions
     eyebrow: "Workflow guide · Forum posts and threads",
     lede: 'If Discord answered "Webhooks posted to forum channels must have a thread_name or thread_id", your webhook belongs to a forum or media channel and the request did not say which post to use. A forum post is a thread inside its parent channel: add thread_name to create a new post, or add thread_id to the URL to reply inside an existing one. This guide shows both — in a raw request, in an automation tool and in DWEEB.',
     published: "2026-09-11",
-    modified: "2026-09-23",
+    modified: "2026-10-11",
     keywords: [
       "webhooks posted to forum channels must have a thread_name or thread_id",
       "discord webhook forum channel",
@@ -1936,7 +1936,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
             ],
             [
               "Send into an existing post or thread",
-              "Send → optional Thread ID",
+              "Send → pick the post or thread",
               "thread_id in the request query",
             ],
             [
@@ -1957,7 +1957,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
           "Build the first message, then select the forum or media channel in the connected destination flow or supply that channel's webhook URL.",
           "Open Forum post in the builder's message options and enter Thread name. This title is separate from any heading written inside your Text Display.",
           "Add Applied tags if needed, using tag IDs from this destination's configured tags. DWEEB accepts comma- or space-separated IDs.",
-          "Leave the Send panel's optional Thread ID empty, review the destination and confirm the new post.",
+          "In the Send panel, keep New post selected under the forum's post list, review the destination and confirm the new post.",
           "Keep the returned Discord message link. DWEEB records the new thread target after a successful send so an in-place update reaches the post you just created.",
         ],
         paragraphs: [
@@ -1985,7 +1985,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
       {
         heading: "Send into an existing thread or forum post",
         paragraphs: [
-          "In Discord with Developer Mode enabled, copy the thread's Channel ID. Open DWEEB's Send panel, expand the optional thread or forum-post control and paste it into Thread ID. Use a webhook for the parent channel, clear Thread name and any create-only tag settings, then review the send destination.",
+          "Pick the parent channel in DWEEB's Send panel. Its open threads and forum posts are listed below the destination, pinned posts first and recently closed ones after them, so sending into one is a click. A post the list doesn't show, such as an older closed one, can still be reached: right-click it in Discord, choose Copy Link and paste the link (or, with Developer Mode on, its ID) into the field under the list. Clear Thread name and any create-only tag settings, then review the send destination.",
           "In your own code, thread_id belongs in the webhook URL's query string, not inside the components tree. Keep the normal exported V2 body, without thread_name. An ID from an unrelated text channel cannot be used to make the webhook post there; choose that channel's own destination instead.",
           "An archived post is not a dead end: Discord unarchives the thread automatically when a webhook sends into it with thread_id. A locked thread is different — check its state and the posting app's access before retrying.",
         ],
@@ -2013,7 +2013,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
           rows: [
             [
               "220001: no forum target",
-              "Enter a Thread name for a new post or the existing Thread ID",
+              "Enter a Thread name for a new post, or pick the existing post in Send",
             ],
             [
               "220002: conflicting targets",

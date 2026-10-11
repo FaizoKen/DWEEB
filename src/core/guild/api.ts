@@ -633,6 +633,61 @@ export async function fetchGuildWebhooks(
   return { webhooks: body.webhooks ?? [], dweeb_application_id: body.dweeb_application_id ?? "" };
 }
 
+/** One thread or forum post a webhook in its channel can post into (see
+ *  `routes::channel_threads`). `type` 10 = announcement thread, 11 = public
+ *  thread (forum and media posts are public threads). */
+export interface ChannelThread {
+  id: string;
+  name: string;
+  type: number;
+  /** Closed (archived). A webhook post reopens it. */
+  archived: boolean;
+  /** Locked — only moderators can reopen or post in it. */
+  locked: boolean;
+  /** A forum's pinned post. */
+  pinned: boolean;
+}
+
+/** `GET /api/guilds/:id/channels/:channelId/threads` response. */
+export interface ChannelThreads {
+  /** Open threads (pinned first, then newest activity), then recently
+   *  archived ones. */
+  threads: ChannelThread[];
+  /** Older archived threads exist past the ones listed. */
+  more_archived: boolean;
+  /** False when the bot can't read this channel's archived threads, so only
+   *  the open ones are listed. */
+  archived_listed: boolean;
+  /** The channel's own Discord type (15 forum, 16 media, …), or null from a
+   *  proxy predating the field. */
+  channel_type: number | null;
+}
+
+/** `GET /api/guilds/:id/channels/:channelId/threads` — the threads and forum
+ *  posts this channel's webhooks can post into. Manage-Webhooks gated, like
+ *  the webhook list. */
+export async function fetchChannelThreads(
+  guildId: string,
+  channelId: string,
+  opts: { force?: boolean; signal?: AbortSignal } = {},
+): Promise<ChannelThreads> {
+  const guild = guildId.trim();
+  const channel = channelId.trim();
+  if (!isValidGuildId(guild) || !SNOWFLAKE_RE.test(channel)) {
+    throw new GuildApiError("That doesn't look like a valid channel.", 0);
+  }
+  const body = await getJson<Partial<ChannelThreads>>(
+    withFresh(`/api/guilds/${guild}/channels/${channel}/threads`, opts.force ?? false),
+    opts.signal,
+  );
+  return {
+    threads: Array.isArray(body.threads) ? body.threads : [],
+    more_archived: body.more_archived === true,
+    archived_listed: body.archived_listed !== false,
+    channel_type: typeof body.channel_type === "number" ? body.channel_type : null,
+  };
+}
+
 /** `POST /api/guilds/:id/channels/:channelId/webhooks` — create an incoming
  *  webhook in a channel. `avatar` is an image data URI or omitted for the
  *  default picture. Returns the created webhook (its `url` is the new token). */

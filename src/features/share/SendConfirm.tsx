@@ -80,6 +80,9 @@ export interface SendConfirmProps {
   channelName?: string;
   /** Target thread id, when posting into a thread. */
   threadId?: string;
+  /** That thread's name, when the thread picker knows it — shown instead of
+   *  the bare id. */
+  threadName?: string;
   /** Message id being overwritten, in update mode. */
   messageId?: string;
   /** That message's own first line, when known — shown instead of the bare id. */
@@ -517,6 +520,7 @@ export function SendConfirm({
   guildName,
   channelName,
   threadId,
+  threadName,
   messageId,
   messageLabel,
   messageUrl,
@@ -696,7 +700,11 @@ export function SendConfirm({
           <div className={styles.fact}>
             <dt>Thread</dt>
             <dd>
-              <code className={styles.chip}>{threadId}</code>
+              {threadName ? (
+                <span className={styles.destName}>{threadName}</span>
+              ) : (
+                <code className={styles.chip}>{threadId}</code>
+              )}
             </dd>
           </div>
         ) : null}

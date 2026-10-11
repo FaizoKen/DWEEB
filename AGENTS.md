@@ -2230,6 +2230,30 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   from a pasted link only through `core/webhook/restoreLink.ts` (never the webhook's own channel
   or a known server channel — Discord 400s "Unknown Channel" — and it checks the webhook first
   when its channel is unknown).
+- **Threads and forum posts are picked, not pasted** (2026-10-11). A support report: a forum
+  post existed in Discord but DWEEB only listed channels, so the only way in was the Thread ID
+  field, fed by "Copy Thread ID" (Developer Mode only). The Send panel's thread section is now
+  `features/share/ThreadPicker` over `GET /api/guilds/:g/channels/:c/threads`
+  (`routes::channel_threads`, Manage-Webhooks gated like the webhook list): the webhook
+  channel's open threads (pinned first, then newest activity — Discord only lists active
+  threads guild-wide, cached under `threads:active:{guild}`) then its 50 most recently
+  archived public ones (a webhook post reopens an archived thread). **Private threads (12) are
+  never listed** — their names belong to their members, not to everyone who manages webhooks.
+  The archived read needs Read Message History, which the bot gets from the server's roles,
+  not its invite: a 403 there answers `archived_listed: false` and the open threads still
+  show, never an error. The ID field stays behind "Not listed?" and now takes a post's
+  **Copy Link** URL too (`threadIdFromInput` keeps the thread segment; stripping non-digits
+  used to glue server + thread ids together). Rules: a thread is only valid under its
+  webhook's channel, so switching between two *known* channels clears it (the ref keeps the
+  last known channel — a newly typed URL passes through "unknown" first); a **forum/media**
+  destination with neither a picked post nor `thread_name` blocks Send/Schedule up front
+  (`forumNeedsPost`, Discord's 220001) with "Add a post title" jumping to Message options; the
+  response carries `channel_type` so that rule works for a server that isn't connected.
+  Web only — the Activity's `target` frame carries a channel and nothing else (see the
+  destination entry), so threads there would be a protocol change. **Server-first deploy
+  ordering**: an old proxy 404s the route and the picker shows "Couldn't load threads" over
+  the still-working ID field. Guarded by `routes::tests::threads_*`/`archived_threads_*`,
+  `channelThreads.test.ts`, `threadInput.test.ts`, `threadSelection.test.ts`.
 - **Plan, install, AI and feedback dead ends** (2026-09-23). `fetchMySubscriptions` returns ok/error
   and never turns a failure into an empty list — that list gates Manage billing, the only in-app
   cancel path. `getStripe()` resolves `null` instead of rejecting, because

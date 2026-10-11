@@ -178,6 +178,10 @@ import {
 import type { WebhookMessage } from "@/core/schema/types";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker";
+import { ThreadPicker } from "./ThreadPicker";
+import { forumNeedsPost, isForumType } from "./threadSelection";
+import { useChannelThreads } from "@/core/webhook/channelThreads";
+import { useOptionsRevealStore } from "@/features/builder/optionsReveal";
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
@@ -185,6 +189,7 @@ import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
 import {
+  FORUM_POST_ERROR,
   cancelledAfterDispatchMessage,
   sendDestinationCopy,
   sendDisabledHint,
@@ -679,6 +684,65 @@ export function SendPanel({
     return knownChannelId ? connectedData?.channelById[knownChannelId]?.name : undefined;
   }, [checkWebhookId, history, connectedData, knownChannelId]);
 
+  // ── Thread / forum post ────────────────────────────────────────────────────
+  // A webhook posts into a thread only under its own channel, so the threads
+  // offered are the webhook channel's. They're listed for an account that
+  // manages that server's webhooks (the proxy's gate); anyone else keeps the
+  // ID field. Loaded as soon as the channel is known (cached, deduped) so the
+  // folded section can say how many there are.
+  const canListThreads =
+    isProxyConfigured() &&
+    authStatus === "authed" &&
+    knownGuildId != null &&
+    knownChannelId != null &&
+    (authGuilds.find((g) => g.id === knownGuildId)?.can_manage_webhooks ?? false);
+  const { entry: threadsEntry } = useChannelThreads(
+    knownGuildId,
+    knownChannelId,
+    canListThreads && !scheduleEditMode,
+  );
+  const localChannelType =
+    knownChannelId && connectedData?.guildId === knownGuildId
+      ? connectedData?.channelById[knownChannelId]?.type
+      : undefined;
+  const destinationChannelType = localChannelType ?? threadsEntry.channelType ?? undefined;
+  const destinationIsForum = isForumType(destinationChannelType);
+  // Discord refuses a forum post with neither a post nor a title; say so here
+  // instead of relaying its 400 after the click.
+  const needsForumPost =
+    !scheduleEditMode &&
+    forumNeedsPost({
+      mode,
+      channelType: destinationChannelType,
+      threadId,
+      postTitle: message.thread_name,
+    });
+  const threadCount = canListThreads ? threadsEntry.threads.length : 0;
+  // The picked thread's name, so the folded section still says where it posts.
+  const selectedThreadName = threadId
+    ? threadsEntry.threads.find((t) => t.id === threadId)?.name
+    : undefined;
+
+  // A forum destination has to be answered (which post?), so its section opens.
+  useEffect(() => {
+    if (destinationIsForum && mode === "new") setOptionalOpen(true);
+  }, [destinationIsForum, mode]);
+
+  // Switching the destination channel drops a thread picked under the old one:
+  // a webhook can't post into another channel's thread (Discord answers
+  // "Unknown Channel"). Only a switch between two known channels counts — the
+  // first resolution of the channel (a verify landing, a restore) keeps the
+  // thread it arrived with, and an update keeps its message's thread. The ref
+  // holds the last channel that was *known*: typing a new URL passes through
+  // "unknown" until its verify lands, and that gap mustn't erase the old one.
+  const threadChannelRef = useRef(knownChannelId);
+  useEffect(() => {
+    if (!knownChannelId) return;
+    const prev = threadChannelRef.current;
+    threadChannelRef.current = knownChannelId;
+    if (mode === "new" && prev && prev !== knownChannelId) setThreadId("");
+  }, [knownChannelId, mode]);
+
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
   //  - person/follower → hard block: Discord rejects the send outright.
@@ -960,6 +1024,11 @@ export function SendPanel({
       });
       return;
     }
+    if (needsForumPost) {
+      setOptionalOpen(true);
+      setState({ kind: "error", message: FORUM_POST_ERROR });
+      return;
+    }
     if (mustSignInToRouteCheck) {
       setState({
         kind: "error",
@@ -1025,6 +1094,7 @@ export function SendPanel({
     if (blockingIssues.length > 0) {
       return `${blockingIssues.length} validation error${blockingIssues.length === 1 ? "" : "s"} — fix them before scheduling.`;
     }
+    if (needsForumPost) return FORUM_POST_ERROR;
     if (
       knownGone ||
       ownershipBlocked ||
@@ -2116,6 +2186,7 @@ export function SendPanel({
     hasBlockingIssues: blockingIssues.length > 0,
     busy: sending || saving || scheduling,
     primaryIsSignIn: scheduleMode && authStatus !== "authed",
+    needsForumPost,
   });
 
   return (
@@ -2585,24 +2656,41 @@ export function SendPanel({
           onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
         >
           <summary className={styles.optionalSummary}>
-            Posting inside a thread or forum post?{" "}
-            <span className={styles.optionalHint}>(optional)</span>
+            {destinationIsForum
+              ? mode === "update"
+                ? "Which forum post is the message in?"
+                : `Which post in ${knownChannelName ? `#${knownChannelName}` : "this forum"}?`
+              : "Posting inside a thread or forum post?"}{" "}
+            <span className={styles.optionalHint}>
+              {selectedThreadName
+                ? `(${selectedThreadName})`
+                : destinationIsForum && mode === "new"
+                  ? "(required)"
+                  : threadCount > 0
+                    ? `(optional · ${threadCount} ${destinationIsForum ? "post" : "thread"}${threadCount === 1 ? "" : "s"})`
+                    : "(optional)"}
+            </span>
           </summary>
           <div className={styles.optionalBody}>
-            <Field
-              label="Thread ID"
-              hint="Most people can skip this. Fill it in only if your message should appear inside a specific thread or forum post — in Discord, right-click the thread → Copy Channel ID (Developer Mode required)."
-            >
-              {(id) => (
-                <TextInput
-                  id={id}
-                  value={threadId}
-                  onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
-                  placeholder="e.g. 1185234567890123456"
-                  inputMode="numeric"
-                />
-              )}
-            </Field>
+            <ThreadPicker
+              guildId={knownGuildId ?? null}
+              channelId={knownChannelId ?? null}
+              channelName={knownChannelName}
+              channelType={localChannelType}
+              canList={canListThreads}
+              mode={mode}
+              value={threadId}
+              onChange={setThreadId}
+              postTitle={message.thread_name ?? ""}
+              onAddPostTitle={
+                onCloseDialog
+                  ? () => {
+                      onCloseDialog();
+                      useOptionsRevealStore.getState().reveal("thread_name");
+                    }
+                  : undefined
+              }
+            />
           </div>
         </details>
       )}
@@ -3019,7 +3107,8 @@ export function SendPanel({
                   componentRouting === "foreign" ||
                   pluginGuildMismatch != null ||
                   hasUploads ||
-                  pickedInPast
+                  pickedInPast ||
+                  needsForumPost
                 }
               >
                 {scheduling ? "Scheduling…" : scheduleAgain ? "Schedule another" : "Schedule post"}
@@ -3039,7 +3128,8 @@ export function SendPanel({
                 mustSignInToRouteCheck ||
                 componentRouting === "foreign" ||
                 pluginGuildMismatch != null ||
-                (mode === "update" && !parsedMessageId)
+                (mode === "update" && !parsedMessageId) ||
+                needsForumPost
               }
             >
               {sending
@@ -3066,6 +3156,7 @@ export function SendPanel({
         guildName={knownGuildName}
         channelName={knownChannelName}
         threadId={scheduleEditMode ? undefined : threadId.trim() || undefined}
+        threadName={scheduleEditMode ? undefined : selectedThreadName || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
         messageLabel={updateTarget?.headline ?? undefined}
         messageUrl={updateTarget?.discordUrl ?? undefined}

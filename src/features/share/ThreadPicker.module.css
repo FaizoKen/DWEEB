@@ -1,0 +1,196 @@
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.title {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+}
+.count {
+  color: var(--app-text-subtle);
+  font-weight: 500;
+}
+.refresh {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+.refresh:hover {
+  color: var(--app-text);
+  background: var(--app-bg-hover);
+}
+.refresh:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.searchIcon {
+  position: absolute;
+  left: 9px;
+  color: var(--app-text-subtle);
+  pointer-events: none;
+}
+.searchInput {
+  width: 100%;
+  padding: 7px 10px 7px 28px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+}
+.searchInput:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.row:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.rowActive,
+.rowActive:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
+
+.icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--app-text-subtle);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.nameText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+.detailWarn {
+  color: var(--app-warning-text, var(--app-text-muted));
+}
+
+.tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.7;
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
+}
+.tagPinned {
+  background: var(--app-accent-soft);
+  color: var(--app-accent-text);
+}
+
+.check {
+  flex: none;
+  color: var(--app-accent);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.noteError {
+  color: var(--app-danger-text, var(--app-text-muted));
+}
+
+.linkBtn,
+.inlineAction {
+  width: fit-content;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--app-accent-text, var(--app-accent));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.linkBtn:hover,
+.inlineAction:hover {
+  text-decoration: underline;
+}
+.inlineAction {
+  margin: 4px 0 2px 36px;
+}

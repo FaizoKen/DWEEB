@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FORUM_POST_HINT,
   PICK_DESTINATION_HINT,
   cancelledAfterDispatchMessage,
   unresolvedUrlTokensMessage,
@@ -175,6 +176,20 @@ describe("sendDisabledHint", () => {
         busy: true,
       }),
     ).toBeNull();
+  });
+
+  it("says why a forum destination with no post is disabled", () => {
+    const forum = {
+      mode: "new" as const,
+      hasDestination: true,
+      hasBlockingIssues: false,
+      busy: false,
+      needsForumPost: true,
+    };
+    expect(sendDisabledHint(forum)).toBe(FORUM_POST_HINT);
+    // The validation callout and an in-flight send still speak for themselves.
+    expect(sendDisabledHint({ ...forum, hasBlockingIssues: true })).toBeNull();
+    expect(sendDisabledHint({ ...forum, busy: true })).toBeNull();
   });
 });
 
