@@ -296,7 +296,11 @@ async fn process(
         send_url.push_str(thread);
     }
 
-    match http.post(&send_url).json(&payload).send().await {
+    // A post into a thread drops the fields that would start a new forum post
+    // (Discord refuses both at once). Schedules stored before the browser did
+    // this itself still carry them, so the worker applies it too.
+    let payload = crate::discord::for_thread_target(&payload, job.thread_id.is_some());
+    match http.post(&send_url).json(payload.as_ref()).send().await {
         Ok(resp) => {
             let code = resp.status().as_u16();
             if resp.status().is_success() {

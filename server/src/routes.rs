@@ -301,13 +301,25 @@ struct ThreadItem {
 /// picker: the open ones (pinned first, then most recently active), followed by
 /// the most recently archived ones. Manage-Webhooks gated like the rest of the
 /// Send picker's reads, since it only matters to someone posting through one.
+///
+/// Either credential: the web app's cookie, or the embedded Activity's bearer —
+/// its channel picker lists threads too, and a cookie-only route silently 401s
+/// inside the Activity iframe. Each path takes its own posting gate (the same
+/// one its post route applies).
 pub async fn channel_threads(
     State(st): State<AppState>,
     Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
+    headers: axum::http::HeaderMap,
     Path((guild, channel_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    authorize_webhooks(&st, &jar, &guild).await?;
+    let via_cookie = current_session(&jar).is_some();
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    if via_cookie {
+        authorize_webhooks_session(&st, session, &guild).await?;
+    } else {
+        authorize_activity_webhooks(&st, session, &guild).await?;
+    }
     if !is_snowflake(&channel_id) {
         return Err(client_error(
             StatusCode::BAD_REQUEST,

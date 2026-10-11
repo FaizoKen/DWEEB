@@ -247,11 +247,14 @@ fn payload_thread_name(message: &Value) -> Option<&str> {
 ///
 /// Everything subtler passes through — Discord stays the authority. A channel
 /// that isn't in the guild fails exactly like [`ensure_channel_in_guild`].
+/// `into_thread`: the post goes into an existing thread of the channel, which
+/// starts nothing, so neither rule applies.
 async fn ensure_postable_channel(
     st: &AppState,
     guild: &str,
     channel_id: &str,
     message: &Value,
+    into_thread: bool,
 ) -> Result<(), AppError> {
     match crate::routes::channel_type_in_guild(st, guild, channel_id).await? {
         None => Err(AppError::Status {
@@ -259,6 +262,10 @@ async fn ensure_postable_channel(
             message: "That channel isn't in this server.".into(),
             retry_after: None,
         }),
+        // Into an existing thread: no post is started, so neither title rule
+        // applies — and a title left in the draft is dropped from the post
+        // (`discord::for_thread_target`) rather than refused.
+        Some(_) if into_thread => Ok(()),
         Some(kind) if is_thread_only_kind(kind) && payload_thread_name(message).is_none() => {
             Err(bad_request(
                 "Posting to a forum or media channel starts a new post, which needs a title — add one in the post dialog.",
@@ -539,6 +546,11 @@ pub struct PostBody {
     /// custom-bot section below). Empty/absent = the standard DWEEB identity.
     #[serde(default)]
     application_id: String,
+    /// Post into this thread (or forum post) of `channel_id` instead of the
+    /// channel itself — picked in the Activity bar's channel picker. Empty/absent
+    /// = the channel (a forum: a new post, titled by the message's `thread_name`).
+    #[serde(default)]
+    thread_id: String,
 }
 
 /// `POST /api/activity/post` `{ guild_id, channel_id, message }` — post the
@@ -574,9 +586,17 @@ pub async fn activity_post(
         return Err(bad_request("message must be a JSON object"));
     }
     let custom_app = parse_application_id(&body.application_id)?;
+    let target_thread = parse_thread_id(&body.thread_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
-    ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
+    ensure_postable_channel(
+        &st,
+        &guild,
+        &channel_id,
+        &body.message,
+        target_thread.is_some(),
+    )
+    .await?;
 
     let (webhook_id, token, hook_guard) = match custom_app.as_deref() {
         // Post as one of the server's own bots: through its connected Activity
@@ -602,7 +622,13 @@ pub async fn activity_post(
     let had_uploads = !files.is_empty();
     let created = st
         .discord
-        .execute_webhook_with_files(&webhook_id, &token, &body.message, files)
+        .execute_webhook_with_files(
+            &webhook_id,
+            &token,
+            &body.message,
+            files,
+            target_thread.as_deref(),
+        )
         .await;
     drop(hook_guard);
     let created = created?;
@@ -614,7 +640,10 @@ pub async fn activity_post(
     // A forum/media post landed in a brand-new thread (its id comes back as the
     // echoed message's channel_id). Every later read/edit of the message — and
     // its jump link — must carry that thread id, so it rides the response.
-    let thread_id = created_thread_id(&channel_id, &created);
+    // A post into a picked thread lives in that thread.
+    let thread_id = target_thread
+        .clone()
+        .or_else(|| created_thread_id(&channel_id, &created));
     let jump = if message_id.is_empty() {
         Value::Null
     } else {
@@ -704,6 +733,16 @@ pub async fn activity_post(
         "permanent_error": permanent_error,
     }))
     .into_response())
+}
+
+/// Parse an optional thread id off a post/schedule body: empty/absent means
+/// the channel itself, anything else must be a snowflake.
+fn parse_thread_id(raw: &str) -> Result<Option<String>, AppError> {
+    match raw.trim() {
+        "" => Ok(None),
+        id if is_snowflake(id) => Ok(Some(id.to_string())),
+        _ => Err(bad_request("thread_id must be a Discord id")),
+    }
 }
 
 /// Parse an optional custom-app id off a post/edit body: empty/absent means
@@ -1709,6 +1748,9 @@ pub struct ScheduleBody {
     /// [`resolve_custom_hook_for_channel`]).
     #[serde(default)]
     application_id: String,
+    /// Post into this thread (or forum post) of `channel_id` when it fires.
+    #[serde(default)]
+    thread_id: String,
 }
 
 /// `POST /api/activity/schedule` `{ guild_id, channel_id, message, start_at, tz }`
@@ -1755,12 +1797,21 @@ pub async fn activity_schedule(
         return Err(bad_request("message must be a JSON object"));
     }
     let custom_app = parse_application_id(&body.application_id)?;
+    let target_thread = parse_thread_id(&body.thread_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     // Same forum/media rule as a live post: the sealed payload must carry the
     // post title (`thread_name`) — the worker executes it verbatim at fire time,
-    // opening the new forum post then.
-    ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
+    // opening the new forum post then. Into a picked thread neither rule
+    // applies (the worker drops a leftover title).
+    ensure_postable_channel(
+        &st,
+        &guild,
+        &channel_id,
+        &body.message,
+        target_thread.is_some(),
+    )
+    .await?;
 
     // Resolve the webhook this schedule will ride. For a custom bot, only
     // *validate* it's connected and capture its current (webhook_id, token) —
@@ -1781,7 +1832,7 @@ pub async fn activity_schedule(
         session,
         crate::schedule::CreateBody {
             webhook_url: format!("https://discord.com/api/webhooks/{webhook_id}/{token}"),
-            thread_id: None,
+            thread_id: target_thread,
             payload: body.message,
             tz: body.tz,
             recurrence: crate::schedule_rule::Recurrence::Once,
@@ -3712,6 +3763,19 @@ mod tests {
         // Defensive: a malformed echo never invents a thread.
         assert_eq!(created_thread_id("100", &json!({})), None);
         assert_eq!(created_thread_id("100", &json!({ "channel_id": "" })), None);
+    }
+
+    #[test]
+    fn a_post_thread_is_a_snowflake_or_nothing() {
+        assert!(matches!(parse_thread_id(""), Ok(None)));
+        assert!(matches!(parse_thread_id("   "), Ok(None)));
+        assert!(matches!(
+            parse_thread_id(" 1558142497497022585 "),
+            Ok(Some(ref id)) if id == "1558142497497022585"
+        ));
+        // Never spliced raw into the execute URL's query string.
+        assert!(parse_thread_id("1558142497497022585&wait=false").is_err());
+        assert!(parse_thread_id("abc").is_err());
     }
 
     #[test]

@@ -917,7 +917,8 @@ impl Discord {
         let mut url =
             format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
         push_thread_param(&mut url, '&', thread_id)?;
-        let resp = send_with_retry(self.http.post(&url).json(payload))
+        let payload = for_thread_target(payload, thread_id.is_some());
+        let resp = send_with_retry(self.http.post(&url).json(payload.as_ref()))
             .await
             .map_err(transport_error)?;
         if resp.status().is_success() {
@@ -943,12 +944,22 @@ impl Discord {
         token: &str,
         payload: &Value,
         files: Vec<UploadFile>,
+        thread_id: Option<&str>,
     ) -> Result<Value, AppError> {
         if files.is_empty() {
-            return self.execute_webhook(webhook_id, token, payload).await;
+            return match thread_id {
+                Some(_) => {
+                    self.execute_webhook_in_thread(webhook_id, token, payload, thread_id)
+                        .await
+                }
+                None => self.execute_webhook(webhook_id, token, payload).await,
+            };
         }
-        let url =
+        let mut url =
             format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
+        push_thread_param(&mut url, '&', thread_id)?;
+        let payload = for_thread_target(payload, thread_id.is_some());
+        let payload = payload.as_ref();
         // Per-request deadline sized to the body — the client-wide one would be
         // bounding the upload rather than Discord's response. See `upload_timeout`.
         let deadline = upload_timeout(upload_bytes(&files));
@@ -1458,6 +1469,30 @@ impl Discord {
     }
 }
 
+/// The fields of a webhook execute body that only *create* a forum/media post.
+const POST_CREATE_FIELDS: [&str; 2] = ["thread_name", "applied_tags"];
+
+/// The body to send when `into_thread`: a post into an existing thread can't
+/// also start one, and Discord refuses the pair outright — 400 code 220002,
+/// "Webhooks posted to forum channels cannot have both a thread_name and
+/// thread_id" — so the create-only fields are left out. Borrowed unchanged when
+/// there is nothing to drop.
+pub(crate) fn for_thread_target(payload: &Value, into_thread: bool) -> std::borrow::Cow<'_, Value> {
+    let has_create_fields = payload
+        .as_object()
+        .is_some_and(|o| POST_CREATE_FIELDS.iter().any(|k| o.contains_key(*k)));
+    if !into_thread || !has_create_fields {
+        return std::borrow::Cow::Borrowed(payload);
+    }
+    let mut owned = payload.clone();
+    if let Some(o) = owned.as_object_mut() {
+        for key in POST_CREATE_FIELDS {
+            o.remove(key);
+        }
+    }
+    std::borrow::Cow::Owned(owned)
+}
+
 /// The application-command set every DWEEB-served app carries: the
 /// `/dashboard` slash command plus the right-click context-menu commands the
 /// dispatcher answers inline (plugins/dispatcher/src/commands.rs). Mirrors
@@ -1885,6 +1920,32 @@ fn audit_reason(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-10-12: a post picked in the thread picker plus a leftover forum
+    /// post title answered 400 code 220002 ("cannot have both a thread_name and
+    /// thread_id"). Into a thread, the create-only fields never go out.
+    #[test]
+    fn a_post_into_a_thread_never_carries_the_fields_that_create_one() {
+        let body = serde_json::json!({
+            "flags": 32768,
+            "thread_name": "Patch notes",
+            "applied_tags": ["1"],
+            "components": [],
+        });
+        let sent = for_thread_target(&body, true);
+        assert!(sent.get("thread_name").is_none());
+        assert!(sent.get("applied_tags").is_none());
+        assert_eq!(sent.get("flags"), body.get("flags"));
+        assert!(sent.get("components").is_some());
+        // A new post keeps them — they are what starts it.
+        assert_eq!(for_thread_target(&body, false).as_ref(), &body);
+        // Nothing to drop: the body is passed through untouched (no clone).
+        let plain = serde_json::json!({ "flags": 32768 });
+        assert!(matches!(
+            for_thread_target(&plain, true),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
 
     /// The regression behind the 2026-08-11 502: reqwest's timeout is a *total*
     /// deadline, so a flat one applied to a multipart call is a bandwidth

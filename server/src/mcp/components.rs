@@ -1751,7 +1751,9 @@ pub fn validate_destination(
             format!("Posting to {dest} starts a new {kind} post, which needs a title — set `thread_name` on the message."),
         )];
     }
-    if !has_title {
+    // Into an existing thread the title is left out of the post
+    // (`discord::for_thread_target`), so it can't be rejected.
+    if !has_title || thread_id_provided {
         return Vec::new();
     }
     vec![Issue::error(
