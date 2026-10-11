@@ -66,10 +66,10 @@ use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::rating::{rating_mine, rating_put, rating_summary, RatingStore};
 use crate::routes::{
-    bootstrap, capabilities, channels, custom_apps_add, custom_apps_list, custom_apps_remove,
-    emojis, guild_activity_invite, health, list_guilds, permanent_add, permanent_list,
-    permanent_reenable, permanent_remove, ready, roles, webhook_create, webhook_delete,
-    webhook_modify, webhooks_list, AppState, DispatcherApi,
+    bootstrap, capabilities, channel_threads, channels, custom_apps_add, custom_apps_list,
+    custom_apps_remove, emojis, guild_activity_invite, health, list_guilds, permanent_add,
+    permanent_list, permanent_reenable, permanent_remove, ready, roles, webhook_create,
+    webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
 };
 use crate::schedule::{
     schedule_create, schedule_delete, schedule_get, schedule_list, schedule_list_for_guild,
@@ -949,6 +949,13 @@ async fn run() {
         .route(
             "/api/guilds/:guild_id/channels/:channel_id/webhooks",
             post(webhook_create),
+        )
+        // The threads and forum posts a webhook in this channel can post into
+        // — the Send panel's thread picker (Manage-Webhooks gated, like the
+        // rest of the picker).
+        .route(
+            "/api/guilds/:guild_id/channels/:channel_id/threads",
+            get(channel_threads),
         )
         .route(
             "/api/guilds/:guild_id/webhooks/:webhook_id",

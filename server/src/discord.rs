@@ -178,6 +178,45 @@ pub struct Channel {
     pub nsfw: Option<bool>,
 }
 
+/// A thread channel (a thread under a text/announcement channel, or a
+/// forum/media post), trimmed to what the Send panel's thread picker shows.
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct Thread {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: i64,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Newest message's id — a snowflake, so it orders threads by activity.
+    #[serde(default)]
+    pub last_message_id: Option<String>,
+    /// Channel flags; bit 1 (`PINNED`) marks a forum's pinned post.
+    #[serde(default)]
+    pub flags: Option<u64>,
+    #[serde(default)]
+    pub thread_metadata: Option<ThreadMetadata>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct ThreadMetadata {
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub locked: bool,
+}
+
+/// The shape both thread-list reads answer with (`members` is ignored).
+#[derive(Deserialize, Default)]
+pub struct ThreadList {
+    #[serde(default)]
+    pub threads: Vec<Thread>,
+    /// Archived reads only: older threads exist past the requested page.
+    #[serde(default)]
+    pub has_more: bool,
+}
+
 /// Trimmed custom emoji. `id` + `name` are enough to build `<:name:id>` (or
 /// `<a:name:id>` when `animated`).
 #[derive(Deserialize, Serialize)]
@@ -461,6 +500,63 @@ impl Discord {
 
     pub async fn emojis(&self, guild: &str) -> Result<Vec<Emoji>, AppError> {
         self.get_bot(&format!("/guilds/{guild}/emojis")).await
+    }
+
+    /// `GET /guilds/{guild}/threads/active` — every unarchived thread in the
+    /// server the bot can see, across all channels (Discord has no per-channel
+    /// form of this read). Plain bot-read error mapping: the bot being absent
+    /// is the same 404 the channel list answers.
+    pub async fn active_threads(&self, guild: &str) -> Result<Vec<Thread>, AppError> {
+        let list: ThreadList = self
+            .get_bot(&format!("/guilds/{guild}/threads/active"))
+            .await?;
+        Ok(list.threads)
+    }
+
+    /// `GET /channels/{channel}/threads/archived/public` — the channel's most
+    /// recently archived public threads (closed forum posts included), newest
+    /// first. A webhook post unarchives its thread, so these stay valid
+    /// destinations. Needs `READ_MESSAGE_HISTORY` on the channel, which the bot
+    /// takes from the server's own roles rather than its invite, so a 403 is the
+    /// server's setting and answers `Ok(None)` ("can't list them here") instead
+    /// of an error — the active threads are still worth showing.
+    pub async fn archived_public_threads(
+        &self,
+        channel: &str,
+        limit: u32,
+    ) -> Result<Option<ThreadList>, AppError> {
+        let resp = self
+            .send_bot(
+                reqwest::Method::GET,
+                &format!("/channels/{channel}/threads/archived/public?limit={limit}"),
+                None,
+                None,
+            )
+            .await?;
+        let status = resp.status();
+        if status.as_u16() == 403 {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            let retry_after = if status.as_u16() == 429 {
+                resp.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<f64>().ok())
+            } else {
+                None
+            };
+            return Err(map_discord_error(
+                status,
+                "reading archived threads".into(),
+                retry_after,
+                false,
+            ));
+        }
+        resp.json::<ThreadList>()
+            .await
+            .map(Some)
+            .map_err(|e| body_error("unexpected thread list from Discord", e))
     }
 
     // ── Webhook management (needs the bot to hold MANAGE_WEBHOOKS) ──────────

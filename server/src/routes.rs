@@ -262,6 +262,185 @@ pub async fn channels(
     Ok(value_response(&value))
 }
 
+/// Channel types a thread can live under: text, announcement, forum, media —
+/// the same set that can host a webhook.
+const THREAD_PARENT_TYPES: [i64; 4] = [0, 5, 15, 16];
+/// Thread types a webhook post can target: announcement threads and public
+/// threads (forum/media posts are public threads). Private threads (12) are
+/// left out: their names are only for the members added to them, and listing
+/// them to everyone who manages webhooks would leak that.
+const POSTABLE_THREAD_TYPES: [i64; 2] = [10, 11];
+/// How many recently archived threads one listing asks Discord for.
+const ARCHIVED_THREAD_PAGE: u32 = 50;
+/// Channel flag `PINNED` — a forum's pinned post.
+const CHANNEL_FLAG_PINNED: u64 = 1 << 1;
+
+/// A channel's archived public threads as cached: `listed` is false when the
+/// bot can't read them there (see `Discord::archived_public_threads`).
+#[derive(Serialize, Deserialize, Default)]
+struct ArchivedThreads {
+    threads: Vec<crate::discord::Thread>,
+    has_more: bool,
+    listed: bool,
+}
+
+/// One row of the Send panel's thread picker.
+#[derive(Serialize, Debug, PartialEq)]
+struct ThreadItem {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    kind: i64,
+    archived: bool,
+    locked: bool,
+    pinned: bool,
+}
+
+/// `GET /api/guilds/:id/channels/:channel_id/threads` — the threads and forum
+/// posts a webhook in this channel can post into, for the Send panel's thread
+/// picker: the open ones (pinned first, then most recently active), followed by
+/// the most recently archived ones. Manage-Webhooks gated like the rest of the
+/// Send picker's reads, since it only matters to someone posting through one.
+pub async fn channel_threads(
+    State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
+    jar: PrivateCookieJar,
+    Path((guild, channel_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    authorize_webhooks(&st, &jar, &guild).await?;
+    if !is_snowflake(&channel_id) {
+        return Err(client_error(
+            StatusCode::BAD_REQUEST,
+            "That doesn't look like a channel ID.",
+        ));
+    }
+    let Some(kind) = channel_type_in_guild(&st, &guild, &channel_id).await? else {
+        return Err(client_error(
+            StatusCode::NOT_FOUND,
+            "That channel isn't in this server.",
+        ));
+    };
+    if !THREAD_PARENT_TYPES.contains(&kind) {
+        return Ok(value_response(&json!({
+            "threads": [],
+            "more_archived": false,
+            "archived_listed": true,
+            "channel_type": kind,
+        })));
+    }
+
+    let (active, archived) = tokio::join!(
+        fetch_active_threads(&st, &guild, q.fresh),
+        fetch_archived_threads(&st, &channel_id, q.fresh),
+    );
+    let active = active?;
+    let active = Vec::<crate::discord::Thread>::deserialize(active.as_ref()).unwrap_or_default();
+    // Archived threads are the extra, not the point: a failed read (Discord
+    // busy, rate limited) still shows the open threads, and says the closed
+    // ones couldn't be listed.
+    let archived = archived
+        .ok()
+        .and_then(|v| ArchivedThreads::deserialize(v.as_ref()).ok())
+        .unwrap_or_default();
+
+    let items = channel_thread_items(&active, &archived.threads, &channel_id);
+    Ok(value_response(&json!({
+        "threads": items,
+        "more_archived": archived.listed && archived.has_more,
+        "archived_listed": archived.listed,
+        "channel_type": kind,
+    })))
+}
+
+/// Every active thread in the guild (Discord only lists them guild-wide),
+/// cached under one key so picking several channels costs one read.
+async fn fetch_active_threads(
+    st: &AppState,
+    guild: &str,
+    fresh: bool,
+) -> Result<Arc<Value>, AppError> {
+    let key = format!("threads:active:{guild}");
+    cached_or_fetch(st, &key, fresh, || st.discord.active_threads(guild)).await
+}
+
+async fn fetch_archived_threads(
+    st: &AppState,
+    channel: &str,
+    fresh: bool,
+) -> Result<Arc<Value>, AppError> {
+    let key = format!("threads:archived:{channel}");
+    cached_or_fetch(st, &key, fresh, || async {
+        Ok::<_, AppError>(
+            match st
+                .discord
+                .archived_public_threads(channel, ARCHIVED_THREAD_PAGE)
+                .await?
+            {
+                Some(list) => ArchivedThreads {
+                    threads: list.threads,
+                    has_more: list.has_more,
+                    listed: true,
+                },
+                None => ArchivedThreads::default(),
+            },
+        )
+    })
+    .await
+}
+
+/// The picker's rows for `channel`: its postable open threads — pinned first,
+/// then newest activity first — followed by its archived ones in Discord's
+/// order (most recently archived first). A thread in both lists (archived or
+/// reopened between the two reads) appears once, as its active self.
+fn channel_thread_items(
+    active: &[crate::discord::Thread],
+    archived: &[crate::discord::Thread],
+    channel: &str,
+) -> Vec<ThreadItem> {
+    let belongs = |t: &&crate::discord::Thread| {
+        t.parent_id.as_deref() == Some(channel) && POSTABLE_THREAD_TYPES.contains(&t.kind)
+    };
+    let activity = |t: &crate::discord::Thread| -> u64 {
+        t.last_message_id
+            .as_deref()
+            .unwrap_or(&t.id)
+            .parse()
+            .unwrap_or(0)
+    };
+    let item = |t: &crate::discord::Thread, archived: bool| {
+        let meta = t.thread_metadata.clone().unwrap_or_default();
+        ThreadItem {
+            id: t.id.clone(),
+            name: t.name.clone().unwrap_or_default(),
+            kind: t.kind,
+            archived: archived || meta.archived,
+            locked: meta.locked,
+            pinned: t.flags.unwrap_or(0) & CHANNEL_FLAG_PINNED != 0,
+        }
+    };
+
+    let mut open: Vec<&crate::discord::Thread> = active.iter().filter(belongs).collect();
+    open.sort_by(|a, b| {
+        let pinned = |t: &crate::discord::Thread| t.flags.unwrap_or(0) & CHANNEL_FLAG_PINNED != 0;
+        pinned(b)
+            .cmp(&pinned(a))
+            .then_with(|| activity(b).cmp(&activity(a)))
+    });
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut items = Vec::with_capacity(open.len() + archived.len());
+    for t in open {
+        if seen.insert(t.id.as_str()) {
+            items.push(item(t, false));
+        }
+    }
+    for t in archived.iter().filter(belongs) {
+        if seen.insert(t.id.as_str()) {
+            items.push(item(t, true));
+        }
+    }
+    items
+}
+
 pub async fn emojis(
     State(st): State<AppState>,
     Query(q): Query<ReadQuery>,
@@ -1942,6 +2121,63 @@ fn value_response(value: &Value) -> Response {
 mod tests {
     use super::*;
     use crate::discord::AppIdentity;
+
+    // ── thread picker ─────────────────────────────────────────────────────────
+
+    fn thread(
+        id: &str,
+        parent: &str,
+        kind: i64,
+        last: Option<&str>,
+        flags: u64,
+    ) -> crate::discord::Thread {
+        crate::discord::Thread {
+            id: id.into(),
+            name: Some(format!("t{id}")),
+            kind,
+            parent_id: Some(parent.into()),
+            last_message_id: last.map(str::to_string),
+            flags: Some(flags),
+            thread_metadata: None,
+        }
+    }
+
+    fn ids(items: &[ThreadItem]) -> Vec<&str> {
+        items.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    #[test]
+    fn threads_are_this_channels_postable_ones_pinned_then_newest() {
+        let active = [
+            thread("100", "1", 11, Some("500"), 0),
+            thread("101", "1", 11, Some("900"), 0),
+            thread("102", "1", 11, Some("200"), CHANNEL_FLAG_PINNED),
+            // Another channel's thread, a private thread, and a thread with no
+            // messages yet (ordered by its own id).
+            thread("103", "2", 11, Some("999"), 0),
+            thread("104", "1", 12, Some("999"), 0),
+            thread("700", "1", 10, None, 0),
+        ];
+        let items = channel_thread_items(&active, &[], "1");
+        assert_eq!(ids(&items), ["102", "101", "700", "100"]);
+        assert!(items[0].pinned);
+        assert!(items.iter().all(|t| !t.archived));
+    }
+
+    #[test]
+    fn archived_threads_follow_the_open_ones_once_each() {
+        let active = [thread("100", "1", 11, Some("500"), 0)];
+        let archived = [
+            thread("90", "1", 11, Some("95"), 0),
+            // Reopened between the two reads: shown once, as open.
+            thread("100", "1", 11, Some("500"), 0),
+            thread("80", "2", 11, Some("85"), 0),
+        ];
+        let items = channel_thread_items(&active, &archived, "1");
+        assert_eq!(ids(&items), ["100", "90"]);
+        assert!(!items[0].archived);
+        assert!(items[1].archived);
+    }
 
     // ── custom-app key binding ────────────────────────────────────────────────
 
