@@ -20,6 +20,7 @@ import {
   sendDisabledHint,
   sendLeadCopy,
   updateFailureMessage,
+  withForumTargetHint,
 } from "./sendCopy";
 
 describe("sendLeadCopy", () => {
@@ -275,5 +276,27 @@ describe("cancelledAfterDispatchMessage", () => {
   it("says the post or edit may already have landed", () => {
     expect(cancelledAfterDispatchMessage("new")).toMatch(/may already have been posted/);
     expect(cancelledAfterDispatchMessage("update")).toMatch(/may already have been applied/);
+  });
+});
+
+describe("withForumTargetHint", () => {
+  const discord220002 =
+    "Discord (400, code 220002): Webhooks posted to forum channels cannot have both a thread_name and thread_id";
+
+  it("adds the fix after Discord's own sentence for a forum-target refusal", () => {
+    const text = withForumTargetHint(discord220002, {
+      code: 220002,
+      message: "Webhooks posted to forum channels cannot have both a thread_name and thread_id",
+    });
+    expect(text.startsWith(discord220002)).toBe(true);
+    expect(text).toContain("“New post”");
+    expect(withForumTargetHint("x", { code: 220001 })).toContain("pick one to send into");
+  });
+
+  it("leaves every other failure as it was", () => {
+    expect(withForumTargetHint("Discord (404, code 10015): Unknown Webhook", { code: 10015 })).toBe(
+      "Discord (404, code 10015): Unknown Webhook",
+    );
+    expect(withForumTargetHint("Network request failed.", null)).toBe("Network request failed.");
   });
 });

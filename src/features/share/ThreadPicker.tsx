@@ -97,6 +97,18 @@ export function ThreadPicker({
   const titleId = useUniqueId("thread-picker");
   const title = postTitle.trim();
   const needsTitle = forum && mode === "new" && value === "" && !title;
+  // A post title left in the draft while a thread is picked: it's left out of
+  // the post (`forThreadTarget`), since Discord refuses both at once — say so
+  // here rather than let the title silently vanish.
+  const titleUnused =
+    mode === "new" && value !== "" && title ? (
+      <p className={cn(styles.note, styles.noteWarn)} role="note">
+        The post title “{title}” isn’t used — the message goes into this {noun}.{" "}
+        {forum
+          ? "Choose “New post” to start a post with it instead."
+          : "Titles only start forum posts."}
+      </p>
+    ) : null;
   // Like "Post to a different channel", the summary's folded list is the whole
   // list with the current pick highlighted; only the card's own "Add a post
   // title" link isn't repeated in it.
@@ -297,6 +309,7 @@ export function ThreadPicker({
           </div>
         ) : null}
         {decided}
+        {decided ? titleUnused : null}
         <div className={styles.head}>
           <button
             type="button"
@@ -345,6 +358,7 @@ export function ThreadPicker({
         </span>
         {refreshButton}
       </div>
+      {titleUnused}
       {listBody}
     </div>
   );

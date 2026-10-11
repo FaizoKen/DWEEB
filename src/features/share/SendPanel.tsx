@@ -181,6 +181,7 @@ import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker"
 import { ThreadPicker } from "./ThreadPicker";
 import { forumNeedsPost, isForumType } from "./threadSelection";
 import { useChannelThreads, useChannelThreadsStore } from "@/core/webhook/channelThreads";
+import { forThreadTarget } from "@/core/webhook/threadTarget";
 import { useOptionsRevealStore } from "@/features/builder/optionsReveal";
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
@@ -196,6 +197,7 @@ import {
   sendLeadCopy,
   unresolvedUrlTokensMessage,
   updateFailureMessage,
+  withForumTargetHint,
 } from "./sendCopy";
 import { destinationPlaceholderContext, scheduleDestLabel } from "./destinationContext";
 import { type ShareTab } from "./tabs";
@@ -1465,7 +1467,8 @@ export function SendPanel({
     }
     let payload: unknown;
     try {
-      payload = JSON.parse(encodeJson(outgoing));
+      // Into a thread, the post-creating fields stay out (Discord 220002).
+      payload = JSON.parse(encodeJson(forThreadTarget(outgoing, threadId)));
     } catch {
       setScheduling(false);
       setConfirmOpen(false);
@@ -1663,7 +1666,8 @@ export function SendPanel({
               threadId: threadId.trim() || undefined,
               signal: ac.signal,
             })
-          : await sendToWebhook(parsedUrl, outgoing, {
+          : // Into a thread, the post-creating fields stay out (Discord 220002).
+            await sendToWebhook(parsedUrl, forThreadTarget(outgoing, threadId), {
               threadId: threadId.trim() || undefined,
               // Ask Discord to echo the created message so we can deep-link to it
               // from the success dialog (without `wait` a POST is a bodyless 204).
@@ -1892,7 +1896,7 @@ export function SendPanel({
                   error: result.error,
                   body: result.body,
                 })
-              : result.error,
+              : withForumTargetHint(result.error, result.body),
           retryAfter: result.retryAfter,
           status: result.status,
           body: result.body,

@@ -71,6 +71,9 @@ export interface PostConfirmProps {
    *  media (16) destination starts a NEW post there, so the confirm collects a
    *  required post title (the draft's `thread_name`) for a brand-new post. */
   channelType?: number;
+  /** The thread / forum post the post goes into (`""` while its name is
+   *  unknown), or null for the channel itself. */
+  threadName?: string | null;
   /** True while the confirmed post is in flight — drives the button spinner. */
   busy?: boolean;
   /** Confirm the post. `makePermanent` carries the "Never expire" choice (always
@@ -284,6 +287,7 @@ export function PostConfirm({
   guildId,
   channelName,
   channelType,
+  threadName = null,
   busy = false,
   onConfirm,
   onSchedule,
@@ -302,7 +306,10 @@ export function PostConfirm({
   // receipt of what the new post will be called; the guard below only catches
   // the race where a collaborator clears the title while this dialog is open.
   const forumDest = channelType === 15 || channelType === 16;
-  const needsTitle = mode === "new" && forumDest;
+  // Into a picked post nothing is started, so no title is needed — and one left
+  // in the draft is dropped from the post (Discord refuses both at once).
+  const intoThread = threadName != null;
+  const needsTitle = mode === "new" && forumDest && !intoThread;
   const postTitle = (message.thread_name ?? "").trim();
   const [titleError, setTitleError] = useState<string | null>(null);
   useEffect(() => {
@@ -677,6 +684,22 @@ export function PostConfirm({
                 <span className={styles.forumBadge}>
                   {channelType === 16 ? "Media channel" : "Forum"}
                 </span>
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
+        {intoThread ? (
+          <div className={styles.fact}>
+            <dt>{forumDest ? "Post" : "Thread"}</dt>
+            <dd>
+              <span className={styles.destName}>
+                {threadName || (forumDest ? "The picked post" : "The picked thread")}
+              </span>
+              {mode === "new" && postTitle ? (
+                <p className={styles.idHint}>
+                  The post title “{postTitle}” isn’t used — the message goes into this{" "}
+                  {forumDest ? "post" : "thread"}.
+                </p>
               ) : null}
             </dd>
           </div>

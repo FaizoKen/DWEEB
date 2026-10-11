@@ -151,6 +151,7 @@ export function ActivityBar() {
   const openCustomBotsOnWeb = useActivityStore((s) => s.openCustomBotsOnWeb);
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
+  const targetThread = useActivityStore((s) => s.targetThread);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
   const canPostToTarget = useActivityStore((s) => s.canPostToTarget);
 
@@ -300,9 +301,12 @@ export function ActivityBar() {
   // channel surfaces "needs a post title" live in the builder (banner + Forum
   // lane dot + disabled Post) instead of springing it in the confirm dialog.
   const setPostDestination = usePostDestinationStore((s) => s.setPostDestination);
+  // A picked thread / forum post is an existing post: the forum's "new posts
+  // need a title" rule doesn't apply there.
   useEffect(() => {
-    setPostDestination(channelType ?? null, channelName ?? null);
-  }, [setPostDestination, channelType, channelName]);
+    if (targetThread) setPostDestination(null, null);
+    else setPostDestination(channelType ?? null, channelName ?? null);
+  }, [setPostDestination, channelType, channelName, targetThread]);
 
   const [restoreOpen, setRestoreOpen] = useState(false);
   // The Activity has one useful save destination: the selected server's shared
@@ -340,10 +344,13 @@ export function ActivityBar() {
     "“Open on web”.";
   // "Update" applies only while the chosen destination still matches where we
   // last posted; re-point the channel/server and the primary reverts to "Post".
+  // The thread counts too: a different thread (or the channel itself) is a new
+  // post somewhere else.
   const canUpdate =
     lastPost != null &&
     lastPost.guild_id === targetGuildId &&
-    lastPost.channel_id === targetChannelId;
+    lastPost.channel_id === targetChannelId &&
+    (lastPost.thread_id ?? null) === (targetThread?.id ?? null);
 
   // Why Post / New / Update can't run, or null when it can. Like the utilities
   // they stay tappable and say why (an in-flight post alone keeps the native
@@ -608,6 +615,17 @@ export function ActivityBar() {
           <ChannelPicker
             selectedId={targetChannelId}
             onSelect={setTargetChannel}
+            // Threads and forum posts nest under their channel, like the web
+            // bar; a pick is shared with the room together with the channel.
+            threads={
+              targetGuildId
+                ? {
+                    guildId: targetGuildId,
+                    selected: targetThread,
+                    onSelect: (id, thread) => setTargetChannel(id, thread),
+                  }
+                : undefined
+            }
             shared={!isDm}
             // Edit-only collaborators see the destination but can't move it —
             // re-pointing a shared room is a posting decision they don't hold.
@@ -848,6 +866,7 @@ export function ActivityBar() {
         guildId={targetGuildId}
         channelName={channelName}
         channelType={channelType}
+        threadName={targetThread ? (targetThread.name ?? "") : null}
         busy={publishing}
         onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
         onSchedule={(makePermanent, at, postAs) => void confirmSchedule(makePermanent, at, postAs)}

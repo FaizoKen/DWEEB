@@ -135,6 +135,8 @@ export async function publishToChannel(
   makePermanent = false,
   applicationId: string | null = null,
   files: CollectedFile[] = [],
+  /** Post into this thread / forum post of `channelId` (null = the channel). */
+  threadId: string | null = null,
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
@@ -147,6 +149,7 @@ export async function publishToChannel(
           message,
           make_permanent: makePermanent,
           application_id: applicationId ?? "",
+          thread_id: threadId ?? "",
         },
         files,
       ),
@@ -182,6 +185,8 @@ export async function schedulePostToChannel(
   destLabel?: string,
   makePermanent = false,
   applicationId: string | null = null,
+  /** Post into this thread / forum post of `channelId` when it fires. */
+  threadId: string | null = null,
 ): Promise<ActivityScheduleResult> {
   let res: Response;
   try {
@@ -197,6 +202,7 @@ export async function schedulePostToChannel(
         dest_label: destLabel,
         make_permanent: makePermanent,
         application_id: applicationId ?? "",
+        thread_id: threadId ?? "",
       }),
     });
   } catch {

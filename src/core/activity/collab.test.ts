@@ -17,6 +17,8 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { applyOps } from "./collabPatch";
 import {
   broadcastTarget,
+  parseRoomThread,
+  type RoomThread,
   isRoomSynced,
   startCollab,
   stopCollab,
@@ -214,7 +216,7 @@ const ME: CollabParticipant = { id: "me", name: "Faiz", avatar: null };
 const ANA_P: CollabParticipant = { id: "ana", name: "Ana", avatar: null };
 
 let onHydrated: Mock<() => void>;
-let onTarget: Mock<(channelId: string) => void>;
+let onTarget: Mock<(channelId: string, thread: RoomThread | null) => void>;
 
 /** Open a room socket holding `local`, without any room traffic yet. */
 async function connectTo(local: WebhookMessage): Promise<FakeSocket> {
@@ -248,7 +250,7 @@ function useFakeRoom() {
     vi.stubGlobal("WebSocket", FakeSocket);
     FakeSocket.instances = [];
     onHydrated = vi.fn<() => void>();
-    onTarget = vi.fn<(channelId: string) => void>();
+    onTarget = vi.fn<(channelId: string, thread: RoomThread | null) => void>();
     onPeerReplace = vi.fn<(replace: PeerReplace) => void>();
   });
   afterEach(() => {
@@ -523,7 +525,22 @@ describe("collab: leaving and coming back", () => {
     // Once our pick comes back from the room, peers' picks apply again.
     again.receive({ ...pick });
     again.receive({ type: "target", cid: "ana", channelId: "chan-3" });
-    expect(onTarget).toHaveBeenCalledWith("chan-3");
+    expect(onTarget).toHaveBeenCalledWith("chan-3", null);
+  });
+
+  it("carries a thread pick with the channel, both ways", async () => {
+    const ws = await connectTo(docOf(node("t1", "Hi")));
+    ws.receive({ type: "draft", cid: "ana", message: docOf(node("t1", "Hi")) });
+    const post = { id: "1558142497497022585", name: "Bug reports" };
+    broadcastTarget("chan-2", post);
+    const pick = ws.sent.filter((f) => f.type === "target").at(-1);
+    expect(pick).toMatchObject({ channelId: "chan-2", thread: post });
+    ws.receive({ ...pick });
+    ws.receive({ type: "target", cid: "ana", channelId: "chan-3", thread: post });
+    expect(onTarget).toHaveBeenLastCalledWith("chan-3", post);
+    // A peer predating threads sends a bare channel: that's the channel itself.
+    ws.receive({ type: "target", cid: "ana", channelId: "chan-3" });
+    expect(onTarget).toHaveBeenLastCalledWith("chan-3", null);
   });
 
   it("reports an unsynced session to the replace confirm, and none outside a session", async () => {
@@ -535,5 +552,28 @@ describe("collab: leaving and coming back", () => {
     expect(isRoomSynced()).toBe(true);
     ws.drop();
     expect(isRoomSynced()).toBe(false);
+  });
+});
+
+describe("parseRoomThread", () => {
+  it("takes a snowflake id and a capped plain name", () => {
+    expect(parseRoomThread({ id: "1558142497497022585", name: "Posts" })).toEqual({
+      id: "1558142497497022585",
+      name: "Posts",
+    });
+    expect(
+      parseRoomThread({ id: "1558142497497022585", name: "x".repeat(300) })?.name,
+    ).toHaveLength(100);
+    expect(parseRoomThread({ id: "1558142497497022585" })).toEqual({
+      id: "1558142497497022585",
+      name: null,
+    });
+  });
+
+  it("refuses anything a peer could use to aim a post somewhere else", () => {
+    expect(parseRoomThread(null)).toBeNull();
+    expect(parseRoomThread("1558142497497022585")).toBeNull();
+    expect(parseRoomThread({ id: "1558142497497022585&wait=false" })).toBeNull();
+    expect(parseRoomThread({ id: 42 })).toBeNull();
   });
 });

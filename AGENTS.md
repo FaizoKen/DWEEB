@@ -81,7 +81,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   with an unbounded wait queue.
 - **The Activity's destination server is the launching guild — fixed. Only the channel moves.**
   The collab room is keyed to the server the Activity launched in, and its `target` frame carries a
-  channel id and nothing else, so the whole room posts into that one server. A guild launch shows a
+  channel id — optionally narrowed to one of *that channel's* threads (`thread: {id, name}`, added
+  2026-10-12; a thread lives inside the channel, so every peer who sees the channel can post into it)
+  — and never a guild, so the whole room posts into that one server. A guild launch shows a
   **static server badge** (no dropdown) plus a channel picker whose pick is shared with the room; only
   a **DM/group-DM launch** gets a server picker, since it has no guild of its own to post into.
   Do not add a server switcher to the Activity bar — this was tried (d76adda) and reverted. A post
@@ -2259,10 +2261,29 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   post-destination (no "needs a title" error for an existing post); `isUpdate` compares the
   thread too, a restore/send snaps the chip to the message's thread, and a send that created
   a forum post names it from its title and force-reloads that channel's list.
-  Web only — the Activity's `target` frame carries a channel and nothing else (see the
-  destination entry), so threads there would be a protocol change. **Server-first deploy
-  ordering**: an old proxy 404s the route and the picker shows "Couldn't load threads" over
-  the still-working ID field. Guarded by `routes::tests::threads_*`/`archived_threads_*`,
+  **A post into a thread never carries the fields that start one** (2026-10-12): a picked post
+  plus a post title left in the draft answered Discord's 400 code 220002 ("Webhooks posted to
+  forum channels cannot have both a thread_name and thread_id"). Whenever a `thread_id` goes
+  out, `thread_name` and `applied_tags` are left out — `forThreadTarget`
+  (`core/webhook/threadTarget.ts`, deliberately *not* in `send.ts`/the barrel: that module is on
+  the boot path, which has ~230 B gzip of budget left) for web sends and new schedules, and
+  `discord::for_thread_target` in the proxy for the scheduled-post worker (which also fixes
+  schedules stored before) and MCP's `send_message` (whose destination check no longer flags a
+  title beside a thread). The draft keeps its title; the thread card says it isn't used, and a
+  220001/220002 that still arrives gets the fix appended (`withForumTargetHint`).
+  **The Activity picks threads too** (2026-10-12): its bar's `ChannelPicker` gets the same
+  `threads` prop, `activityStore.targetThread` sits beside `targetChannelId` (any channel or
+  server change drops it), and the room's `target` frame carries an optional `thread`
+  (`parseRoomThread`: snowflake id, name capped at 100 — peer input; a peer predating the field
+  sends a bare channel, read as the channel itself). `/api/activity/post` and
+  `/api/activity/schedule` take `thread_id` (`parse_thread_id`; into a thread
+  `ensure_postable_channel` skips both title rules), the threads route accepts the Activity's
+  bearer (each credential with its own post gate), a restore of a thread message points the room
+  at that thread, a post that opens a new forum post follows into it, and Update needs the
+  thread to match. **Server-first deploy ordering, and it is load-bearing**: an old proxy
+  ignores `thread_id`, so an Activity post meant for a thread would land in the *parent
+  channel*; on the web, an old proxy 404s the threads route and the picker shows "Couldn't
+  load threads" over the still-working ID field. Guarded by `routes::tests::threads_*`/`archived_threads_*`,
   `channelThreads.test.ts`, `threadInput.test.ts`, `threadSelection.test.ts`.
 - **Plan, install, AI and feedback dead ends** (2026-09-23). `fetchMySubscriptions` returns ok/error
   and never turns a failure into an empty list — that list gates Manage billing, the only in-app

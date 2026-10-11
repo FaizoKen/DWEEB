@@ -83,6 +83,7 @@ function seedServerLaunch(overrides: Parameters<typeof useActivityStore.setState
     context: { guildId: LAUNCH_GUILD, channelId: LAUNCH_CHANNEL, instanceId: "inst" },
     targetGuildId: LAUNCH_GUILD,
     targetChannelId: LAUNCH_CHANNEL,
+    targetThread: null,
     targetGuildMeta: launchGuild,
     // A server launch has a fixed destination, so it never loads a server list.
     guilds: [],
@@ -116,7 +117,45 @@ describe("activity post destination", () => {
     seedServerLaunch();
     useActivityStore.getState().setTargetChannel(ROOM_CHANNEL);
     expect(useActivityStore.getState().targetChannelId).toBe(ROOM_CHANNEL);
-    expect(broadcastTargetMock).toHaveBeenCalledWith(ROOM_CHANNEL);
+    expect(broadcastTargetMock).toHaveBeenCalledWith(ROOM_CHANNEL, null);
+  });
+
+  it("shares a thread pick with the room, inside the same channel", () => {
+    seedServerLaunch();
+    const post = { id: "800000000000000001", name: "Bug reports" };
+    useActivityStore.getState().setTargetChannel(ROOM_CHANNEL, post);
+    expect(useActivityStore.getState()).toMatchObject({
+      targetChannelId: ROOM_CHANNEL,
+      targetThread: post,
+    });
+    expect(broadcastTargetMock).toHaveBeenLastCalledWith(ROOM_CHANNEL, post);
+    // Another channel never inherits it — a thread lives under its channel.
+    useActivityStore.getState().setTargetChannel(OTHER_CHANNEL);
+    expect(useActivityStore.getState().targetThread).toBeNull();
+    expect(broadcastTargetMock).toHaveBeenLastCalledWith(OTHER_CHANNEL, null);
+  });
+
+  it("restoring a message inside a thread points the room at that thread", async () => {
+    seedServerLaunch({ targetChannelId: ROOM_CHANNEL });
+    vi.mocked(restorePostedMessage).mockResolvedValueOnce({
+      message: { components: [] },
+      message_id: "700000000000000002",
+      channel_id: ROOM_CHANNEL,
+      guild_id: LAUNCH_GUILD,
+      url: null,
+      webhook_id: "hook",
+      application_id: null,
+      thread_id: "800000000000000009",
+    });
+    await useActivityStore
+      .getState()
+      .restore(
+        `https://discord.com/channels/${LAUNCH_GUILD}/800000000000000009/700000000000000002`,
+      );
+    const s = useActivityStore.getState();
+    expect(s.targetChannelId).toBe(ROOM_CHANNEL);
+    expect(s.targetThread?.id).toBe("800000000000000009");
+    expect(s.lastPost?.thread_id).toBe("800000000000000009");
   });
 
   it("restoring from a sibling channel moves the room there — on success", async () => {
@@ -151,7 +190,7 @@ describe("activity post destination", () => {
     // …and now the room follows to it (shared, so the move reaches everyone), with
     // the toolbar wired to update the restored message in place.
     expect(s.targetChannelId).toBe(OTHER_CHANNEL);
-    expect(broadcastTargetMock).toHaveBeenCalledWith(OTHER_CHANNEL);
+    expect(broadcastTargetMock).toHaveBeenCalledWith(OTHER_CHANNEL, null);
     expect(s.lastPost?.channel_id).toBe(OTHER_CHANNEL);
   });
 

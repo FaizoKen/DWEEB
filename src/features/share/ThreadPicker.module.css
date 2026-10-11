@@ -258,3 +258,6 @@
   background: var(--app-bg-hover);
   color: var(--app-text-subtle);
 }
+.noteWarn {
+  color: var(--app-warning-text);
+}

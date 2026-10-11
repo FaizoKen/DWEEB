@@ -112,9 +112,9 @@ export function inspectCapabilities(
     notes.push({
       kind: "conflict",
       severity: "warning",
-      title: "Two thread settings clash",
+      title: "Post title not used",
       detail:
-        "You set both a thread to post in and a new thread name. Discord uses the thread you picked and ignores the name — pick one.",
+        "A thread is picked, so the message goes into it and its post title is left out — Discord refuses a message that both starts a post and goes into one. Clear the thread to start a new post with that title.",
     });
   } else if (ctx.threadIdProvided) {
     notes.push({

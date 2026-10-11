@@ -177,3 +177,25 @@ export function cancelledAfterDispatchMessage(mode: SendMode): string {
     ? "Cancelled — but the edit may already have been applied. Check the message before updating again."
     : "Cancelled — but the message may already have been posted. Check the channel before sending again.";
 }
+
+/**
+ * What to do about Discord's forum-destination refusals, said in the editor's
+ * terms. Discord's own sentence stays first (it's what people search for, and
+ * what the raw response shows); this line follows it.
+ */
+const FORUM_TARGET_HINTS: Record<number, string> = {
+  220001:
+    "This is a forum channel, so the message needs a post: pick one to send into, or give the message a post title (Message options → Forum post).",
+  220002:
+    "The message has a post title and also a post to send into. Keep one: choose “New post” to start a post with that title, or clear the title (Message options → Forum post).",
+};
+
+/** A send failure's message, with the fix appended for a forum-target refusal. */
+export function withForumTargetHint(error: string, body: unknown): string {
+  const code =
+    body && typeof body === "object" && "code" in body
+      ? (body as { code: unknown }).code
+      : undefined;
+  const hint = typeof code === "number" ? FORUM_TARGET_HINTS[code] : undefined;
+  return hint ? `${error}\n${hint}` : error;
+}

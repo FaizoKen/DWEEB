@@ -90,6 +90,28 @@ export interface PeerReplace {
   cleared: boolean;
 }
 
+/** A thread (or forum post) inside the room's shared channel. Carried on the
+ *  `target` frame beside the channel: it lives *in* that channel, so — unlike a
+ *  guild — every peer who can see the channel can post into it, and a peer that
+ *  predates the field simply ignores it (and its own picks carry none). */
+export interface RoomThread {
+  id: string;
+  name: string | null;
+}
+
+/** A peer-supplied thread, or null when absent or malformed. The id is only
+ *  ever a snowflake and the name plain text, capped (Discord's own is 100). */
+export function parseRoomThread(raw: unknown): RoomThread | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { id, name } = raw as { id?: unknown; name?: unknown };
+  if (typeof id !== "string" || !/^\d{15,25}$/.test(id)) return null;
+  return { id, name: typeof name === "string" && name ? name.slice(0, 100) : null };
+}
+
+function sameThread(a: RoomThread | null, b: RoomThread | null): boolean {
+  return a === b || (a != null && b != null && a.id === b.id && a.name === b.name);
+}
+
 interface StartOptions {
   instanceId: string;
   /** The launching guild, or null on a DM / group-DM launch (no guild to gate
@@ -102,10 +124,13 @@ interface StartOptions {
    *  seeds the room's shared target so a latecomer inherits it. Ignored on a DM
    *  launch, where collaborators don't share a postable server. */
   targetChannelId: string | null;
+  /** The thread inside that channel the room starts on, if any. */
+  targetThread?: RoomThread | null;
   onRoster: (participants: CollabParticipant[]) => void;
   onConnectedChange?: (connected: boolean) => void;
-  /** A peer moved the shared post destination (server launch only). */
-  onTarget?: (channelId: string) => void;
+  /** A peer moved the shared post destination (server launch only) — a channel,
+   *  optionally narrowed to one of its threads / forum posts. */
+  onTarget?: (channelId: string, thread: RoomThread | null) => void;
   /** The host's plan caps concurrent co-editors and this room is full — the
    *  server refused the socket. `cap` is that limit. Editing continues solo, and
    *  we stop retrying (a reconnect would just be refused again). */
@@ -194,6 +219,8 @@ let lastSent: WebhookMessage | null = null;
  * with the current channel and latecomers land on the same destination.
  */
 let currentTarget: string | null = null;
+/** The thread inside {@link currentTarget} the room agreed on, if any. */
+let currentThread: RoomThread | null = null;
 /**
  * Whether our editor has moved off its fresh-open baseline this session — set the
  * first time we make a local edit or apply any peer state. It gates the server's
@@ -264,7 +291,12 @@ let nextSeq = 1;
  * rather than silently moving the bar back. `sentAt` is null while it still has
  * to go out (picked while disconnected).
  */
-let pendingTarget: { channelId: string; seq: number; sentAt: number | null } | null = null;
+let pendingTarget: {
+  channelId: string;
+  thread: RoomThread | null;
+  seq: number;
+  sentAt: number | null;
+} | null = null;
 /** The exit-flush listeners (see `flushOnExit`), kept to remove them. */
 let exitListeners: (() => void) | null = null;
 
@@ -278,6 +310,7 @@ export function startCollab(options: StartOptions): void {
   // Baseline for the first diff — peers reconcile via the hello/draft exchange.
   lastSent = useMessageStore.getState().message;
   currentTarget = options.targetChannelId;
+  currentThread = options.targetChannelId ? (options.targetThread ?? null) : null;
   currentFocus = useMessageStore.getState().selectedId;
   diverged = false;
   hydratedFired = false;
@@ -297,11 +330,12 @@ export function startCollab(options: StartOptions): void {
  *  launch (collaborators don't share a postable server, so there's nothing to
  *  agree on) and when nothing changed. A pick made while disconnected is kept and
  *  sent on reconnect (see `pendingTarget`). */
-export function broadcastTarget(channelId: string): void {
+export function broadcastTarget(channelId: string, thread: RoomThread | null = null): void {
   if (!opts?.guildId) return;
-  if (currentTarget === channelId) return;
+  if (currentTarget === channelId && sameThread(currentThread, thread)) return;
   currentTarget = channelId;
-  pendingTarget = { channelId, seq: 0, sentAt: null };
+  currentThread = thread;
+  pendingTarget = { channelId, thread, seq: 0, sentAt: null };
   flushTarget();
 }
 
@@ -336,6 +370,7 @@ export function stopCollab(): void {
   lastSnapshotAt = 0;
   lastSent = null;
   currentTarget = null;
+  currentThread = null;
   currentFocus = null;
   peers.clear();
   pendingAnswer = null;
@@ -598,8 +633,10 @@ function handleFrame(frame: Record<string, unknown>): void {
     // before it (or is a hello answer that never saw it) — already stale.
     if (pendingTarget && !targetGivenUp()) return;
     pendingTarget = null;
+    const thread = parseRoomThread(frame.thread);
     currentTarget = frame.channelId;
-    opts.onTarget?.(frame.channelId);
+    currentThread = thread;
+    opts.onTarget?.(frame.channelId, thread);
   }
 }
 
@@ -661,7 +698,13 @@ function resetConnectionSync(): void {
 function answerHello(to: string): void {
   send({ type: "draft", cid, message: useMessageStore.getState().message, ...(to ? { to } : {}) });
   if (opts?.guildId && currentTarget) {
-    send({ type: "target", cid, channelId: currentTarget, ...(to ? { to } : {}) });
+    send({
+      type: "target",
+      cid,
+      channelId: currentTarget,
+      ...(currentThread ? { thread: currentThread } : {}),
+      ...(to ? { to } : {}),
+    });
   }
   if (currentFocus) sendFocus(currentFocus);
 }
@@ -692,7 +735,15 @@ function inflightOps(frames: readonly InflightFrame[]): CollabOp[] {
 function flushTarget(): void {
   if (!pendingTarget || pendingTarget.sentAt !== null) return;
   const seq = nextSeq++;
-  if (send({ type: "target", cid, channelId: pendingTarget.channelId, seq })) {
+  if (
+    send({
+      type: "target",
+      cid,
+      channelId: pendingTarget.channelId,
+      ...(pendingTarget.thread ? { thread: pendingTarget.thread } : {}),
+      seq,
+    })
+  ) {
     pendingTarget.seq = seq;
     pendingTarget.sentAt = Date.now();
   }

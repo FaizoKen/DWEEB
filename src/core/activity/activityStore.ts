@@ -58,7 +58,13 @@ import {
 import { browserTimezone } from "@/core/schedule/recurrence";
 import { libraryEntryMessage } from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
-import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
+import {
+  startCollab,
+  stopCollab,
+  broadcastTarget,
+  type RoomThread,
+  type CollabParticipant,
+} from "./collab";
 import { createConnectionNotifier } from "./connectionNotice";
 import { actorDisplayName, peerReplaceNotice } from "./roomReplace";
 import { setActivityToken } from "./runtime";
@@ -146,6 +152,11 @@ interface ActivityState {
    *  picker. Null before a channel is chosen (always so on a DM launch, until a
    *  destination server *and* channel are picked). */
   targetChannelId: string | null;
+  /** The thread (or forum post) inside {@link targetChannelId} the next post goes
+   *  into, or null for the channel itself (a forum: a new post). Picked in the
+   *  bar's channel picker and shared with the room alongside the channel; any
+   *  channel change drops it, since a thread only exists under its own channel. */
+  targetThread: RoomThread | null;
   /** The user's postable servers — those with the DWEEB bot where they hold
    *  Manage Webhooks (the gate the post enforces). Only loaded on a DM launch,
    *  where a destination must be chosen. Empty in a server launch (the guild is
@@ -283,8 +294,9 @@ interface ActivityState {
   refreshPostableGuilds(): Promise<void>;
   /** Clear {@link connectedBot} once the post dialog has consumed the push. */
   clearConnectedBot(): void;
-  /** Re-point `publish()` at a different channel in the target guild. */
-  setTargetChannel(channelId: string): void;
+  /** Re-point `publish()` at a different channel in the target guild — or at
+   *  one of its threads / forum posts (`thread`; omitted = the channel itself). */
+  setTargetChannel(channelId: string, thread?: RoomThread | null): void;
   /** Pick the destination server (DM launch only): loads its channels + preview
    *  data and resets the channel selection. A server launch ignores this — its
    *  destination server is the guild it launched in, permanently (see
@@ -330,6 +342,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   lastPost: null,
   targetGuildId: null,
   targetChannelId: null,
+  targetThread: null,
   guilds: [],
   guildsLoading: false,
   targetGuildMeta: null,
@@ -518,8 +531,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // re-broadcasting (that would echo back to the room and loop). Safe to
         // apply unconditionally: the frame only ever carries a channel in the
         // launching guild, which is the one server this Activity can post to.
-        onTarget: (channelId) => {
-          if (get().targetChannelId !== channelId) set({ targetChannelId: channelId });
+        onTarget: (channelId, thread) => {
+          const s = get();
+          if (
+            s.targetChannelId !== channelId ||
+            s.targetThread?.id !== thread?.id ||
+            s.targetThread?.name !== thread?.name
+          ) {
+            set({ targetChannelId: channelId, targetThread: thread });
+          }
         },
         // The room is full for the host's plan tier — keep editing solo. Collab
         // has stopped retrying, so there's no "reconnecting…" to announce.
@@ -624,8 +644,18 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         makePermanent,
         applicationId,
         files,
+        get().targetThread?.id ?? null,
       );
       set({ lastPost: result });
+      // A post that opened a new forum post lives in it from now on: follow it
+      // there (named by the title it was given), so Update stays lit for this
+      // message and the room's next post goes into the same post.
+      if (result.thread_id && !get().targetThread) {
+        get().setTargetChannel(channelId, {
+          id: result.thread_id,
+          name: message.thread_name?.trim() || null,
+        });
+      }
       // Success is surfaced by the post-success dialog (see ActivityBar), so no
       // toast here — the two would be redundant.
       return result;
@@ -682,6 +712,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         destLabel,
         makePermanent,
         postAs,
+        get().targetThread?.id ?? null,
       );
       return result.next_run_at;
     } catch (e) {
@@ -781,7 +812,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // to it so the in-place Update lights up (it keys on the destination
       // matching the message's channel) and everyone here follows to it. Only on
       // success, so a miss never strands the room on a channel it never posted in.
-      if (channelId !== roomChannelId) get().setTargetChannel(channelId);
+      // A message inside a thread / forum post points the room at that thread
+      // as well, so the in-place Update lights up and the next post follows it.
+      const restoredThread = result.thread_id ?? null;
+      if (channelId !== roomChannelId || restoredThread !== (get().targetThread?.id ?? null)) {
+        get().setTargetChannel(
+          channelId,
+          restoredThread ? { id: restoredThread, name: null } : null,
+        );
+      }
       // Wire the toolbar to update THIS message: `lastPost` carries the webhook
       // (and the custom bot, when one authored it) so the next edit PATCHes it
       // in place under the same identity instead of posting a copy (same
@@ -1064,15 +1103,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (get().connectedBot !== null) set({ connectedBot: null });
   },
 
-  setTargetChannel(channelId) {
-    set({ targetChannelId: channelId });
+  setTargetChannel(channelId, thread = null) {
+    set({ targetChannelId: channelId, targetThread: thread });
     // On a server launch the destination is shared: tell the room so everyone's
     // editor re-points to the same channel. No-op on a DM launch (collaborators
     // don't share a postable server) — see `broadcastTarget`. Skip the broadcast
     // for an edit-only user: moving a shared destination is a posting decision, so
     // only someone who can post may re-point the room (the picker is read-only for
     // them too — this guards the path as defence in depth).
-    if (get().canPostToTarget !== false) broadcastTarget(channelId);
+    if (get().canPostToTarget !== false) broadcastTarget(channelId, thread);
   },
 
   setTargetGuild(guildId) {
@@ -1094,6 +1133,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({
       targetGuildId: guildId,
       targetChannelId: null,
+      targetThread: null,
       targetGuildMeta: meta,
       // `guilds` is pre-filtered to servers the user can post to (see
       // `loadPostableGuilds`), so a picked one is postable by construction.
