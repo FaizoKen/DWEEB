@@ -180,7 +180,7 @@ import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker";
 import { ThreadPicker } from "./ThreadPicker";
 import { forumNeedsPost, isForumType } from "./threadSelection";
-import { useChannelThreads } from "@/core/webhook/channelThreads";
+import { useChannelThreads, useChannelThreadsStore } from "@/core/webhook/channelThreads";
 import { useOptionsRevealStore } from "@/features/builder/optionsReveal";
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
@@ -742,6 +742,25 @@ export function SendPanel({
     threadChannelRef.current = knownChannelId;
     if (mode === "new" && prev && prev !== knownChannelId) setThreadId("");
   }, [knownChannelId, mode]);
+
+  // The toolbar's channel picker can narrow the channel to a thread too, so
+  // while this post goes to the bar's channel the two share one pick: the
+  // bar's thread fills the field, and a pick here moves the bar (like a channel
+  // pick in the picker above does). A pasted webhook for another channel keeps
+  // its own, local thread.
+  const sendTargetThread = useSendTargetStore((s) => s.thread);
+  const barThreadId = barChannelId ? (sendTargetThread?.id ?? "") : "";
+  const barLinked =
+    mode === "new" && !scheduleEditMode && barChannelId != null && knownChannelId === barChannelId;
+  useEffect(() => {
+    if (barLinked) setThreadId(barThreadId);
+  }, [barLinked, barThreadId]);
+  const pickThread = (id: string) => {
+    setThreadId(id);
+    if (!barLinked) return;
+    const name = threadsEntry.threads.find((t) => t.id === id)?.name ?? null;
+    useSendTargetStore.getState().setSendThread(id ? { id, name } : null);
+  };
 
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
@@ -1698,8 +1717,28 @@ export function SendPanel({
         // Keep the action bar's destination chip honest: the message landed in
         // this channel, so that's where the *next* post points too (a send
         // through a pasted URL or an OAuth-created webhook may have moved it).
+        // A new post lands in its thread too — the picked one, or the forum
+        // post this send just created (named by the title it was given), whose
+        // channel list is refreshed so the new post is there next time.
         if (effGuildId && effChannelId) {
-          useSendTargetStore.getState().setSendTarget(effGuildId, effChannelId);
+          const createdPost = mode === "new" && !threadId.trim() && effThreadId;
+          useSendTargetStore.getState().setSendTarget(
+            effGuildId,
+            effChannelId,
+            mode === "new"
+              ? effThreadId
+                ? {
+                    id: effThreadId,
+                    name: createdPost
+                      ? (message.thread_name?.trim() ?? null) || null
+                      : (selectedThreadName ?? null),
+                  }
+                : null
+              : undefined,
+          );
+          if (createdPost && canListThreads) {
+            void useChannelThreadsStore.getState().load(effGuildId, effChannelId, { force: true });
+          }
         }
 
         // Point the form at the message that's now live: record it as the
@@ -2056,6 +2095,15 @@ export function SendPanel({
   // app-owned webhooks, which is the route plugin components need.
   const canManageWebhooks = useCanManageGuildWebhooks();
   const pickerActive = authStatus === "authed" && canManageWebhooks;
+  const addPostTitle = onCloseDialog
+    ? () => {
+        onCloseDialog();
+        useOptionsRevealStore.getState().reveal("thread_name");
+      }
+    : undefined;
+  // New posts through the channel picker get the thread card right under the
+  // channel card; everything else keeps the folded section further down.
+  const threadSummary = mode === "new" && !scheduleEditMode && pickerActive && canListThreads;
 
   // The paste field collapses only when an easier alternative exists (see the
   // mode note above): the OAuth create flow for a new post, or the picker for an
@@ -2426,6 +2474,21 @@ export function SendPanel({
                 initialChannelId={barChannelId}
                 variant={destinationPicked ? "summary" : "list"}
               />
+              {threadSummary && knownChannelId ? (
+                <ThreadPicker
+                  variant="summary"
+                  guildId={knownGuildId ?? null}
+                  channelId={knownChannelId}
+                  channelName={knownChannelName}
+                  channelType={localChannelType}
+                  canList={canListThreads}
+                  mode={mode}
+                  value={threadId}
+                  onChange={pickThread}
+                  postTitle={message.thread_name ?? ""}
+                  onAddPostTitle={addPostTitle}
+                />
+              ) : null}
               <details className={styles.redirectNote}>
                 <summary className={styles.redirectSummary}>Other ways to create a webhook</summary>
                 <div className={styles.redirectBody}>
@@ -2649,7 +2712,7 @@ export function SendPanel({
         </div>
       ) : null}
 
-      {scheduleEditMode ? null : (
+      {scheduleEditMode || threadSummary ? null : (
         <details
           className={styles.optional}
           open={optionalOpen}
@@ -2680,16 +2743,9 @@ export function SendPanel({
               canList={canListThreads}
               mode={mode}
               value={threadId}
-              onChange={setThreadId}
+              onChange={pickThread}
               postTitle={message.thread_name ?? ""}
-              onAddPostTitle={
-                onCloseDialog
-                  ? () => {
-                      onCloseDialog();
-                      useOptionsRevealStore.getState().reveal("thread_name");
-                    }
-                  : undefined
-              }
+              onAddPostTitle={addPostTitle}
             />
           </div>
         </details>

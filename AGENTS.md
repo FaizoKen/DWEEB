@@ -2249,6 +2249,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   destination with neither a picked post nor `thread_name` blocks Send/Schedule up front
   (`forumNeedsPost`, Discord's 220001) with "Add a post title" jumping to Message options; the
   response carries `channel_type` so that rule works for a server that isn't connected.
+  **The thread is picked like the channel** (maintainer, 2026-10-12): the toolbar's channel
+  picker nests each channel's threads under it (chevron to expand; picking a forum keeps the
+  panel open on its posts, with "New post" first), and `sendTargetStore` holds `{channel,
+  thread}` — any channel change drops the thread. The Send panel shows the same decided-card
+  + disclosure pair as the channel ("Post in #x" card, "Choose a different post" / "Post
+  inside a thread"), and a pick in either place is one pick (`pickThread` writes the store
+  while the post goes to the bar's channel). A picked thread clears the bar's forum
+  post-destination (no "needs a title" error for an existing post); `isUpdate` compares the
+  thread too, a restore/send snaps the chip to the message's thread, and a send that created
+  a forum post names it from its title and force-reloads that channel's list.
   Web only — the Activity's `target` frame carries a channel and nothing else (see the
   destination entry), so threads there would be a protocol change. **Server-first deploy
   ordering**: an old proxy 404s the route and the picker shows "Couldn't load threads" over

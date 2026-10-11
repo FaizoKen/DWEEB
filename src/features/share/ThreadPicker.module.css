@@ -194,3 +194,67 @@
 .inlineAction {
   margin: 4px 0 2px 36px;
 }
+
+/* ── Summary layout (Send): the decided thread as a card, like the channel
+   card above it, with the alternatives folded behind a disclosure. ─────── */
+.panel {
+  max-height: none;
+  padding: 8px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+}
+.rowCard {
+  padding: 8px 10px;
+}
+.iconCard {
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--app-bg-hover);
+}
+.rowCard .name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.changeToggle {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--app-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.changeToggle:hover {
+  color: var(--app-text);
+}
+.changeChevron {
+  flex: none;
+}
+.changeLabel {
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changeCount {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.7;
+  background: var(--app-bg-hover);
+  color: var(--app-text-subtle);
+}

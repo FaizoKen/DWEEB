@@ -227,3 +227,98 @@
     min-height: 40px;
   }
 }
+
+/* ── Threads (web bar) ──────────────────────────────────────────────────────
+   A channel row plus its expand chevron on one line; the channel's threads
+   nest beneath it, indented like Discord's sidebar. */
+.rowLine {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.rowLine > .row {
+  flex: 1;
+  min-width: 0;
+}
+/* The channel holding the picked thread: tinted, not checked. */
+.row[data-parent] .rowHash,
+.row[data-parent] .rowName {
+  color: var(--app-accent-text);
+}
+.expand {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text-subtle);
+  cursor: pointer;
+}
+.expand:hover,
+.expand[aria-expanded="true"] {
+  background: var(--app-bg-subtle);
+  color: var(--app-text);
+}
+
+.threads {
+  list-style: none;
+  margin: 0 0 4px 14px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--app-border);
+}
+.threadRow {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: var(--app-text-xs, 12px);
+}
+.threadTag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.7;
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
+}
+.threadMore {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--app-accent-text);
+  font-size: var(--app-text-xs, 12px);
+  font-weight: 600;
+  cursor: pointer;
+}
+.threadMore:hover {
+  text-decoration: underline;
+}
+.threadNote {
+  padding: 4px 8px;
+  font-size: var(--app-text-xs, 12px);
+  color: var(--app-text-muted);
+}
+
+/* Trigger: "channel › thread" — the channel part never shrinks below a few
+   characters, the thread name takes the ellipsis. */
+.triggerSep {
+  color: var(--app-text-subtle);
+  font-weight: 500;
+}
+.triggerThread {
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  .expand {
+    width: 40px;
+    height: 40px;
+  }
+}

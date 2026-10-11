@@ -281,11 +281,14 @@ function ActionBar({
 
   const sendTargetGuildId = useSendTargetStore((s) => s.guildId);
   const sendTargetChannelId = useSendTargetStore((s) => s.channelId);
+  const sendTargetThread = useSendTargetStore((s) => s.thread);
   const setSendTarget = useSendTargetStore((s) => s.setSendTarget);
   // The pick only means something in the server it was made for; a server
   // switch parks it until the user returns to that server.
   const barChannelId =
     connectedGuildId && sendTargetGuildId === connectedGuildId ? sendTargetChannelId : null;
+  // …optionally narrowed to one of that channel's threads / forum posts.
+  const barThread = barChannelId ? sendTargetThread : null;
 
   // The linked (restored/posted) message's channel, recovered from this
   // browser's webhook history — the entry was written by the restore or send
@@ -317,10 +320,16 @@ function ActionBar({
   // Activity, re-pointing it elsewhere flips the primary back to "Send" (a new
   // post there). When either channel is unknown (signed out, a pasted URL with
   // no saved entry), the link alone decides — the old behaviour.
+  // The thread counts too: re-pointing the chip at another thread of the same
+  // channel (or out of the message's thread) is a new post elsewhere.
   const isUpdate =
     restoredFrom != null &&
     !parked &&
-    (!destActive || !barChannelId || !restoredChannelId || restoredChannelId === barChannelId);
+    (!destActive ||
+      !barChannelId ||
+      !restoredChannelId ||
+      (restoredChannelId === barChannelId &&
+        (barThread?.id ?? null) === (restoredFrom.threadId || null)));
 
   // The linked message's Discord jump link — for the "View the posted message"
   // affordance carried over from the Activity bar (where it rides `openLastPost`).
@@ -402,7 +411,16 @@ function ActionBar({
     if (guildData?.guildId !== connectedGuildId || !guildData.channelById[restoredChannelId])
       return;
     snappedOriginRef.current = restoredFrom;
-    setSendTarget(connectedGuildId, restoredChannelId);
+    // A message inside a thread snaps the chip to that thread as well. Its name
+    // is kept when the send that made this origin already recorded it (a post
+    // it just created), else it arrives once the picker loads the threads.
+    const known = useSendTargetStore.getState().thread;
+    const threadId = restoredFrom.threadId || null;
+    setSendTarget(
+      connectedGuildId,
+      restoredChannelId,
+      threadId ? { id: threadId, name: known?.id === threadId ? known.name : null } : null,
+    );
   }, [restoredFrom, destActive, connectedGuildId, restoredChannelId, guildData, setSendTarget]);
 
   // Mirror the picked channel's kind/name into the shared post-destination
@@ -415,10 +433,12 @@ function ActionBar({
     barChannelId && guildData?.guildId === connectedGuildId
       ? guildData.channelById[barChannelId]
       : undefined;
+  // A picked thread / forum post is an existing post, so the forum's "new posts
+  // need a title" rule doesn't apply — the post goes into that thread.
   useEffect(() => {
-    if (isUpdate || !destActive) setPostDestination(null, null);
+    if (isUpdate || !destActive || barThread) setPostDestination(null, null);
     else setPostDestination(barChannel?.type ?? null, barChannel?.name ?? null);
-  }, [isUpdate, destActive, barChannel, setPostDestination]);
+  }, [isUpdate, destActive, barChannel, barThread, setPostDestination]);
 
   // The save dialog behind the bar's save icon (see SaveMessageDialog).
   const [saveOpen, setSaveOpen] = useState(false);
@@ -584,6 +604,11 @@ function ActionBar({
             <ChannelPicker
               selectedId={barChannelId}
               onSelect={(id) => setSendTarget(connectedGuildId, id)}
+              threads={{
+                guildId: connectedGuildId,
+                selected: barThread,
+                onSelect: (id, thread) => setSendTarget(connectedGuildId, id, thread),
+              }}
             />
           ) : null}
         </div>
