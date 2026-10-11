@@ -172,10 +172,26 @@ async function webBootAssets(): Promise<{ assets: string[]; entryFile: string | 
  * Schema properties Google validates as a *datetime* rather than a plain date:
  * a bare "YYYY-MM-DD" is rejected twice over, as an invalid datetime value AND
  * as a missing timezone (Search Console, 2026-07-20). Deliberately narrow —
- * `datePublished`/`dateModified` are Date-typed, are legitimately date-only
- * here, and are cross-checked against sitemap lastmod above.
+ * `datePublished`/`dateModified` are legitimately date-only on articles and
+ * pages, and are cross-checked against sitemap lastmod above.
  */
 const DATETIME_PROPERTIES = new Set(["uploadDate"]);
+
+/**
+ * Types whose own date properties Google validates as a datetime even though
+ * the same property is date-only elsewhere. ProfilePage's `dateCreated` and
+ * `dateModified` are DateTime in its rich-result spec, and Search Console
+ * flagged `/about/`'s date-only `dateModified` (2026-10-11).
+ */
+const DATETIME_PROPERTIES_BY_TYPE: Record<string, ReadonlySet<string>> = {
+  ProfilePage: new Set(["dateCreated", "dateModified"]),
+};
+
+function nodeTypes(node: object): string[] {
+  const type = (node as { "@type"?: unknown })["@type"];
+  if (typeof type === "string") return [type];
+  return Array.isArray(type) ? type.filter((t): t is string => typeof t === "string") : [];
+}
 
 function validDateTime(value: string): boolean {
   return (
@@ -191,8 +207,9 @@ function auditJsonLdDates(node: unknown, label: string): void {
     return;
   }
   if (!node || typeof node !== "object") return;
+  const typed = nodeTypes(node).flatMap((type) => [...(DATETIME_PROPERTIES_BY_TYPE[type] ?? [])]);
   for (const [key, value] of Object.entries(node)) {
-    if (DATETIME_PROPERTIES.has(key)) {
+    if (DATETIME_PROPERTIES.has(key) || typed.includes(key)) {
       if (typeof value !== "string" || !validDateTime(value)) {
         errors.push(
           `${label}: JSON-LD "${key}" must be an ISO 8601 datetime with a timezone offset (got ${JSON.stringify(value)})`,
@@ -500,7 +517,8 @@ async function main(): Promise<void> {
     }
 
     const declaredModifiedDates = new Set([
-      ...[...html.matchAll(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2})"/g)].map(
+      // The date part of a date or a datetime (ProfilePage's is a datetime).
+      ...[...html.matchAll(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2})(?:T[^"]*)?"/g)].map(
         (match) => match[1]!,
       ),
       ...[
@@ -806,7 +824,9 @@ async function main(): Promise<void> {
   const rootShellHtml = await readFile(join(DIST, "index.html"), "utf8");
   const parsedWebEntry = moduleEntryFromHtml(rootShellHtml);
   if (webEntryFile === null) {
-    errors.push("Vite manifest names no chunk for index.html, so the shell's entry cannot be checked");
+    errors.push(
+      "Vite manifest names no chunk for index.html, so the shell's entry cannot be checked",
+    );
   } else if (parsedWebEntry !== `/${webEntryFile}`) {
     errors.push(
       `/: moduleEntryFromHtml read ${parsedWebEntry ?? "no module entry"} from the shell; the manifest names /${webEntryFile}`,

@@ -506,7 +506,9 @@ export function renderAboutPage(): string {
     name: "About DWEEB and how it is tested",
     description,
     url: ABOUT_URL,
-    dateModified: ABOUT_LASTMOD,
+    // ProfilePage types its dates as DateTime: Search Console reports a bare
+    // "YYYY-MM-DD" here as an invalid datetime (2026-10-11).
+    dateModified: `${ABOUT_LASTMOD}T00:00:00+00:00`,
     inLanguage: "en",
     isPartOf: { "@id": SITE.websiteId },
     mainEntity: { "@id": SITE.personId },

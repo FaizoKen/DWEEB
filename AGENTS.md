@@ -1346,7 +1346,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   was removed. Keep the film lazy. Add video schema only with a dedicated crawlable watch page
   whose visible primary content is the player. `DATETIME_PROPERTIES` in `audit.ts` remains the
   guard for any future datetime-typed schema: those values need a full ISO datetime + timezone;
-  `datePublished`/`dateModified` remain legitimate date-only values.
+  `datePublished`/`dateModified` remain legitimate date-only values — **except on a
+  `ProfilePage`** (`/about/`), whose spec types `dateCreated`/`dateModified` as DateTime;
+  Search Console flagged the date-only value as "Invalid datetime value" (2026-10-11), so it is
+  emitted as midnight UTC and `DATETIME_PROPERTIES_BY_TYPE` gates it. The sitemap cross-check
+  compares the date part of either form.
   Landing pages are a catalog (`LANDINGS` in `scripts/seo/guides.ts`, rendered by
   `renderLandingPage`) — currently `/discord-message-builder/`, `/discord-webhook-builder/`
   and `/discord-embed-builder/`.
