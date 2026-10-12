@@ -494,6 +494,35 @@ fn is_unhandled_abort(kind: &str, message: &str) -> bool {
     kind == "unhandledrejection" && ABORT_REASON_MESSAGES.contains(&message)
 }
 
+/// What Chromium errors a response body with when the connection fails after
+/// the headers arrived (`BodyStreamBuffer::GetError`). No code we ship words
+/// anything this way. Mirrors `NETWORK_FAILURE_MESSAGES` in
+/// `src/core/telemetry/crashReport.ts`.
+const NETWORK_FAILURE_MESSAGES: [&str; 1] = ["network error"];
+
+/// Whether a beacon is a dropped connection someone left unhandled: the network
+/// failing, not a crash, and a beacon whose stack cannot say whose promise it
+/// was.
+///
+/// Chromium creates the error for a request when `fetch()` is called, so its
+/// stack names the line that *started* the request, never the promise nobody
+/// handled. That paged on 2026-10-12 (build `fc508f33d7`, `frames=page`, one
+/// frame: the webhook POST in `sendToWebhook`), whose own chain handles both
+/// ways the request can fail. In Chrome 154 it leaked nothing over HTTP/1.1 or
+/// HTTP/2, whether the connection died before the headers or mid-body. A
+/// page-world `fetch` hook that chains onto the request and drops the result
+/// does leak, under our frames. Same shape as [`is_unhandled_abort`]: whoever
+/// dropped it, the request failed because the connection did.
+///
+/// Logged at `info`, and narrow like its siblings: `unhandledrejection` only;
+/// the exact message only; and only this wording. "Failed to fetch" still
+/// pages: it is also how a request that never left fails, and a location-less
+/// one is how our own dropped `fetch` reads. A current client declines to send
+/// these at all; this is the authority for older ones.
+fn is_unhandled_network_failure(kind: &str, message: &str) -> bool {
+    kind == "unhandledrejection" && NETWORK_FAILURE_MESSAGES.contains(&message)
+}
+
 /// Whether `message` is the browser's muted cross-origin error, read the way
 /// the client reads it: leading whitespace trimmed, and a byte-order mark with
 /// it (JavaScript's `trimStart` strips one). Control characters are already
@@ -679,6 +708,23 @@ fn log_crash(
             %message,
             %stack,
             "web app unhandled abort (a deliberate cancellation, not a crash)",
+        );
+    } else if is_unhandled_network_failure(kind, message) {
+        // A connection that failed mid-reply, whose rejection somebody dropped.
+        // The stack only names the request's `fetch()` call, so it can't say
+        // whose promise it was. Counted, never paged. See
+        // [`is_unhandled_network_failure`].
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %frames,
+            %surface,
+            %version,
+            %build,
+            %path,
+            %message,
+            %stack,
+            "web app unhandled network failure (the connection failed, not a crash)",
         );
     } else {
         tracing::warn!(
@@ -1344,6 +1390,81 @@ mod tests {
                 "{message}"
             );
         }
+    }
+
+    /// The 2026-10-12 page, as build `fc508f33d7` sent it (the alert cut the
+    /// second frame's URL short; the rest is verbatim). The only frame is the
+    /// webhook POST's `fetch()` in `sendToWebhook`, whose own chain handles the
+    /// failure; Chromium stamps a request's error where `fetch()` was called,
+    /// so nothing in the stack can say whose promise was dropped.
+    #[test]
+    fn the_2026_10_12_unhandled_network_failure_is_demoted_not_paged() {
+        let body: CrashBody = serde_json::from_str(
+            r#"{"kind":"unhandledrejection","message":"network error",
+                "stack":"TypeError: network error\n    at Hs (https://dweeb.faizo.net/assets/previewSheet-DZGDMyw1.js:2:136038)\n    at a.children.a.onConfirm (https://dweeb.faizo.net/assets/ShareDialog-a.js:1:2)",
+                "version":"1.3.0","build":"fc508f33d7","surface":"web","path":"/"}"#,
+        )
+        .expect("payload shape");
+        let kind = clamp_field(&body.kind, KIND_MAX);
+        let message = clamp_field(&body.message, MESSAGE_MAX);
+        let stack = clamp_field(&body.stack, STACK_MAX);
+        // No earlier branch claims it — every frame is ours…
+        assert!(!is_non_crash(&body.message));
+        assert!(!pages_as_broken_deploy(&kind, &message));
+        assert!(!is_routine_stale_chunk(&kind, &message));
+        assert!(!is_repaired_dom_desync(&kind));
+        assert_eq!(frame_origin(&stack), FrameOrigin::Page);
+        assert!(!is_foreign_code_error(&kind, &message, &stack));
+        assert!(!is_unhandled_abort(&kind, &message));
+        // …so this one does, at info.
+        assert!(is_unhandled_network_failure(&kind, &message));
+        let line = logged_line(&kind, &message, &stack);
+        assert!(line.contains(" INFO "), "{line}");
+        assert!(line.contains("web app unhandled network failure"), "{line}");
+        assert!(
+            line.contains("kind=unhandledrejection frames=page"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn only_a_dropped_rejection_worded_exactly_as_a_failed_body_is_demoted() {
+        const MESSAGE: &str = "network error";
+        // A report that took the app down pages whatever it says.
+        for kind in CLIENT_KINDS {
+            assert_eq!(
+                is_unhandled_network_failure(kind, MESSAGE),
+                kind == "unhandledrejection",
+                "{kind}"
+            );
+        }
+        let app_down = logged_line(
+            "boundary",
+            MESSAGE,
+            "TypeError: network error at Xk (https://dweeb.faizo.net/assets/index-a.js:1:2)",
+        );
+        assert!(app_down.contains(" WARN "), "{app_down}");
+        assert!(app_down.contains("web app crash"), "{app_down}");
+        // Exact, and this wording only: "Failed to fetch" is also a request
+        // that never left, and how our own dropped `fetch` reads, so it pages.
+        for message in [
+            "Failed to fetch",
+            "TypeError: network error",
+            "network error.",
+            "NetworkError when attempting to fetch resource.",
+            "",
+        ] {
+            assert!(
+                !is_unhandled_network_failure("unhandledrejection", message),
+                "{message}"
+            );
+        }
+        let ours = logged_line(
+            "unhandledrejection",
+            "Failed to fetch",
+            "TypeError: Failed to fetch at Hs (https://dweeb.faizo.net/assets/a.js:2:3)",
+        );
+        assert!(ours.contains(" WARN "), "{ours}");
     }
 
     #[test]

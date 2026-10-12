@@ -162,3 +162,29 @@ describe("the crash reporter's unhandled-abort gate", () => {
     expect(sent()[0]?.kind).toBe("boundary");
   });
 });
+
+describe("the crash reporter's unhandled-network-failure gate", () => {
+  /** What Chromium errors a request with when its connection fails mid-reply —
+   *  its stack stamped where `fetch()` was called, so every frame is ours. */
+  function chromiumBodyFailure(): Error {
+    return errorWithStack("network error", [
+      "TypeError: network error",
+      "at Hs (https://dweeb.faizo.net/assets/previewSheet-DZGDMyw1.js:2:136038)",
+      OUR_FRAME,
+    ]);
+  }
+
+  it("never sends the 2026-10-12 dropped body failure, yet still sends a crash after it", () => {
+    fire("unhandledrejection", { reason: chromiumBodyFailure() });
+    expect(proxyFetch).not.toHaveBeenCalled();
+    fire("unhandledrejection", { reason: errorWithStack("boom", ["Error: boom", OUR_FRAME]) });
+    expect(sent().map((beacon) => beacon.message)).toEqual(["boom"]);
+  });
+
+  it("still sends the same failure when it takes the app down", async () => {
+    const { reportBoundaryError } = await import("./reporter");
+    reportBoundaryError(chromiumBodyFailure());
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]?.kind).toBe("boundary");
+  });
+});

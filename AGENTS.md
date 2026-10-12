@@ -257,6 +257,27 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   transaction was aborted, so the request cannot be fulfilled."), and that can be ours; and
   Chromium's wording only (a literal in `chrome.dll`) until a beacon shows Gecko's or WebKit's.
   Keep `abort()` calls reason-less, or add the reason's wording to both lists. No deploy ordering.
+- **A dropped connection failure is the network's, and its stack cannot say whose promise
+  it was either** (2026-10-12). A page read `kind=unhandledrejection frames=page … network
+  error`. The one frame was the webhook POST's `fetch(` in `sendToWebhook`, mapped by
+  rebuilding the reporting build (`fc508f33d7`; the column lands exactly on `fetch(`).
+  Chromium creates a request's error **when `fetch()` is called** (`ResponseResolver` in
+  `fetch_manager.cc`, so that it carries a stack), so that frame names who *started* the
+  request, never who dropped the rejection. `"network error"` is Chromium's wording for a
+  response body that failed after the headers arrived (`BodyStreamBuffer::GetError`, in
+  current source; Chrome 154 still says "Failed to fetch" there, so the visitor ran a newer
+  build), and nothing we ship words anything that way. Our chain handles both ways the request can
+  fail: it awaits `fetch()` in a `try`, and `readBody` reads the body with `.catch`. Driven
+  in Chrome 154 over HTTP/1.1 and HTTP/2 (refused, reset before headers, reset/GOAWAY
+  mid-body, bad chunking, bad gzip, abort mid-body), it leaked nothing. A page-world fetch
+  hook that peeks at a clone and drops it did leak. Policy: `isUnhandledNetworkFailure`
+  (crashReport.ts, dropped before the throttle) and `is_unhandled_network_failure`
+  (telemetry.rs, the authority; **info**, `web app unhandled network failure`). Narrow
+  like the abort rule: `unhandledrejection` only, the exact message only, this wording
+  only. **"Failed to fetch" still pages**: it is also how a request that never left
+  fails, and a location-less one is how our own dropped `fetch` reads. Residue, accepted:
+  if *our* code ever drops a body read, a mid-reply disconnect on it won't page. No
+  deploy ordering.
 - **Preact must survive a DOM something else rewrote — an in-page translator is the
   known rewriter** (2026-07-29). Preact places a node with
   `parentDom.insertBefore(newNode, oldDom)`, where `oldDom` is the sibling it remembers;

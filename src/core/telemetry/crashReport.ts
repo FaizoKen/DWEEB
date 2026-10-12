@@ -753,6 +753,41 @@ export function isUnhandledAbort(kind: CrashKind, message: string): boolean {
   return kind === "unhandledrejection" && ABORT_REASON_MESSAGES.includes(asProxyReads(message));
 }
 
+/**
+ * What Chromium errors a response body with when the connection fails after
+ * the headers arrived (`BodyStreamBuffer::GetError`). No code we ship words
+ * anything this way. Mirrored as `NETWORK_FAILURE_MESSAGES` in
+ * `telemetry.rs`. See [`isUnhandledNetworkFailure`].
+ */
+export const NETWORK_FAILURE_MESSAGES: readonly string[] = ["network error"];
+
+/**
+ * Whether a report is a dropped connection someone left unhandled: the network
+ * failing, not a crash, and a report whose stack cannot say whose promise it
+ * was.
+ *
+ * Chromium creates the error for a request when `fetch()` is called, so its
+ * stack names the line that *started* the request, never the promise nobody
+ * handled. On 2026-10-12 a beacon read `network error` with one frame, the
+ * webhook POST in `sendToWebhook`. That chain handles both ways the request
+ * can fail: it awaits `fetch()` in a `try`, and reads the body with `.catch`.
+ * In Chrome 154 it leaked nothing over HTTP/1.1 or HTTP/2, whether the
+ * connection died before the headers or mid-body. A page-world `fetch` hook
+ * that chains onto the request and drops the result does leak, under our
+ * frames. [`frameOrigin`] cannot attribute it, same as [`isUnhandledAbort`].
+ *
+ * Whoever dropped it, the request failed because the connection did, and
+ * there is nothing for us to fix. Deliberately narrow: `unhandledrejection`
+ * only (an app-down report pages whatever its message); the exact message
+ * only; and only this wording. "Failed to fetch" still pages: it is also how
+ * a request that never left fails, and a location-less one is how our own
+ * dropped `fetch` reads. The proxy applies the same rule, as the authority for
+ * older bundles (`is_unhandled_network_failure`).
+ */
+export function isUnhandledNetworkFailure(kind: CrashKind, message: string): boolean {
+  return kind === "unhandledrejection" && NETWORK_FAILURE_MESSAGES.includes(asProxyReads(message));
+}
+
 /** The longest line [`wireStack`] promotes whole; a longer one is kept from its
  *  URL on. Well under [`STACK_MAX`], so a head always fits beside it. */
 const PROMOTED_LINE_MAX = 240;

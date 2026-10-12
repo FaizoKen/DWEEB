@@ -19,6 +19,7 @@ import {
   isNonCrashMessage,
   isStaleChunkMessage,
   isUnhandledAbort,
+  isUnhandledNetworkFailure,
   KIND_MAX_LENGTH,
   buildMetaFromHtml,
   moduleEntryFromHtml,
@@ -703,6 +704,53 @@ describe("isUnhandledAbort", () => {
       "",
     ]) {
       expect(isUnhandledAbort("unhandledrejection", message), message).toBe(false);
+    }
+  });
+});
+
+describe("isUnhandledNetworkFailure", () => {
+  const MESSAGE = "network error";
+
+  it("recognises the 2026-10-12 rejection, which no frame rule can place", () => {
+    // Chromium stamps a request's error where `fetch()` was called, so the one
+    // frame is our webhook POST, not whoever dropped the rejection.
+    const reason = new TypeError(MESSAGE);
+    reason.stack = [
+      `TypeError: ${MESSAGE}`,
+      "    at Hs (https://dweeb.faizo.net/assets/previewSheet-DZGDMyw1.js:2:136038)",
+      "    at a.children.a.onConfirm (https://dweeb.faizo.net/assets/ShareDialog-a.js:1:2)",
+    ].join("\n");
+    const p = buildCrashPayload({
+      kind: "unhandledrejection",
+      error: reason,
+      path: "/",
+      surface: "web",
+      version: "1.3.0",
+      build: "fc508f33d7",
+    });
+    expect(p.message).toBe(MESSAGE);
+    expect(frameOrigin(p.stack)).toBe("page");
+    expect(isForeignCodeError("unhandledrejection", p.message, p.stack)).toBe(false);
+    expect(isUnhandledAbort("unhandledrejection", p.message)).toBe(false);
+    expect(isUnhandledNetworkFailure("unhandledrejection", p.message)).toBe(true);
+  });
+
+  it("claims only a dropped rejection, so a report that took the app down still pages", () => {
+    for (const kind of CRASH_KINDS) {
+      expect(isUnhandledNetworkFailure(kind, MESSAGE), kind).toBe(kind === "unhandledrejection");
+    }
+  });
+
+  it("matches the exact wording, and never a request that failed before it left", () => {
+    // "Failed to fetch" is also how our own dropped `fetch` reads, so it pages.
+    for (const message of [
+      "Failed to fetch",
+      `TypeError: ${MESSAGE}`,
+      `${MESSAGE}.`,
+      "NetworkError when attempting to fetch resource.",
+      "",
+    ]) {
+      expect(isUnhandledNetworkFailure("unhandledrejection", message), message).toBe(false);
     }
   });
 });

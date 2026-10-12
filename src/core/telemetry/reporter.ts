@@ -37,6 +37,7 @@ import {
   isForeignCodeError,
   isNonCrashMessage,
   isUnhandledAbort,
+  isUnhandledNetworkFailure,
   moduleEntryFromHtml,
   resolveCrashKind,
   shellProbeVerdict,
@@ -232,6 +233,9 @@ function report(kind: CrashKind, error: unknown): void {
     // page-world fetch hook's dropped `.then` carries our abort's stack. The
     // work was cancelled on purpose; not a crash, and not worth a slot either.
     if (isUnhandledAbort(resolvedKind, payload.message)) return;
+    // Likewise a connection that failed mid-reply (2026-10-12): its stack names
+    // the request's `fetch()` call, not whoever dropped the rejection.
+    if (isUnhandledNetworkFailure(resolvedKind, payload.message)) return;
     payload.kind = resolvedKind;
     // Throttle on the resolved kind, before any verification: the slot must be
     // claimed synchronously so a crash loop can't fire a probe per frame.
