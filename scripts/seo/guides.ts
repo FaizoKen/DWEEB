@@ -4,7 +4,7 @@ import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 import { CODE_GUIDE_INPUTS } from "./code-guides";
 
-export const GUIDES_LASTMOD = "2026-10-11";
+export const GUIDES_LASTMOD = "2026-10-15";
 
 export interface GuideSection {
   heading: string;
@@ -38,7 +38,7 @@ export interface GuidePage {
    * still read as a complete guide without it: the tool's static markup is a
    * worked example, and the script only makes it live.
    */
-  tool?: "timestamp-generator";
+  tool?: "timestamp-generator" | "markdown-preview" | "rules-generator";
   sources: { label: string; url: string }[];
   related: string[];
   ctaLabel: string;
@@ -63,14 +63,17 @@ function guide(input: GuideInput): GuidePage {
 export const GUIDES: GuidePage[] = [
   guide({
     slug: "discord-components-v2",
-    title: "Discord Components V2 Guide: JSON Example & Limits | DWEEB",
+    // 2026-10-15: the site's most-shown page (2,653 impressions in 28 days) at
+    // position 6.7 with 1.7% CTR; "discord components v2 examples" is its
+    // second-largest named query, so the title now names examples.
+    title: "Discord Components V2 Guide: Examples, JSON & Limits | DWEEB",
     h1: "Discord Components V2: Complete Guide",
     description:
-      "Every Discord Components V2 type with its numeric ID, nesting rules, a minimal webhook JSON example, current limits and an editable example you can open.",
+      "Every Discord Components V2 type with its numeric ID, nesting rules, a minimal webhook JSON example, current limits and editable examples you can open.",
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-09-23",
+    modified: "2026-10-15",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -835,21 +838,29 @@ export const GUIDES: GuidePage[] = [
   }),
   guide({
     slug: "discord-text-formatting",
-    title: "Discord Text Formatting: Markdown, Headers & More | DWEEB",
-    h1: "Discord Text Formatting & Markdown Guide",
+    // 2026-10-15: 1,350 impressions over 239 queries at position 14.8 and ~0.5%
+    // CTR. The head terms sit behind Discord's own Markdown Text 101; the tail
+    // asks for a preview ("discord markdown live preview", "discord text
+    // preview", "discord formatting test"), which a reference page alone could
+    // not give — so the page now leads with one and says so in the snippet.
+    title: "Discord Text Formatting & Markdown with Live Preview | DWEEB",
+    h1: "Discord Text Formatting: Markdown Guide and Live Preview",
     description:
-      "Every Discord markdown rule that actually renders: bold, italics, headers, subtext, lists, spoilers, code blocks, masked links — plus the quirks that break them.",
+      "Preview Discord markdown live, then copy it: bold, italics, headers, subtext, lists, spoilers, code blocks, masked links and timestamps, plus the quirks.",
     eyebrow: "Reference · Markdown & formatting",
-    lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. This reference covers the full syntax plus the edge cases DWEEB's preview parser is tested against real Discord clients for.",
+    lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. Try any message in the live preview below, then use the reference after it for the full syntax and the edge cases DWEEB's preview parser is tested against real Discord clients for.",
     published: "2026-07-17",
-    modified: "2026-09-23",
+    modified: "2026-10-15",
     keywords: [
       "discord text formatting",
       "discord markdown",
+      "discord markdown preview",
       "discord bold italic underline",
       "discord headers",
+      "discord subtext",
       "discord spoiler tag",
     ],
+    tool: "markdown-preview",
     sections: [
       {
         heading: "The complete formatting cheat sheet",
@@ -959,6 +970,32 @@ export const GUIDES: GuidePage[] = [
       "discord-components-v2",
       "discord-webhook-limits",
     ],
+    faq: [
+      {
+        q: "How do I make text bigger in Discord?",
+        a: "Start the line with # and a space for a large header, ## for a medium one or ### for a small one. Headers only work at the very start of a line, and the space after the hashes is required.",
+      },
+      {
+        q: "How do I make small text in Discord?",
+        a: "Start the line with -# and a space. Discord calls it subtext: a smaller, muted line that suits footnotes, captions and last-updated lines. Like headers, it only works at the start of a line.",
+      },
+      {
+        q: "Does Discord markdown support tables?",
+        a: "No. Discord has no table syntax, so pipes and dashes show up as plain characters. Line columns up inside a code block, where a monospace font keeps them aligned, or use one line per row with bold labels.",
+      },
+      {
+        q: "Can I write coloured text or math in Discord?",
+        a: "There is no colour or LaTeX syntax. The usual workaround for colour is a code block with a language tag, such as diff (lines starting with + or -) or ansi with escape codes, which the desktop and web apps highlight; other clients may show it as plain code. Math stays plain text or goes in a code block.",
+      },
+      {
+        q: "Why is my Discord formatting not working?",
+        a: "The most common causes are a missing space after #, -# or a list marker, an asterisk followed by a space (Discord leaves * text* alone), underscores inside a word, and text sitting inside a code block, which shows everything literally. Paste the message into the preview above to see which rule it trips.",
+      },
+      {
+        q: "Does this preview match Discord exactly?",
+        a: "It uses the same parser as DWEEB's message preview, which has regression tests from live Discord checks. Fonts, emoji artwork and code colouring differ slightly, and user, role and channel mentions show placeholder names, so check an important message in its real channel.",
+      },
+    ],
     ctaLabel: "Try the formatting live",
     ctaPath: "/",
   }),
@@ -968,17 +1005,23 @@ export const GUIDES: GuidePage[] = [
     // queries ("discord timestamp generator", "…format", "…syntax", "…code")
     // are tool-intent, and Discord's reference had grown from seven styles to
     // nine (s and S) while this page still said seven.
-    title: "Discord Timestamp Generator & All 9 Format Codes | DWEEB",
-    h1: "Discord Timestamp Generator and Format Codes",
+    // 2026-10-15: 1,425 impressions at position 6.9 but 0.7% CTR. The largest
+    // named queries were time-zone ones ("time zone converter discord",
+    // "discord time code", "discord timezone code") that the old title, about
+    // format codes, never echoed — the snippet now says what the codes are for.
+    title: "Discord Timestamp Generator: Time Codes for Any Time Zone | DWEEB",
+    h1: "Discord Timestamp Generator: Time Codes and Formats",
     description:
-      "Free Discord timestamp generator: pick a date and copy the <t:unix:style> code for all nine styles, including the newer s and S, shown in your own timezone.",
+      "Pick a date and copy a Discord time code that shows in every reader's own time zone. All nine <t:unix:style> formats, including s and S, plus a decoder.",
     eyebrow: "Tool and reference · Dynamic timestamps",
     lede: 'A Discord timestamp token like <t:1767225600:F> renders as a real date in every reader\'s own timezone and language — no more "8 PM EST / 1 AM UTC" tables in event posts. Pick a moment in the generator below and copy a code; the reference after it explains all nine styles, how to produce the number in code, and the mistakes that break a timestamp.',
     published: "2026-07-17",
-    modified: "2026-09-23",
+    modified: "2026-10-15",
     keywords: [
       "discord timestamp generator",
       "discord timestamp format",
+      "discord time code",
+      "discord time zone converter",
       "discord timestamp",
       "discord relative time",
       "discord unix timestamp",
@@ -1140,6 +1183,14 @@ date +%s
       {
         q: "How do I make a timestamp in Discord?",
         a: "Convert the moment to a unix timestamp in seconds and write it as <t:SECONDS:STYLE>, for example <t:1767225600:F>. The generator at the top of this page does the conversion from your own timezone and gives you a code to copy for every style.",
+      },
+      {
+        q: "How do I show a time in everyone's time zone on Discord?",
+        a: "Post it as a timestamp code instead of typing the time. Pick the moment in the generator above in your own time zone, copy a code such as <t:1767225600:F>, and paste it into your message: Discord converts it for every reader, so nobody has to work out the difference from UTC, EST or CET.",
+      },
+      {
+        q: "Is there a time zone converter for Discord?",
+        a: "Discord has no converter built in, but its timestamp codes do the conversion for you: one code shows each reader the time in their own zone and language. Use the generator above to make the code from a date and time in your zone.",
       },
       {
         q: "What timezone do Discord timestamps use?",
@@ -2091,21 +2142,27 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
   // text; the template page carries the visual card, and they cross-link.
   guide({
     slug: "discord-server-rules",
-    title: "Discord Server Rules Template: Copy & Paste Examples | DWEEB",
-    h1: "Discord Server Rules Templates You Can Copy and Paste",
+    // 2026-10-15: "discord rules generator", "rule generator", "rules maker"
+    // and "server rules generator" were landing on the template page at
+    // position ~10 with no generator anywhere on the site — the guide now
+    // carries one and the title says so.
+    title: "Discord Server Rules Template & Generator: Copy and Paste | DWEEB",
+    h1: "Discord Server Rules Templates and Generator",
     description:
-      "Copy-and-paste Discord server rules templates for general, gaming, creator and study servers, plus voice and age-restricted add-ons and formatting tips.",
+      "Generate Discord server rules or copy a ready template for general, gaming, creator and study servers, with voice and age-restricted add-ons and formatting tips.",
     eyebrow: "Community guide · Server rules",
-    lede: "Good rules are short, numbered and impossible to miss. This guide gives you complete rule sets you can paste into your #rules channel today — a general template, versions for gaming, creator and study servers, add-ons for voice chat and age-restricted channels — plus the formatting that makes them readable and a way to keep them editable after you post.",
+    lede: "Good rules are short, numbered and impossible to miss. Build your own set with the generator below, or take a complete rule set you can paste into your #rules channel today — a general template, versions for gaming, creator and study servers, add-ons for voice chat and age-restricted channels — plus the formatting that makes them readable and a way to keep them editable after you post.",
     published: "2026-09-16",
-    modified: "2026-09-23",
+    modified: "2026-10-15",
     keywords: [
       "discord server rules template",
       "discord rules template",
+      "discord rules generator",
       "discord rules copy and paste",
       "discord server rules examples",
       "rules for discord server",
     ],
+    tool: "rules-generator",
     sections: [
       {
         heading: "What a good rules message does",

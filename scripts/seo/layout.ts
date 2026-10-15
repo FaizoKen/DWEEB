@@ -436,6 +436,23 @@ export function renderTemplatePage(
     .map((t) => `<li>${escapeHtml(t)}</li>`)
     .join("")}</ul></section>`;
 
+  // The message's own words, ready to paste: most template queries are "…copy
+  // and paste" searches, and the text used to be reachable only inside the
+  // JSON. Plain markdown keeps its headings, bold and lists in any channel.
+  const name = seo.h1.replace(/ Template$/, "");
+  const hasPlaceholders = /\{[a-z_]+\}/.test(payload.text);
+  const textSection = payload.text
+    ? `<section class="block prose" id="template-text">
+    <h2>Copy and paste the ${escapeHtml(name)} text</h2>
+    <p>This is the template's text as Discord markdown. Paste it into any channel and the headings, bold text, lists and subtext format exactly as they do in the preview; the card, ${seo.componentKinds.some((kind) => /button|select|menu/i.test(kind)) ? "buttons and menus" : "layout and images"} come with the full template when you open it in DWEEB.${
+      hasPlaceholders
+        ? " Words in {braces} are DWEEB placeholders that fill in when you send from DWEEB — replace them by hand if you paste the text yourself."
+        : ""
+    } The <a href="/guides/discord-text-formatting/">Discord text formatting guide</a> explains every piece of syntax it uses.</p>
+    <pre class="code-block code-wrap" tabindex="0" aria-label="${attr(name)} text"><code>${escapeHtml(payload.text)}</code></pre>
+  </section>`
+    : "";
+
   const payloadSection = `<section class="block prose" id="template-json">
     <h2>Template JSON and compatibility</h2>
     <p>This example contains <strong>${payload.topLevel} top-level blocks</strong> and <strong>${payload.components} components including nested blocks</strong>. Its text fields use ${payload.characters} characters of the editor's message budget. The JSON below is exported from the same template that opens in DWEEB.</p>
@@ -538,6 +555,7 @@ export function renderTemplatePage(
         <div class="discord-frame">${messageHtml}</div>
       </section>
 
+      ${textSection}
       ${whenToUse}
       ${whatsInside}
       ${tips}
@@ -797,6 +815,7 @@ th{color:#f2f3f5;background:#292b30}
 td{color:var(--muted)}
 tbody tr:last-child td{border-bottom:0}
 .code-block{overflow:auto;margin:16px 0 20px;padding:18px;background:#111214;border:1px solid var(--border);border-radius:12px;color:#e3e5e8;line-height:1.55;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
+.code-wrap{white-space:pre-wrap;overflow-wrap:anywhere}
 .sources ul{margin:0;padding-left:22px;display:grid;gap:8px}
 
 .preview-block{margin:8px 0 30px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--panel)}

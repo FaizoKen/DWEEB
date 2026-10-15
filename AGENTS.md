@@ -1325,6 +1325,28 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (~20 "copy and paste" variants landing on the template page) got `/guides/discord-welcome-messages/`,
   the same guide-carries-the-text / template-carries-the-card split as the rules pair, which moved
   the rules template from position ~28 to ~10 within a week of 2026-09-16.
+- **Guide tools render through the editor's parser, and template pages carry their text**
+  (2026-10-15 pass; 28-day GSC: 702 clicks / 20.6K impressions / position 8.6, 74 pages
+  indexed). Three guides now carry tools (`GuidePage.tool`): the timestamp generator, a **live
+  markdown preview** on `/guides/discord-text-formatting/` (its tail asked for "markdown live
+  preview / text preview / formatting test" while the head terms sit behind Discord's Markdown
+  Text 101) and a **rules generator** on `/guides/discord-server-rules/` ("discord rules
+  generator / maker" was landing on the template page with no generator on the site). Rules for
+  new tools: render message text with `tools/markdown-html.ts` (`parseMarkdown` AST → escaped
+  HTML; links are non-navigating spans and headings are `div[role=heading]`, so the client may
+  assign it to `innerHTML` and the guide outline stays the article's), never a second markdown
+  dialect; keep a client script's imports free of `layout.ts`/build modules (hence
+  `rules-data.ts` beside `rules-generator.ts`); "Open in DWEEB" goes through
+  `tools/share-link.ts` (a hand-built `#s=` token plus `entry`), and analytics placements must
+  stay `hero|body|nav|footer` or `gtag-init.js` drops the click. Every template page also has a
+  **"Copy and paste the … text" block** (`TemplatePayload.text`, every Text Display in reading
+  order) — the template query tail is mostly copy-and-paste, and the text used to exist only
+  inside the JSON. The help-center, verification and giveaway templates were moved to
+  "Crawled – currently not indexed" on 2026-10-10/12 after earning impressions; their only
+  unique copy was a short intro, so each gained an FAQ answering its own queries. If more
+  templates drop, give them page-specific substance, not more shared boilerplate. Many guide
+  impressions come from AI-Mode-style follow-ups ("still nothing", "method 1 isnt working", in
+  several languages) — a citation, not a ranking, so judge guide CTR with that in mind.
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
   template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then

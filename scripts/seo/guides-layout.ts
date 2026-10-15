@@ -21,6 +21,16 @@ import {
   TIMESTAMP_TOOL_SCRIPT,
   timestampGeneratorHtml,
 } from "./tools/timestamp-generator";
+import {
+  MARKDOWN_PREVIEW_CSS,
+  MARKDOWN_PREVIEW_SCRIPT,
+  markdownPreviewHtml,
+} from "./tools/markdown-preview";
+import {
+  RULES_GENERATOR_CSS,
+  RULES_GENERATOR_SCRIPT,
+  rulesGeneratorHtml,
+} from "./tools/rules-generator";
 
 /**
  * Interactive tools a guide can carry (`GuidePage.tool`): the static markup,
@@ -36,6 +46,16 @@ const GUIDE_TOOLS: Record<
     html: timestampGeneratorHtml,
     script: TIMESTAMP_TOOL_SCRIPT,
     css: TIMESTAMP_TOOL_CSS,
+  },
+  "markdown-preview": {
+    html: markdownPreviewHtml,
+    script: MARKDOWN_PREVIEW_SCRIPT,
+    css: MARKDOWN_PREVIEW_CSS,
+  },
+  "rules-generator": {
+    html: rulesGeneratorHtml,
+    script: RULES_GENERATOR_SCRIPT,
+    css: RULES_GENERATOR_CSS,
   },
 };
 

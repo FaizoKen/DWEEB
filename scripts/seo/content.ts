@@ -53,26 +53,21 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-09-23";
+export const TEMPLATES_LASTMOD = "2026-10-15";
 
 // 2026-09-11: every detail page gained its source-derived JSON and compatibility
 // reference. 2026-09-16: every detail page gained the "Read next" guide row.
 // 2026-09-18: every detail page gained generated discord.js / discord.py code.
 // 2026-09-22: every preview renders the real sample images instead of the
 // placeholder glyph that read as a broken picture.
+// 2026-10-15: every detail page gained a "Copy and paste the … text" block with
+// the message's own markdown (the template query tail is mostly copy-and-paste).
 // Future individual edits should use an override instead of refreshing this baseline.
-const DEFAULT_TEMPLATE_LASTMOD = "2026-09-22";
-// 2026-09-23: the welcome page gained the welcome-messages guide (intro, FAQ,
-// "Read next"), and the channel guide's row leads with it; the announcement,
-// event and giveaway pages now lead their "Read next" row with the timestamp
-// generator.
-const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
-  welcome: "2026-09-23",
-  "channel-guide": "2026-09-23",
-  announcement: "2026-09-23",
-  event: "2026-09-23",
-  "giveaway-button": "2026-09-23",
-};
+const DEFAULT_TEMPLATE_LASTMOD = "2026-10-15";
+// Per-template dates newer than the baseline go here. (The 2026-09-23 entries for
+// welcome, channel-guide, announcement, event and giveaway-button were folded into
+// the 2026-10-15 baseline.)
+const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
 
 /** Meaningful content date for one generated template page. */
 export function templateLastmod(id: string): string {
@@ -249,6 +244,29 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Adding a human check before granting access",
       "Granting roles based on where members joined from",
       "Running a lightweight alternative to a captcha bot",
+    ],
+    tips: [
+      "Post it in a channel new members can see before they have any role, and hide the rest of the server from @everyone so the verified role is what opens it up.",
+      "Keep the message to one instruction and one button. Every extra sentence is one more thing a new member has to read before they can join in.",
+    ],
+    keywords: ["discord verification message", "discord verify button", "verify message template"],
+    faq: [
+      {
+        q: "What should a Discord verification message say?",
+        a: "One instruction, what it unlocks, and the rules it agrees to. For example: “Click the button below to verify you're human and unlock the rest of the server. By verifying you confirm you've read and agree to the #rules.” That is the wording this template starts with; change it in DWEEB to match your server.",
+      },
+      {
+        q: "How does the verify button work?",
+        a: "It is a link button, so Discord simply opens it: the member verifies in the browser through RoleLogic's Member Origin Role service, which then gives them the role you configured. Because it is a link rather than a bot button, the message posts through any webhook and the button never expires.",
+      },
+      {
+        q: "Is this the same as Discord's verification level?",
+        a: "No. Discord's own verification level, in Server Settings under Safety Setup, only checks things such as a verified email or phone number before someone can talk. A verification message gates the server behind a role instead, so you decide what the check is and can see who passed it.",
+      },
+      {
+        q: "Can I make a verify button without RoleLogic?",
+        a: "Yes. A DWEEB Self Role button can grant a Verified role on click with no browser step: add a button, pair it with the Self Role plugin and choose the role (the DWEEB bot needs to be in your server to hand out roles). It is a simpler gate — one click rather than an external check.",
+      },
     ],
   },
   "topgg-vote": {
@@ -617,7 +635,31 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Boosting engagement with one-click entry",
       "Drawing a fair winner automatically",
     ],
-    keywords: ["discord giveaway bot", "giveaway message", "raffle", "prize draw"],
+    keywords: [
+      "discord giveaway bot",
+      "giveaway message",
+      "raffle",
+      "prize draw",
+      "host a giveaway on discord",
+    ],
+    faq: [
+      {
+        q: "How do I host a giveaway on Discord?",
+        a: "Open this template in DWEEB, write the prize and end time, and pair the Enter button with the Giveaway plugin, where you set the number of winners and any entry requirements. Send it to your giveaway channel; members enter with one click, and when it ends the host draws the winners from the giveaway's host panel.",
+      },
+      {
+        q: "How do members enter the giveaway?",
+        a: "They click the Enter button on the message. There are no reactions to add and nothing to type, and the entrant count on the message updates as people join.",
+      },
+      {
+        q: "How is the winner picked?",
+        a: "At random from everyone who entered and met the requirements, by the Giveaway plugin rather than by hand. If a winner does not claim the prize, the host can reroll to draw someone new; people already drawn are not drawn again.",
+      },
+      {
+        q: "Can I show when the giveaway ends in everyone's time zone?",
+        a: "Yes. Put the end time in the message as a Discord timestamp code, such as <t:1767225600:R> for a countdown, and each member sees it in their own time zone. The timestamp generator guide makes the code from a date you pick.",
+      },
+    ],
     guides: [
       "discord-timestamp-format",
       "how-to-create-a-discord-webhook",
@@ -637,7 +679,28 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Deflecting repeat questions before they become tickets",
       "Combining self-serve FAQ answers with private staff tickets",
     ],
-    keywords: ["support hub", "help desk", "self-serve support", "faq menu", "ticket menu"],
+    keywords: [
+      "support hub",
+      "help desk",
+      "self-serve support",
+      "faq menu",
+      "ticket menu",
+      "discord ticket template",
+    ],
+    faq: [
+      {
+        q: "What is a Discord ticket template?",
+        a: "A message members use to open a private support channel with your staff. This one pairs it with a self-serve FAQ menu: the first menu answers common questions privately and instantly, and the second opens a ticket on the topic the member picks for anything the answers don't cover.",
+      },
+      {
+        q: "How do I set up tickets on Discord with this template?",
+        a: "Open the template in DWEEB and pair its menus with the Quick Replies and Tickets plugins. In Tickets you choose the topics, the staff roles that handle tickets and the category new ticket channels go into; in Quick Replies you write the answers. Then send it to your support channel.",
+      },
+      {
+        q: "Who can see a ticket?",
+        a: "The member who opened it, the staff roles you chose, and anyone staff add to the ticket. The rest of the server never sees the ticket channel.",
+      },
+    ],
   },
   faq: {
     slug: "discord-faq-template",

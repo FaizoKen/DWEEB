@@ -13,6 +13,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MARKDOWN_PREVIEW_SCRIPT } from "./markdown-preview";
+import { RULES_GENERATOR_SCRIPT } from "./rules-generator";
 import { TIMESTAMP_TOOL_SCRIPT } from "./timestamp-generator";
 
 /** The slice of `Bun.build` this uses; bun-types is not a project dependency. */
@@ -33,6 +35,14 @@ const TOOL_ENTRIES: readonly { entry: string; publicPath: string }[] = [
   {
     entry: fileURLToPath(new URL("./timestamp-generator.client.ts", import.meta.url)),
     publicPath: TIMESTAMP_TOOL_SCRIPT,
+  },
+  {
+    entry: fileURLToPath(new URL("./markdown-preview.client.ts", import.meta.url)),
+    publicPath: MARKDOWN_PREVIEW_SCRIPT,
+  },
+  {
+    entry: fileURLToPath(new URL("./rules-generator.client.ts", import.meta.url)),
+    publicPath: RULES_GENERATOR_SCRIPT,
   },
 ];
 
