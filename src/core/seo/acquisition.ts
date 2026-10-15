@@ -91,6 +91,8 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-webhook-security",
     "edit-discord-webhook-message",
     "discord-text-formatting",
+    "discord-colored-text",
+    "discord-color-codes",
     "discord-timestamp-format",
     "discord-webhook-limits",
     "discord-webhook-name-avatar",

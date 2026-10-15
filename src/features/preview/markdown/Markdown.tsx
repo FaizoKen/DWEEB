@@ -6,7 +6,7 @@
  * unchanged text doesn't re-run the parser on every keystroke.
  */
 
-import { memo, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   parseMarkdown,
   type BlockNode,
@@ -17,6 +17,7 @@ import {
 import { formatTimestamp } from "./timestamp";
 import { GUILD_NAV_BY_TYPE } from "@/ui/guildNav";
 import { useChannelInfo, useRoleInfo } from "@/core/guild/guildStore";
+import { reportBackgroundFailure } from "@/core/telemetry/reporter";
 import { HashIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./Markdown.module.css";
@@ -103,12 +104,45 @@ function renderBlock(block: BlockNode, key: number): ReactNode {
       );
     }
     case "codeblock":
+      // Discord lowercases the tag; the check stays inline so the parser
+      // itself is only fetched once a message actually has an ansi block.
+      if (block.lang?.toLowerCase() === "ansi")
+        return <AnsiCodeBlock key={key} value={block.value} />;
       return (
         <pre key={key} className={styles.codeblock} data-lang={block.lang ?? ""}>
           <code>{block.value}</code>
         </pre>
       );
   }
+}
+
+let renderAnsi: ((value: string) => ReactNode) | null = null;
+
+/**
+ * An ```ansi block, colored the way Discord colors it (`./ansi`). The
+ * renderer is a separate chunk because this component sits on the boot path
+ * and colored text is rare; until it lands the block shows its raw text. A
+ * failed load leaves it that way and reports through the background-task
+ * channel, so only a non-stale failure pages.
+ */
+function AnsiCodeBlock({ value }: { value: string }) {
+  const [render, setRender] = useState(() => renderAnsi);
+  useEffect(() => {
+    if (render) return;
+    let live = true;
+    import("./ansiRender").then((module) => {
+      renderAnsi = module.renderAnsi;
+      if (live) setRender(() => module.renderAnsi);
+    }, reportBackgroundFailure);
+    return () => {
+      live = false;
+    };
+  }, [render]);
+  return (
+    <pre className={styles.codeblock} data-lang="ansi">
+      <code>{render ? render(value) : value}</code>
+    </pre>
+  );
 }
 
 function renderInline(nodes: InlineNode[]): ReactNode {

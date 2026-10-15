@@ -17,10 +17,10 @@ import { withClientParams } from "@/core/seo/clientParams";
 const ACCENT = 0x5865f2;
 
 /** Builder URL that opens `content` as one accent-striped Text Display card. */
-export function openInDweebHref(content: string, entry: string): string {
+export function openInDweebHref(content: string, entry: string, accent: number = ACCENT): string {
   const wire = {
     flags: 32768,
-    components: [{ type: 17, accent_color: ACCENT, components: [{ type: 10, content }] }],
+    components: [{ type: 17, accent_color: accent, components: [{ type: 10, content }] }],
   };
   const token = `${CURRENT_VERSION}.${compressToEncodedURIComponent(JSON.stringify(wire))}`;
   return withClientParams(`/#s=${token}`, { entry });

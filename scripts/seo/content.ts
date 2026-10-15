@@ -53,7 +53,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-10-15";
+export const TEMPLATES_LASTMOD = "2026-10-16";
 
 // 2026-09-11: every detail page gained its source-derived JSON and compatibility
 // reference. 2026-09-16: every detail page gained the "Read next" guide row.
@@ -67,7 +67,10 @@ const DEFAULT_TEMPLATE_LASTMOD = "2026-10-15";
 // Per-template dates newer than the baseline go here. (The 2026-09-23 entries for
 // welcome, channel-guide, announcement, event and giveaway-button were folded into
 // the 2026-10-15 baseline.)
-const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
+const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
+  // 2026-10-16: retitled and re-introduced as a ticket panel (see its entry).
+  "help-center": "2026-10-16",
+};
 
 /** Meaningful content date for one generated template page. */
 export function templateLastmod(id: string): string {
@@ -234,7 +237,9 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   verify: {
     slug: "discord-verification-message",
-    title: "Discord Verification Message — one-click verify button | DWEEB",
+    // 2026-10-16: its queries all say "template" ("verify template discord",
+    // "discord verification message template"); the title now does too.
+    title: "Discord Verification Message Template — Verify Button | DWEEB",
     h1: "Discord Verification Gate Template",
     description:
       "A one-click Discord verification panel that uses RoleLogic to check member origin and grant a matching role. Posts by webhook; RoleLogic setup required.",
@@ -515,7 +520,9 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   "reaction-roles": {
     slug: "discord-reaction-roles-menu",
-    title: "Discord Reaction Roles Menu — self-assign roles | DWEEB",
+    // 2026-10-16: "discord reaction roles template" / "reaction roles template"
+    // reach this page at position 6-7; the title now names the template.
+    title: "Discord Reaction Roles Template — Self-Assign Role Menu | DWEEB",
     h1: "Discord Reaction Roles Menu Template",
     description:
       "A Discord reaction roles menu: members self-assign roles by interest from a dropdown. Pairs with the Self Role plugin — customize the options and post.",
@@ -668,12 +675,18 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   "help-center": {
     slug: "discord-help-center-template",
-    title: "Discord Help Center: FAQ & Ticket Template | DWEEB",
-    h1: "Discord Help Center Template",
+    // 2026-10-16: the queries that reach this page are ticket searches —
+    // "discord ticket template", "ticket message template discord", "ticket
+    // panel discord" (position ~8) — while "help center" brings nothing. The
+    // catalogue deliberately has one ticket template (the standalone "Support
+    // desk" was folded into this one on 2026-07-03), so this page leads with the
+    // ticket panel instead of a second template competing for the same query.
+    title: "Discord Ticket Panel Template with FAQ Menu | DWEEB",
+    h1: "Discord Ticket Panel & Help Center Template",
     description:
-      "A Discord help center with a self-serve FAQ menu and private topic tickets. Configure DWEEB's Quick Replies and Tickets plugins in one panel.",
+      "A Discord ticket panel template: members pick a topic to open a private ticket, after a self-serve FAQ menu answers the common questions. Pairs with Tickets.",
     intro:
-      "Turn one message into your server's entire support desk. The first menu answers the questions you get every day on the spot — privately, instantly, no staff needed. The second opens a private ticket on the member's chosen topic for everything the FAQ can't solve. Members self-serve first and escalate second, so your team only sees the tickets that actually need a human.",
+      "A ticket panel is the message members use to reach your staff privately: they pick a topic, and a private channel opens with them and the team. This template places one under a self-serve FAQ menu, turning one message into your server's entire support desk. The first menu answers the questions you get every day on the spot — privately, instantly, no staff needed. The second opens a private ticket on the member's chosen topic for everything the FAQ can't solve. Members self-serve first and escalate second, so your team only sees the tickets that actually need a human.",
     whenToUse: [
       "Building a full support hub for a busy server",
       "Deflecting repeat questions before they become tickets",

@@ -2,6 +2,18 @@
   "schemaVersion": 1,
   "generator": "scripts/gen-template-og.ts",
   "assets": {
+    "/guides-og/discord-color-codes.png": {
+      "sourceSvgSha256": "b4e889495a3e73705b0f03dfc242cf51d76dc26a05f05c4c6407f184b52c8168",
+      "pngSha256": "889cca0841152e90c38095c98ab706f7d47fd63036045fbb353f6f460b485377",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-colored-text.png": {
+      "sourceSvgSha256": "8949c222b601a29e77d372447d549cea9d749bda1e6a954498a25eb52c0e6a3f",
+      "pngSha256": "68f023f0efba71d5c4707620aa9e6b28486996e15cf77dae6a4f9a3670c80e65",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/discord-components-v2.png": {
       "sourceSvgSha256": "a0d45945ef7a248d085f09763546c6e1d6be7944d12ea3f8f1aeb8af721a02cf",
       "pngSha256": "3e15cb9bf3208ee33ff740c25f5c12fee3e3554a890c92efd4c62b180894e8fb",
@@ -111,8 +123,8 @@
       "height": 630
     },
     "/guides-og/guides.png": {
-      "sourceSvgSha256": "7122f5135680c15a46d1c6438d849b760a7cb68d2d417faf870f8131836c885d",
-      "pngSha256": "4db1c384dde6b96c62c5ceff43d3233702340d20a03bec022138ae21d113e6f7",
+      "sourceSvgSha256": "819a834cae05241a89a5ef7b94d773b388a0ae5db1c7564da4ff2ec10d68bc90",
+      "pngSha256": "11a92258eb656b05519577e5973a2ecc7d42486fd99fcf555741970321785424",
       "width": 1200,
       "height": 630
     },

@@ -3,8 +3,25 @@
 import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 import { CODE_GUIDE_INPUTS } from "./code-guides";
+import { colorFormats } from "@/core/color/colorCode";
+import {
+  BRAND_COLORS,
+  DEFAULT_ROLE_COLOR,
+  LIBRARY_COLORS,
+  PALETTE_2021,
+  ROLE_PRESETS,
+} from "./tools/color-data";
 
-export const GUIDES_LASTMOD = "2026-10-15";
+/** A number as prose writes it: 5,793,266. */
+const num = (value: number) => value.toLocaleString("en-US");
+
+/** One color as a table row: name, hex, decimal and an optional note. */
+function colorRow(name: string, value: number, note?: string): string[] {
+  const f = colorFormats(value);
+  return note === undefined ? [name, f.hex, f.decimal] : [name, f.hex, f.decimal, note];
+}
+
+export const GUIDES_LASTMOD = "2026-10-16";
 
 export interface GuideSection {
   heading: string;
@@ -38,7 +55,12 @@ export interface GuidePage {
    * still read as a complete guide without it: the tool's static markup is a
    * worked example, and the script only makes it live.
    */
-  tool?: "timestamp-generator" | "markdown-preview" | "rules-generator";
+  tool?:
+    | "timestamp-generator"
+    | "markdown-preview"
+    | "rules-generator"
+    | "colored-text-generator"
+    | "color-converter";
   sources: { label: string; url: string }[];
   related: string[];
   ctaLabel: string;
@@ -73,7 +95,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-10-15",
+    modified: "2026-10-16",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -122,7 +144,7 @@ export const GUIDES: GuidePage[] = [
             ],
             [
               "Container (17)",
-              "An embed-like group with an optional accent colour",
+              "An embed-like group with an optional [accent colour](/guides/discord-color-codes/)",
               "Containers cannot be nested",
             ],
             [
@@ -850,7 +872,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Reference · Markdown & formatting",
     lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. Try any message in the live preview below, then use the reference after it for the full syntax and the edge cases DWEEB's preview parser is tested against real Discord clients for.",
     published: "2026-07-17",
-    modified: "2026-10-15",
+    modified: "2026-10-16",
     keywords: [
       "discord text formatting",
       "discord markdown",
@@ -876,7 +898,7 @@ export const GUIDES: GuidePage[] = [
             [
               "```lang```",
               "Code block",
-              "Multi-line; DWEEB preserves the language tag but its preview does not add syntax colours",
+              "Multi-line; an ansi block colours text with escape codes — make them with the [colored text generator](/guides/discord-colored-text/)",
             ],
             ["> text", "Quote", ">>> quotes every following line"],
             ["# / ## / ### text", "Heading 1–3", "Must start the line"],
@@ -893,7 +915,7 @@ export const GUIDES: GuidePage[] = [
       {
         heading: "Quirks Discord actually enforces",
         paragraphs: [
-          "These are the rules that make a message render differently in Discord than in a generic markdown previewer. DWEEB's preview parser has regression tests based on live Discord checks. The preview still has documented differences such as native emoji artwork, font fallbacks and no code syntax highlighting; review the final message in its destination channel.",
+          "These are the rules that make a message render differently in Discord than in a generic markdown previewer. DWEEB's preview parser has regression tests based on live Discord checks. The preview still has documented differences such as native emoji artwork, font fallbacks and no syntax highlighting beyond ansi colors; review the final message in its destination channel.",
         ],
         bullets: [
           "*italics* needs a non-space character right after the opening asterisk: `* text*` stays literal, which keeps math like 3 * 4 * 5 intact.",
@@ -965,10 +987,10 @@ export const GUIDES: GuidePage[] = [
       },
     ],
     related: [
+      "discord-colored-text",
       "discord-timestamp-format",
       "discord-server-rules",
       "discord-components-v2",
-      "discord-webhook-limits",
     ],
     faq: [
       {
@@ -985,7 +1007,7 @@ export const GUIDES: GuidePage[] = [
       },
       {
         q: "Can I write coloured text or math in Discord?",
-        a: "There is no colour or LaTeX syntax. The usual workaround for colour is a code block with a language tag, such as diff (lines starting with + or -) or ansi with escape codes, which the desktop and web apps highlight; other clients may show it as plain code. Math stays plain text or goes in a code block.",
+        a: "Ordinary text has no colour syntax, but a code block tagged ansi colours the text inside it with escape codes, which the colored text generator guide makes for you; a diff block also tints lines starting with + green and - red. The desktop and browser apps show the colours, while the phone apps have long shown plain code. There is no LaTeX: math stays plain text or goes in a code block.",
       },
       {
         q: "Why is my Discord formatting not working?",
@@ -997,6 +1019,385 @@ export const GUIDES: GuidePage[] = [
       },
     ],
     ctaLabel: "Try the formatting live",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-colored-text",
+    // 2026-10-16: "discord colored text" (and "…generator", "discord ansi",
+    // "discord text effects") is a large search family the site had no page
+    // for, and the pages that rank for it describe the 2022 feature. Every
+    // code, color and renderer difference here was read off discord.com's own
+    // bundle and CSS that day — see src/features/preview/markdown/ansi.ts.
+    title: "Discord Colored Text Generator & All ANSI Color Codes | DWEEB",
+    h1: "Discord Colored Text: Generator and ANSI Color Codes",
+    description:
+      "Make colored text for Discord: pick colors, copy the ansi code block and paste. Every ANSI code Discord draws in 2026, from 16 colors to RGB, bold and italic.",
+    eyebrow: "Tool + reference · Text formatting",
+    lede: "Discord has no color syntax for ordinary text, but it colors the inside of a code block tagged ansi. Color your text in the generator and copy it with the invisible escape codes already in place, then use the reference below for every code Discord accepts — including the bright, RGB and italic codes it began rolling out in October 2026, and what readers on older clients see instead.",
+    published: "2026-10-16",
+    modified: "2026-10-16",
+    keywords: [
+      "discord colored text",
+      "discord colored text generator",
+      "discord ansi color codes",
+      "how to color text in discord",
+      "discord color text",
+      "discord ansi",
+    ],
+    tool: "colored-text-generator",
+    sections: [
+      {
+        heading: "How colored text works in Discord",
+        paragraphs: [
+          "Discord's markdown has no color syntax: bold, italics and headers are as far as ordinary text goes. Inside a code block, though, Discord highlights code by its language, and the ansi language reads the color codes terminals use. Each code is the escape character (ESC), a left bracket, numbers separated by semicolons and the letter m. ESC[31m turns the text after it red; ESC[0m puts everything back to normal.",
+          "The escape character is invisible and cannot be typed on a keyboard, which is why colored text is copied from a generator rather than written by hand. In the example below it is written \\u001b so you can see where it goes; in Discord it has to be the real character, and in a bot or a webhook's JSON you write it exactly as \\u001b.",
+        ],
+        code: `\`\`\`ansi
+\\u001b[1;31mBold red\\u001b[0m and normal text, then \\u001b[32mgreen\\u001b[0m.
+\`\`\``,
+      },
+      {
+        heading: "Text and background color codes",
+        paragraphs: [
+          "Each color has a text code and a background code ten higher. The bright set (✦) is drawn only by Discord's newer renderer; the next section shows what every reader gets.",
+        ],
+        table: {
+          headers: ["Color", "Text", "Background", "Bright text ✦", "Bright background ✦"],
+          rows: [
+            ["Black", "30", "40", "90", "100"],
+            ["Red", "31", "41", "91", "101"],
+            ["Green", "32", "42", "92", "102"],
+            ["Yellow", "33", "43", "93", "103"],
+            ["Blue", "34", "44", "94", "104"],
+            ["Magenta (pink)", "35", "45", "95", "105"],
+            ["Cyan", "36", "46", "96", "106"],
+            ["White (light gray)", "37", "47", "97", "107"],
+          ],
+        },
+      },
+      {
+        heading: "What each color looks like in each theme",
+        paragraphs: [
+          "The named colors are theme colors: Discord picks a shade for each of its four appearance themes so the text stays readable. These are the values it uses, measured from Discord's own stylesheet in October 2026. Black is pure black in every theme, so it disappears on Onyx; white is the same light gray everywhere, and bright white is pure white.",
+        ],
+        table: {
+          headers: ["Code", "Light", "Ash", "Dark", "Onyx"],
+          rows: [
+            ["31 red", "#e75858", "#ec6361", "#de464a", "#ca2b37"],
+            ["32 green", "#399b5d", "#45a366", "#1b8d4d", "#017b40"],
+            ["33 yellow", "#c07600", "#ce8100", "#b36c00", "#9d5a00"],
+            ["34 blue", "#3789ea", "#4591ec", "#1a7ce6", "#0268ca"],
+            ["35 magenta", "#e444bb", "#f549c9", "#d53fae", "#b73495"],
+            ["36 cyan", "#0098a3", "#049faa", "#008995", "#00757f"],
+            ["37 white", "#b6b7bc", "#b6b7bc", "#b6b7bc", "#b6b7bc"],
+            ["90 bright black ✦", "#70717a", "#70717a", "#70717a", "#70717a"],
+            ["91 bright red ✦", "#ca2b37", "#ff938e", "#f47470", "#e55455"],
+            ["92 bright green ✦", "#108e4d", "#21bb63", "#21bb63", "#108e4d"],
+            ["93 bright yellow ✦", "#db6e00", "#e79418", "#e79418", "#db6e00"],
+            ["94 bright blue ✦", "#5865f2", "#a0a9fa", "#5865f2", "#5865f2"],
+            ["95 bright magenta ✦", "#b3269c", "#fd99e9", "#ff4cd2", "#ff4cd2"],
+            ["96 bright cyan ✦", "#007782", "#5fbfc8", "#2fa9b3", "#0096a1"],
+          ],
+        },
+      },
+      {
+        heading: "Bold, underline, italic and strikethrough codes",
+        paragraphs: [
+          "Codes combine in one sequence: ESC[1;4;32m is bold, underlined green. Discord applies every reset in a sequence before any new style, so ESC[0;31m — reset, then red — is the safe way to switch from one style to the next, and it is what the generator writes. Dim (2), blink (5), reverse (7) and hidden (8) do nothing in Discord.",
+        ],
+        table: {
+          headers: ["Code", "Effect", "Turn just this off", "Every reader sees it?"],
+          rows: [
+            ["0", "Reset all colors and styles", "—", "Yes"],
+            ["1", "Bold", "22 ✦ (or reset with 0)", "Yes"],
+            ["4", "Underline", "24 ✦ (or reset with 0)", "Yes"],
+            ["3", "Italic", "23 ✦", "Newer renderer only"],
+            ["9", "Strikethrough", "29 ✦", "Newer renderer only"],
+            ["53", "Overline", "55 ✦", "Newer renderer only"],
+            ["39 / 49", "Default text / background color", "—", "Yes"],
+          ],
+        },
+      },
+      {
+        heading: "Any color: RGB and 256-color codes",
+        paragraphs: [
+          "Discord's newer renderer also reads the two extended color forms terminals use. ESC[38;2;R;G;Bm sets the text to any RGB color — ESC[38;2;255;122;0m is orange — and 48;2 does the same for the background. ESC[38;5;Nm picks entry N of the standard 256-color table: 0–15 are the sixteen named colors above, 16–231 a six-step color cube and 232–255 grays from near black to near white.",
+          "There is a trade-off. The named colors follow each reader's theme, so Discord keeps them readable on Light and on Onyx alike; an RGB color is the same everywhere, so a dark blue that reads well on Light can all but vanish on Onyx. Use named colors for anything people must read and keep RGB for accents.",
+        ],
+      },
+      {
+        heading: "What every reader sees",
+        paragraphs: [
+          "Since October 2026 Discord has been moving accounts to a new code renderer (in the web client it is the experiment 2026-03-arborium-highlight). Until it reaches everyone, two renderers read the same message differently:",
+        ],
+        table: {
+          headers: ["Feature", "Older renderer", "Newer renderer ✦"],
+          rows: [
+            ["8 text and background colors (30–37, 40–47)", "Yes", "Yes"],
+            ["Bold (1) and underline (4)", "Yes", "Yes"],
+            ["Bright colors (90–97, 100–107)", "Not drawn", "Yes"],
+            ["RGB and 256-color codes (38;…, 48;…)", "Not drawn", "Yes"],
+            ["Italic, strikethrough, overline (3, 9, 53)", "Not drawn", "Yes"],
+            ["Turning one style off (22–29, 55)", "Ignored", "Yes"],
+          ],
+        },
+        bullets: [
+          "Text styled with a code the older renderer does not draw simply shows uncolored there, so a message never breaks — it just loses some color for those readers.",
+          "Discord's phone apps have long shown an ansi block as plain code without any color. Treat color as decoration and keep the meaning in the words: a status should still say ONLINE or OFFLINE.",
+        ],
+      },
+      {
+        heading: "Colored text from a bot or a webhook",
+        paragraphs: [
+          "In code, write the escape inside the string: \\u001b in JSON, JavaScript, Java and C#, or \\x1b in Python and most shells. A webhook carries it the same way in its JSON body, and the code block colors the same in plain content, an embed description or a Components V2 Text Display — so a [webhook sent with cURL](/guides/discord-webhook-curl/) or [from Python](/guides/discord-webhook-python/) can post colored text without a bot.",
+          "Every escape sequence counts toward the message's character limit. ESC[0;1;31m is nine characters and an RGB sequence about eighteen, so per-letter rainbow effects run out of room long before a 2,000-character message does. The generator counts them for you.",
+        ],
+        code: `{
+  "content": "\`\`\`ansi\\n\\u001b[1;32mDeploy finished\\u001b[0m in 42s\\n\`\`\`"
+}
+
+// discord.js
+await channel.send("\`\`\`ansi\\n\\u001b[1;31mBuild failed\\u001b[0m\\n\`\`\`");
+
+# discord.py
+await channel.send("\`\`\`ansi\\n\\x1b[1;31mBuild failed\\x1b[0m\\n\`\`\`")`,
+      },
+      {
+        heading: "Why older color lists look wrong",
+        paragraphs: [
+          "Guides written before August 2026 describe a fixed palette in which 30 was gray and the backgrounds had names like firefly dark blue, marble blue and greyish turquoise. In August 2026 Discord moved the ansi colors into its themes: 30 is now true black, each background uses the same shade as its text color, and every color is tuned per theme, as in the table above. The codes themselves did not change, so older colored messages still render, just in the new shades.",
+        ],
+      },
+      {
+        heading: "Other ways to color text",
+        paragraphs: [
+          "Before ansi blocks people colored text with other code-block languages, and one still works: in a diff block, lines starting with + are tinted green and lines starting with - are tinted red. Only ansi can color individual words in the middle of a line.",
+          "Outside code blocks Discord colors names and role mentions with the role's color, and an embed or [Components V2 container](/guides/discord-components-v2/) carries an [accent color](/guides/discord-color-codes/) on its edge — but none of these color the words you write. For everything else Discord formats, see the [text formatting guide and live preview](/guides/discord-text-formatting/).",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do you make colored text in Discord?",
+        a: "Type your text in the generator above, select words and pick a color or style, then copy it and paste it into Discord. The copy is a code block tagged ansi with invisible escape codes inside, and Discord's desktop and browser apps color the text in it.",
+      },
+      {
+        q: "Can you color text in a normal Discord message without a code block?",
+        a: "No. Discord only colors text inside an ansi code block. Outside one, the only colors are role colors on names and mentions and the accent stripe of an embed or a Components V2 container.",
+      },
+      {
+        q: "Why does my message show [31m instead of colors?",
+        a: "The invisible escape character in front of each code was lost, usually because the code was typed by hand or copied from a page that dropped it. Copy the text from the generator instead. In a bot or a webhook's JSON, write the escape inside the string as \\u001b.",
+      },
+      {
+        q: "Does Discord colored text work on mobile?",
+        a: "Not reliably. Discord's phone apps have long shown ansi code blocks as plain code without colors, while the desktop and browser apps color them. Keep the meaning in the words rather than only in the color.",
+      },
+      {
+        q: "Can I use any color or hex code in Discord text?",
+        a: "Yes, with the RGB code ESC[38;2;R;G;Bm for text or 48;2 for a background, which the generator's Custom picker writes for you. Only readers on Discord's newer renderer, rolling out since October 2026, see it; others see that text uncolored.",
+      },
+      {
+        q: "Why do my colors look different to someone else?",
+        a: "The named colors follow each reader's theme, so red on Light is a different shade from red on Onyx by design. RGB colors look the same everywhere. A reader still on Discord's older renderer also sees only the eight basic colors, bold and underline.",
+      },
+      {
+        q: "Does colored text work in webhooks and embeds?",
+        a: "Yes. An ansi code block colors the same way in webhook content, embed descriptions and Components V2 Text Displays. In the JSON body, write the escape character as \\u001b.",
+      },
+    ],
+    sources: [
+      {
+        label: "Discord support: Markdown Text 101 (code blocks)",
+        url: "https://support.discord.com/hc/en-us/articles/210298617-Markdown-Text-101-Chat-Formatting-Bold-Italic-Underline",
+      },
+      {
+        label: "ECMA-48: Control functions for coded character sets (SGR)",
+        url: "https://ecma-international.org/publications-and-standards/standards/ecma-48/",
+      },
+      {
+        label: "XTerm control sequences: 256-color and RGB SGR forms",
+        url: "https://invisible-island.net/xterm/ctlseqs/ctlseqs.html",
+      },
+      {
+        label: "Rebane's Discord Colored Text Generator: 2026 changelog",
+        url: "https://rebane2001.com/discord-colored-text-generator/",
+      },
+    ],
+    related: [
+      "discord-text-formatting",
+      "discord-timestamp-format",
+      "discord-components-v2",
+      "discord-color-codes",
+    ],
+    ctaLabel: "Open the message builder",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-color-codes",
+    // 2026-10-16: raw color values ("0x5865f2", "0x57f287") were reaching
+    // template pages from search, and DWEEB had no page that explains the one
+    // thing every Discord color field shares — it is a single integer, which a
+    // JSON body needs in decimal. Every color below comes from its source as of
+    // that day (scripts/seo/tools/color-data.ts says which), and every number
+    // in the tables is computed from it rather than typed.
+    title: "Discord Color Codes: Embed Colors & Hex to Decimal | DWEEB",
+    h1: "Discord Color Codes: Embed, Role and Brand Colors",
+    description:
+      "Convert any color to the decimal Discord's JSON needs, and copy Discord's brand, role and discord.js / discord.py colors in hex and decimal. Free converter.",
+    eyebrow: "Tool + reference · Colors",
+    lede: "Discord stores every color as one number: an embed's color, a Components V2 container's accent and a role's color are all 0xRRGGBB integers, and a webhook's JSON needs them in decimal. Convert any color below, then copy Discord's own brand and role colors and the named colors discord.js and discord.py ship.",
+    published: "2026-10-16",
+    modified: "2026-10-16",
+    keywords: [
+      "discord color codes",
+      "discord embed color",
+      "discord hex to decimal",
+      "discord blurple hex code",
+      "discord.js colors",
+      "discord role colors",
+    ],
+    tool: "color-converter",
+    sections: [
+      {
+        heading: "Why Discord wants a decimal color",
+        paragraphs: [
+          `A color is three bytes — red, green and blue — and Discord keeps it as the single number they make: red × 65,536 + green × 256 + blue. Blurple, #5865F2, is 88 × 65,536 + 101 × 256 + 242 = ${num(0x5865f2)}. Code can write the same number as the hex literal 0x5865F2, but JSON has no hex notation, so a webhook's body carries the decimal: in a classic embed's color field, and in a Components V2 container's accent_color.`,
+          "Leave accent_color out for a container with no colored stripe. The two payloads below are separate messages, because a Components V2 message cannot also carry embeds.",
+        ],
+        code: `{
+  "embeds": [{ "title": "A classic embed", "color": ${0x5865f2} }]
+}
+
+{
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": ${0x5865f2},
+      "components": [{ "type": 10, "content": "A Components V2 container" }]
+    }
+  ]
+}`,
+      },
+      {
+        heading: "Discord's brand colors",
+        paragraphs: [
+          `Discord's branding page lists three colors today: Blurple, Light Blurple and Black. The brighter green, yellow, fuchsia and red of its 2021 palette are no longer on that page, but discord.js and discord.py still name them, so they turn up in bots everywhere. The blurple Discord used before its 2021 rebrand, #7289DA (${num(0x7289da)}), survives as discord.py's og_blurple().`,
+        ],
+        table: {
+          headers: ["Color", "Hex", "Decimal", "Where it comes from"],
+          rows: [
+            ...BRAND_COLORS.map((c) => colorRow(c.name, c.value, "Discord's branding page")),
+            ...PALETTE_2021.map((c) =>
+              colorRow(c.name, c.value, "2021 palette, still in discord.js / discord.py"),
+            ),
+            colorRow("Old blurple", 0x7289da, "Before the 2021 rebrand"),
+          ],
+        },
+      },
+      {
+        heading: "Discord role color presets",
+        paragraphs: [
+          `The role color picker in Server Settings offers twenty swatches: ten colors and a darker shade of each. Discord shows them without names, so the names here are only descriptive. A role with no color of its own is stored as 0 and shows as #99AAB5 (${num(DEFAULT_ROLE_COLOR)}), and any hex code works if none of the presets fits.`,
+        ],
+        table: {
+          headers: ["Swatch", "Hex", "Decimal"],
+          rows: [
+            ...ROLE_PRESETS.map((c) => colorRow(c.name, c.value).slice(0, 3)),
+            colorRow("No color (default)", DEFAULT_ROLE_COLOR).slice(0, 3),
+          ],
+        },
+      },
+      {
+        heading: "discord.js and discord.py color names",
+        paragraphs: [
+          "Both libraries ship named colors, and they disagree in places that bite: discord.js Colors.Green is the bright 2021 brand green #57F287 while discord.py's Colour.green() is the role picker's #2ECC71, discord.js Red is #ED4245 against discord.py red()'s #E74C3C, and each library's grey names point at different shades. Match on the hex, not the name. discord.py also offers the app's theme backgrounds (ash_theme(), dark_theme() and so on); they are background shades rather than accents, so they are not listed here.",
+        ],
+        table: {
+          headers: ["Hex", "Decimal", "discord.js Colors", "discord.py Colour"],
+          rows: LIBRARY_COLORS.map((c) => {
+            const f = colorFormats(c.value);
+            return [f.hex, f.decimal, c.js ?? "—", c.py ?? "—"];
+          }),
+        },
+      },
+      {
+        heading: "Convert between hex and decimal in code",
+        paragraphs: [
+          "Every language that talks to Discord can do the conversion in one call, and both libraries also accept the literal directly.",
+        ],
+        code: `// JavaScript
+parseInt("5865F2", 16);       // ${0x5865f2}
+(${0x5865f2}).toString(16);       // "5865f2"
+0x5865f2;                     // ${0x5865f2}
+
+# Python
+int("5865F2", 16)             # ${0x5865f2}
+f"{${0x5865f2}:06X}"              # '5865F2'
+0x5865F2                      # ${0x5865f2}`,
+      },
+      {
+        heading: "Picking an accent color that works",
+        bullets: [
+          "The stripe is narrow, so saturated colors read best. Very pale ones such as Light Blurple almost vanish on the Light theme, and very dark ones on Dark and Onyx.",
+          "Keep one color per purpose — rules, announcements, alerts — so members learn what a stripe means at a glance.",
+          "Color is a cue, not the message: say it in the text as well, for readers who cannot tell the colors apart.",
+          "To color the words themselves, use an ansi code block — the [colored text generator](/guides/discord-colored-text/) writes one for you.",
+        ],
+        paragraphs: [
+          "Accent colors are a Container setting in the [Components V2 guide](/guides/discord-components-v2/), and the [embed builder](/discord-embed-builder/) shows how a classic embed's color carries over when you convert it.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is Discord's blurple hex code?",
+        a: `#5865F2, which is ${0x5865f2} in decimal and 0x5865F2 in code. The blurple Discord used before its 2021 rebrand was #7289DA (${0x7289da}).`,
+      },
+      {
+        q: "How do I set an embed color in a Discord webhook?",
+        a: `Send the color as a decimal number: in a classic embed's color field, or in a Components V2 container's accent_color — ${0x5865f2} for blurple. JSON has no hex notation, so write the number rather than "#5865F2".`,
+      },
+      {
+        q: "How do I convert a hex color to decimal for Discord?",
+        a: 'Paste it into the converter on this page, or work it out as red × 65,536 + green × 256 + blue. In code, parseInt("5865F2", 16) in JavaScript or int("5865F2", 16) in Python does it.',
+      },
+      {
+        q: "What are Discord's default role colors?",
+        a: "The role color picker offers twenty presets — ten colors and a darker shade of each — listed in the table above. A role with no color of its own shows as #99AAB5.",
+      },
+      {
+        q: "Why does discord.js Green look different from discord.py green?",
+        a: "They are different colors. discord.js Colors.Green is Discord's 2021 brand green #57F287, while discord.py's Colour.green() is the role picker's #2ECC71; discord.py calls the brand one brand_green(). Red differs the same way.",
+      },
+    ],
+    sources: [
+      { label: "Discord: Branding guidelines (brand colors)", url: "https://discord.com/branding" },
+      {
+        label: "Discord API: Embed object (color)",
+        url: "https://docs.discord.com/developers/resources/message#embed-object",
+      },
+      {
+        label: "Discord API: Components reference (Container accent_color)",
+        url: "https://docs.discord.com/developers/components/reference",
+      },
+      {
+        label: "discord.js: Colors",
+        url: "https://github.com/discordjs/discord.js/blob/main/packages/discord.js/src/util/Colors.js",
+      },
+      {
+        label: "discord.py: Colour",
+        url: "https://github.com/Rapptz/discord.py/blob/master/discord/colour.py",
+      },
+    ],
+    related: [
+      "discord-colored-text",
+      "discord-components-v2",
+      "discord-embed-to-components-v2",
+      "discord-js-components-v2",
+    ],
+    ctaLabel: "Build a card in your color",
     ctaPath: "/",
   }),
   guide({
@@ -1016,7 +1417,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Tool and reference · Dynamic timestamps",
     lede: 'A Discord timestamp token like <t:1767225600:F> renders as a real date in every reader\'s own timezone and language — no more "8 PM EST / 1 AM UTC" tables in event posts. Pick a moment in the generator below and copy a code; the reference after it explains all nine styles, how to produce the number in code, and the mistakes that break a timestamp.',
     published: "2026-07-17",
-    modified: "2026-10-15",
+    modified: "2026-10-16",
     keywords: [
       "discord timestamp generator",
       "discord timestamp format",
@@ -1223,7 +1624,12 @@ date +%s
         url: "https://discordpy.readthedocs.io/en/stable/api.html#discord.utils.format_dt",
       },
     ],
-    related: ["discord-text-formatting", "discord-components-v2", "edit-discord-webhook-message"],
+    related: [
+      "discord-text-formatting",
+      "discord-colored-text",
+      "discord-components-v2",
+      "edit-discord-webhook-message",
+    ],
     ctaLabel: "Insert a timestamp with the visual picker",
     ctaPath: "/",
   }),
@@ -2780,13 +3186,15 @@ const WEBHOOK_BUILDER_LANDING = landing({
   // 2026-09-23: "discord webhook sender / tester / maker / creator" searches
   // sat at position 40-50 with the page saying none of those words; the tool
   // does all of them, so the snippet now says so.
-  title: "Discord Webhook Builder & Sender with Live Preview | DWEEB",
+  // 2026-10-16: "discord webhook editor" (position 5.9-7.2) and "webhook
+  // editor" (9.1) earned no clicks with a title that never said "editor".
+  title: "Discord Webhook Builder, Sender & Editor — Live Preview | DWEEB",
   h1: "Discord Webhook Message Builder",
   breadcrumb: "Discord Webhook Message Builder",
   chip: "🛠️ Visual builder",
   lede: "Use a visual Discord webhook message builder to design, preview, test, send, restore and schedule Components V2 messages from one editor.",
   description:
-    "Build, test and send Discord webhook messages visually: live preview, JSON import and export, and restore-and-edit — free, no account. Sign in to schedule.",
+    "Build, test, send and edit Discord webhook messages visually: live preview, JSON import and export, restore-and-edit of posts — free, no account needed.",
   keywords: [
     "discord webhook message builder",
     "discord webhook builder",
@@ -2909,7 +3317,7 @@ const EMBED_BUILDER_LANDING = landing({
     "discord embed maker",
     "discord embed json",
   ],
-  modified: "2026-08-20",
+  modified: "2026-10-16",
   ctaLabel: "Build an embed-style message free",
   ogCategory: "Embed converter · Components V2",
   ogKicker: "Import · Convert · Preview · Send",
@@ -2953,7 +3361,11 @@ const EMBED_BUILDER_LANDING = landing({
       table: {
         headers: ["Classic embed part", "Modern equivalent in the builder", "What improves"],
         rows: [
-          ["Accent color stripe", "Container accent color", "Familiar stripe, same hex value"],
+          [
+            "Accent color stripe",
+            "Container accent color",
+            "Same color — [convert hex to decimal](/guides/discord-color-codes/)",
+          ],
           ["Title + URL", "Heading text (optionally linked)", "Three heading sizes instead of one"],
           ["Description", "Text Display", "Full markdown including subtext and lists"],
           ["Thumbnail", "Section with a thumbnail accessory", "Text wraps beside it deliberately"],

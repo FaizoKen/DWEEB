@@ -14,6 +14,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MARKDOWN_PREVIEW_SCRIPT } from "./markdown-preview";
+import { COLOR_CONVERTER_SCRIPT } from "./color-converter";
+import { COLORED_TEXT_SCRIPT } from "./colored-text";
 import { RULES_GENERATOR_SCRIPT } from "./rules-generator";
 import { TIMESTAMP_TOOL_SCRIPT } from "./timestamp-generator";
 
@@ -43,6 +45,14 @@ const TOOL_ENTRIES: readonly { entry: string; publicPath: string }[] = [
   {
     entry: fileURLToPath(new URL("./rules-generator.client.ts", import.meta.url)),
     publicPath: RULES_GENERATOR_SCRIPT,
+  },
+  {
+    entry: fileURLToPath(new URL("./colored-text.client.ts", import.meta.url)),
+    publicPath: COLORED_TEXT_SCRIPT,
+  },
+  {
+    entry: fileURLToPath(new URL("./color-converter.client.ts", import.meta.url)),
+    publicPath: COLOR_CONVERTER_SCRIPT,
   },
 ];
 

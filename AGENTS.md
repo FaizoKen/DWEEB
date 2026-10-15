@@ -1347,6 +1347,40 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   templates drop, give them page-specific substance, not more shared boilerplate. Many guide
   impressions come from AI-Mode-style follow-ups ("still nothing", "method 1 isnt working", in
   several languages) — a citation, not a ranking, so judge guide CTR with that in mind.
+- **Discord colored text (```ansi) is parsed the way Discord parses it, with measured colors**
+  (2026-10-16). `src/features/preview/markdown/ansi.ts` is a port of the parser in
+  discord.com's own web bundle (the module whose CSI regex is `\x1B\[([0-?]*)([ -/]*)([@-~])`);
+  a 20,000-case random differential run against that module found 0 mismatches. Its quirks are
+  Discord's, so don't "fix" them: inside one sequence every reset applies before every set
+  (`ESC[31;0m` is red), `ESC[m` changes nothing, dim/reverse/hidden are tracked but never drawn,
+  `22` clears dim *and* bold, and a malformed `38;2;…` still consumes its arguments. **Two
+  renderers are live**: the new one (user experiment `2026-03-arborium-highlight`, rolling out
+  since Oct 2026) reads 16 named colors (30–37/90–97, 40–47/100–107), `38;5;n`, `38;2;r;g;b`,
+  italic, strikethrough and overline; the older highlight.js one reads only `LEGACY_SGR_CODES`
+  (0, 1, 4, 30–37, 40–47) and draws everything else uncolored — `usesExtendedAnsi` is that test,
+  and copy must never promise the extended codes to every reader. Phones have long shown ansi
+  blocks uncolored (third-party reports, not measured). The colors are theme colors since Aug
+  2026: `ANSI_PALETTES` holds `--ansi-*` resolved per theme (`.theme-dark` = Ash, `.theme-darker`
+  = Dark, `.theme-midnight` = Onyx, `.theme-light`). Re-measure by downloading discord.com/app's
+  CSS/JS and grepping `--ansi-` and `custom-ansi-color`, never from third-party color lists
+  (they still describe the 2022 Solarized palette). The editor preview colors ansi blocks with
+  the **Ash** palette (the canvas is classic dark's #313338, Ash's surface is #323339 — keep the
+  pair in one theme) through `ansiRender.tsx`, **loaded lazily**: `Markdown.tsx` is on the boot
+  path, and after this the critical bundle measured 179,916 gzip / 586,481 raw bytes against the
+  180,000 / 590,000 budgets — 84 bytes of gzip headroom, so the next boot-path addition needs a
+  budget decision, not a squeeze. `encodeAnsi` writes one `ESC[0;…m` per style change, which both
+  renderers read identically. Two guides carry tools built on it:
+  `/guides/discord-colored-text/` (generator: its truth is styled runs, the contenteditable is
+  re-read on every input and re-rendered, paste of a fenced ansi block restores colors) and
+  `/guides/discord-color-codes/` (hex/decimal converter over `src/core/color/colorCode.ts`;
+  every color in `scripts/seo/tools/color-data.ts` is from its named source — branding page,
+  Discord's role-picker array in the web bundle, discord.js `Colors.js`, discord.py
+  `colour.py` — and every table number is computed, never typed). discord.js and discord.py
+  disagree on names (`Colors.Green` #57F287 vs `green()` #2ECC71; Red likewise; greys swapped);
+  discord.py's theme-background colors are deliberately left out because two of them disagree
+  with Discord's current CSS. The template catalogue's one ticket template is Help center (the
+  standalone one was folded into it 2026-07-03), so it is titled as a ticket panel rather than a
+  second ticket template being added.
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
   template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then

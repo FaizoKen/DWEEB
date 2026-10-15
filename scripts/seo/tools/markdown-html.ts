@@ -20,7 +20,9 @@
  * compete with the page's headings.
  */
 
+import { isAnsiLanguage } from "@/features/preview/markdown/ansi";
 import { parseMarkdown, type BlockNode, type InlineNode } from "@/features/preview/markdown/parse";
+import { ansiSourceHtml } from "./ansi-html";
 
 /** Renders a timestamp token's visible text; injected so the build stays locale-free. */
 export type TimestampFormatter = (unix: number, style: string) => string;
@@ -113,6 +115,10 @@ function block(node: BlockNode, ts: TimestampFormatter): string {
         : `<ul class="md-list">${items}</ul>`;
     }
     case "codeblock":
+      // Colored like the editor's preview colors it: Ash, the theme its canvas matches.
+      if (isAnsiLanguage(node.lang)) {
+        return `<pre class="md-pre"><code>${ansiSourceHtml(node.value, "ash")}</code></pre>`;
+      }
       return `<pre class="md-pre"><code>${esc(node.value)}</code></pre>`;
   }
 }

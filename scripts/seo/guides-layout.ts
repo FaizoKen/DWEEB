@@ -31,6 +31,12 @@ import {
   RULES_GENERATOR_SCRIPT,
   rulesGeneratorHtml,
 } from "./tools/rules-generator";
+import { COLORED_TEXT_CSS, COLORED_TEXT_SCRIPT, coloredTextHtml } from "./tools/colored-text";
+import {
+  COLOR_CONVERTER_CSS,
+  COLOR_CONVERTER_SCRIPT,
+  colorConverterHtml,
+} from "./tools/color-converter";
 
 /**
  * Interactive tools a guide can carry (`GuidePage.tool`): the static markup,
@@ -56,6 +62,16 @@ const GUIDE_TOOLS: Record<
     html: rulesGeneratorHtml,
     script: RULES_GENERATOR_SCRIPT,
     css: RULES_GENERATOR_CSS,
+  },
+  "colored-text-generator": {
+    html: coloredTextHtml,
+    script: COLORED_TEXT_SCRIPT,
+    css: COLORED_TEXT_CSS,
+  },
+  "color-converter": {
+    html: colorConverterHtml,
+    script: COLOR_CONVERTER_SCRIPT,
+    css: COLOR_CONVERTER_CSS,
   },
 };
 
