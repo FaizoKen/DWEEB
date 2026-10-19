@@ -306,8 +306,10 @@ fn is_repaired_dom_desync(kind: &str) -> bool {
 /// Mirrors `EXTENSION_SCHEMES` in `src/core/telemetry/crashReport.ts`; both are
 /// pinned by `foreign-code-vectors.json`, which the tests below run. Add a
 /// scheme only on evidence that it reaches page stacks on an engine DWEEB can
-/// boot on — and never http(s): the client promotes an http(s) frame into the
-/// wire stack precisely because no change here can ever count one as foreign.
+/// boot on — and never http(s): the client promotes an http(s) frame of ours
+/// into the wire stack precisely because no change here can ever count one as
+/// foreign. (Third-party *hosts* are a separate, exact list:
+/// [`THIRD_PARTY_SCRIPT_HOSTS`].)
 const EXTENSION_SCHEMES: [&str; 5] = [
     "chrome-extension",
     "moz-extension",
@@ -324,18 +326,42 @@ const EXTENSION_SCHEMES: [&str; 5] = [
 /// any code that has no URL.)
 const GECKO_MAIN_WORLD: &str = "<anonymous code>";
 
+/// Hosts of third-party scripts the page loads but DWEEB does not ship: their
+/// code is no more ours than an extension's. A location is one of theirs only
+/// when an `https` scheme run is followed **directly** by `<host>/` (the host
+/// compared ASCII-case-insensitively) — how every engine prints the URL a
+/// script was loaded from — so a longer host, userinfo, a port, plain http, the
+/// host in a path, or a URL cut before its `/` all read as ours.
+///
+/// `www.googletagmanager.com` serves gtag.js. On 2026-10-19 (build
+/// `a3450ef53b`) a popup blocker's page-world fetch hook (Poper Blocker's
+/// `injectScriptAdjust.js`) inspected gtag's analytics request in an async
+/// function whose promise it drops, so a failed hit paged as
+/// `kind=unhandledrejection frames=mixed`: the hook's two frames over gtag's,
+/// nothing of ours. gtag catches its own failure, and without the hook the same
+/// failed hits leak nothing. Any frame of ours still makes a stack ours,
+/// `gtag-init.js` included — it is served from our origin.
+///
+/// Mirrors `THIRD_PARTY_SCRIPT_HOSTS` in `src/core/telemetry/crashReport.ts`;
+/// both are pinned by `foreign-code-vectors.json`. Add a host only on evidence
+/// (a beacon naming it), only for code we load but never ship, and lowercase.
+const THIRD_PARTY_SCRIPT_HOSTS: [&str; 1] = ["www.googletagmanager.com"];
+
 /// Whose code a stack names, from every location in it (see [`frame_origin`]).
 /// Logged as `frames=` on both the demoted and the paging crash line, so a page
-/// says at a glance whether an extension was in the stack (`mixed`).
+/// says at a glance whether someone else's code was in the stack (`mixed`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrameOrigin {
     /// No location at all.
     None,
-    /// Locations, none of them an extension's.
+    /// Locations, every one of them ours.
     Page,
     /// Locations, every one of them an extension's.
     Extension,
-    /// Both.
+    /// Locations, none of them ours, at least one a third-party script's (an
+    /// extension's beside it or not).
+    ThirdParty,
+    /// Ours beside someone else's.
     Mixed,
 }
 
@@ -345,9 +371,19 @@ impl std::fmt::Display for FrameOrigin {
             Self::None => "none",
             Self::Page => "page",
             Self::Extension => "extension",
+            Self::ThirdParty => "third-party",
             Self::Mixed => "mixed",
         })
     }
+}
+
+/// Whose code one location is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owner {
+    /// Anything that is neither of the others — a malformed run included.
+    Ours,
+    Extension,
+    ThirdParty,
 }
 
 /// `[A-Za-z0-9+.-]`: the characters a URL scheme is made of (RFC 3986).
@@ -355,17 +391,39 @@ fn is_scheme_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')
 }
 
-/// The whole scheme run before every `://` in `stack`, left to right, possibly
-/// empty. Every byte of a run is ASCII, so both of its ends are char
-/// boundaries — and the client's UTF-16 scan finds exactly the same runs.
-fn location_schemes(stack: &str) -> impl Iterator<Item = &str> + '_ {
+/// Whose code each `://` in `stack` names, left to right, judged from the whole
+/// scheme run before it (possibly empty) and, for `https`, the host right after
+/// it. Every byte of a run is ASCII, so both of its ends are char boundaries —
+/// and the client's UTF-16 scan finds exactly the same runs. The host compare
+/// is bytewise, so a non-ASCII character can never fold into a listed host.
+fn location_owners(stack: &str) -> impl Iterator<Item = Owner> + '_ {
     let bytes = stack.as_bytes();
     stack.match_indices("://").map(move |(at, _)| {
         let start = bytes[..at]
             .iter()
             .rposition(|&b| !is_scheme_byte(b))
             .map_or(0, |i| i + 1);
-        &stack[start..at]
+        let scheme = &stack[start..at];
+        let host_from = at + 3;
+        if EXTENSION_SCHEMES
+            .iter()
+            .any(|known| scheme.eq_ignore_ascii_case(known))
+        {
+            Owner::Extension
+        } else if scheme.eq_ignore_ascii_case("https")
+            && THIRD_PARTY_SCRIPT_HOSTS.iter().any(|host| {
+                bytes
+                    .get(host_from..host_from + host.len() + 1)
+                    .is_some_and(|b| {
+                        b[..host.len()].eq_ignore_ascii_case(host.as_bytes())
+                            && b[host.len()] == b'/'
+                    })
+            })
+        {
+            Owner::ThirdParty
+        } else {
+            Owner::Ours
+        }
     })
 }
 
@@ -373,29 +431,30 @@ fn location_schemes(stack: &str) -> impl Iterator<Item = &str> + '_ {
 /// run of scheme characters before it and compared whole, ASCII-case-
 /// insensitively, against [`EXTENSION_SCHEMES`] — so a malformed run
 /// (`1chrome-extension`, or none at all) counts as ours, the paging side — plus
-/// each [`GECKO_MAIN_WORLD`] token. Location-less frames (`<anonymous>`,
-/// `[native code]`, `async Promise.all (index 0)`, a bare `fn@`) are ignored,
-/// and so is layout: this reads the clamped stack, whose control characters
-/// [`clamp_field`] has already turned into spaces — the very text the client
-/// judges, since it maps them the same way before reading its own copy.
+/// each [`GECKO_MAIN_WORLD`] token; an `https` one is a third-party script's
+/// when a listed host follows its `://` ([`THIRD_PARTY_SCRIPT_HOSTS`]).
+/// Location-less frames (`<anonymous>`, `[native code]`,
+/// `async Promise.all (index 0)`, a bare `fn@`) are ignored, and so is layout:
+/// this reads the clamped stack, whose control characters [`clamp_field`] has
+/// already turned into spaces — the very text the client judges, since it maps
+/// them the same way before reading its own copy.
 fn frame_origin(stack: &str) -> FrameOrigin {
     let mut extension = stack.contains(GECKO_MAIN_WORLD);
-    let mut page = false;
-    for scheme in location_schemes(stack) {
-        if EXTENSION_SCHEMES
-            .iter()
-            .any(|known| scheme.eq_ignore_ascii_case(known))
-        {
-            extension = true;
-        } else {
-            page = true;
+    let mut third_party = false;
+    let mut ours = false;
+    for owner in location_owners(stack) {
+        match owner {
+            Owner::Extension => extension = true,
+            Owner::ThirdParty => third_party = true,
+            Owner::Ours => ours = true,
         }
     }
-    match (extension, page) {
-        (false, false) => FrameOrigin::None,
-        (false, true) => FrameOrigin::Page,
-        (true, false) => FrameOrigin::Extension,
-        (true, true) => FrameOrigin::Mixed,
+    match (ours, third_party, extension) {
+        (true, false, false) => FrameOrigin::Page,
+        (true, _, _) => FrameOrigin::Mixed,
+        (false, true, _) => FrameOrigin::ThirdParty,
+        (false, false, true) => FrameOrigin::Extension,
+        (false, false, false) => FrameOrigin::None,
     }
 }
 
@@ -416,12 +475,18 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 ///    `chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js` —
 ///    reported by build `e699a38eec`, a bundle ~25 days stale in a
 ///    service-worker cache. Only this function could stop that client paging.
+///  - 2026-10-19: a popup blocker's fetch hook dropped its own inspection of
+///    gtag's failed analytics request (`Failed to fetch`, two frames of the
+///    hook's over gtag.js's — see [`THIRD_PARTY_SCRIPT_HOSTS`]), reported by
+///    the live build. Every bundle up to it sends that shape, so this function
+///    is again what stops it paging.
 ///
 /// Three shapes are demoted to `info` (still greppable under `web_crash`, never
 /// a page):
 ///
-///  - **Extension-only** (`error` and `unhandledrejection`): the stack names at
-///    least one location and every one is an extension's ([`frame_origin`]).
+///  - **Someone else's only** (`error` and `unhandledrejection`): the stack
+///    names at least one location and every one is an extension's or a
+///    third-party script's ([`frame_origin`] = `extension` or `third-party`).
 ///    *Every* one, not just the top frame: an extension wrapping an API we call
 ///    sits above our own frame — `History.pushState (chrome-extension://…)` over
 ///    our misuse of it — and that must page.
@@ -450,17 +515,22 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 /// single extension frame hides ours whenever everything else in the window
 /// names nothing of ours — a long or multi-line V8 message, or URL-less lines
 /// such as V8's builtins (`at Array.forEach (<anonymous>)`) — but a fault of
-/// ours hidden that way still pages from every current bundle. Pinned,
-/// together with the client's twin, to `foreign-code-vectors.json`.
+/// ours hidden that way still pages from every current bundle. Bundles older
+/// than the third-party list promote only into a window with no http(s)
+/// location at all, so for them our frame under five lines of gtag's is hidden
+/// the same way; only our own `gtag()` call can put it there, and nothing on
+/// screen waits on that. Pinned, together with the client's twin, to
+/// `foreign-code-vectors.json`.
 fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
     let origin = frame_origin(stack);
+    let someone_elses = matches!(origin, FrameOrigin::Extension | FrameOrigin::ThirdParty);
     match kind {
         "error" => {
-            origin == FrameOrigin::Extension
+            someone_elses
                 || (!stack.is_empty() && origin == FrameOrigin::None)
                 || (stack.is_empty() && is_muted_script_error(message))
         }
-        "unhandledrejection" => origin == FrameOrigin::Extension,
+        "unhandledrejection" => someone_elses,
         _ => false,
     }
 }
@@ -632,7 +702,8 @@ fn log_crash(
     stack: &str,
 ) {
     // Whose code the stack names, logged on the two lines that turn on it: on a
-    // page, `frames=mixed` says an extension was in the stack beside ours.
+    // page, `frames=mixed` says someone else's code — an extension's or a
+    // third-party script's — was in the stack beside ours.
     let frames = frame_origin(stack);
 
     // Routine deploy skew stays greppable under the same target but at `info`,
@@ -676,8 +747,10 @@ fn log_crash(
         );
     } else if is_foreign_code_error(kind, message, stack) {
         // Someone else's code crashing in our visitors' pages — a browser
-        // extension (`frames=extension`), a userscript or console experiment
-        // (`frames=none`), a muted cross-origin script. Counted, never paged.
+        // extension (`frames=extension`), a third-party script we load, maybe
+        // beside an extension (`frames=third-party`), a userscript or console
+        // experiment (`frames=none`), a muted cross-origin script. Counted,
+        // never paged.
         // The client also declines to send these, but old clients ship from SW
         // caches for weeks; this branch is the authority (see
         // [`is_foreign_code_error`]).
@@ -1171,6 +1244,7 @@ mod tests {
     struct ForeignSpec {
         extension_schemes: Vec<String>,
         gecko_main_world: String,
+        third_party_script_hosts: Vec<String>,
         cases: Vec<ForeignCase>,
     }
 
@@ -1198,6 +1272,22 @@ mod tests {
         listed.sort_unstable();
         assert_eq!(ours, listed, "EXTENSION_SCHEMES drifted from the spec");
         assert_eq!(GECKO_MAIN_WORLD, spec.gecko_main_world);
+        let mut hosts = THIRD_PARTY_SCRIPT_HOSTS.to_vec();
+        hosts.sort_unstable();
+        let mut listed: Vec<&str> = spec
+            .third_party_script_hosts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(
+            hosts, listed,
+            "THIRD_PARTY_SCRIPT_HOSTS drifted from the spec"
+        );
+        // The match folds the stack's case, never the list's.
+        for host in THIRD_PARTY_SCRIPT_HOSTS {
+            assert_eq!(host, host.to_ascii_lowercase(), "{host} must be lowercase");
+        }
 
         let mut failures = Vec::new();
         for case in &spec.cases {
@@ -1320,6 +1410,55 @@ mod tests {
         assert!(is_foreign_code_error(&kind, &message, &stack));
         // Thrown rather than dropped, the same code is just as foreign.
         assert!(is_foreign_code_error("error", &message, &stack));
+    }
+
+    /// The 2026-10-19 page, byte for byte as build `a3450ef53b` sent it (the
+    /// alert cut it short; this is the journal's copy, reproduced exactly by
+    /// that build in headless Chrome under a replica of the hook). Poper
+    /// Blocker's page-world fetch hook awaited gtag's analytics request in an
+    /// async function whose promise it drops, so the request failing rejected
+    /// that promise too. Two frames of the hook's, three of gtag's, none of
+    /// ours. A bundle up to that build sends this shape, so this side fixes it.
+    #[test]
+    fn the_2026_10_19_hook_dropped_gtag_hit_is_demoted_not_paged() {
+        let body: CrashBody = serde_json::from_str(
+            r#"{"kind":"unhandledrejection","message":"Failed to fetch",
+                "stack":"TypeError: Failed to fetch\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)\nat wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)\nat Ul (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:453:1245)\nat yR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1017:183)",
+                "version":"1.4.0","build":"a3450ef53b","surface":"web","path":"/"}"#,
+        )
+        .expect("payload shape");
+        let kind = clamp_field(&body.kind, KIND_MAX);
+        let message = clamp_field(&body.message, MESSAGE_MAX);
+        let stack = clamp_field(&body.stack, STACK_MAX);
+        // No earlier branch claims it…
+        assert!(!is_non_crash(&body.message));
+        assert!(!pages_as_broken_deploy(&kind, &message));
+        assert!(!is_routine_stale_chunk(&kind, &message));
+        assert!(!is_repaired_dom_desync(&kind));
+        // …so the foreign-code branch does, at info, with `frames=third-party`.
+        assert_eq!(frame_origin(&stack), FrameOrigin::ThirdParty);
+        assert!(is_foreign_code_error(&kind, &message, &stack));
+        let line = logged_line(&kind, &message, &stack);
+        assert!(line.contains(" INFO "), "{line}");
+        assert!(line.contains("web app foreign-code error"), "{line}");
+        assert!(
+            line.contains("kind=unhandledrejection frames=third-party"),
+            "{line}"
+        );
+        // The same hook over a request of OURS still pages: nothing in the
+        // stack can say whether we or the hook dropped it.
+        let ours = logged_line(
+            "unhandledrejection",
+            "Failed to fetch",
+            "TypeError: Failed to fetch at WnrW \
+             (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061) \
+             at Hs (https://dweeb.faizo.net/assets/previewSheet-DZGDMyw1.js:2:136038)",
+        );
+        assert!(ours.contains(" WARN "), "{ours}");
+        assert!(
+            ours.contains("kind=unhandledrejection frames=mixed"),
+            "{ours}"
+        );
     }
 
     /// The 2026-09-25 page, byte for byte as build `e87dcd0497` sent it. The
@@ -1506,6 +1645,7 @@ mod tests {
         assert_eq!(FrameOrigin::None.to_string(), "none");
         assert_eq!(FrameOrigin::Page.to_string(), "page");
         assert_eq!(FrameOrigin::Extension.to_string(), "extension");
+        assert_eq!(FrameOrigin::ThirdParty.to_string(), "third-party");
         assert_eq!(FrameOrigin::Mixed.to_string(), "mixed");
     }
 

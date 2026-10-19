@@ -165,10 +165,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
 - **A crash beacon must be *our* crash before it may page** (2026-07-24; extension frames
-  2026-09-14). The `error` and `unhandledrejection` traps hear everything thrown or dropped in the
-  page's own JS world, including code we never shipped — extension scripts that run in the page's
-  world (a wallet must, to define `window.ethereum`; an isolated-world content script never reaches
-  page listeners), userscripts, bookmarklets, console experiments. Two have paged. 2026-07-24: a
+  2026-09-14; third-party scripts 2026-10-19). The `error` and `unhandledrejection` traps hear
+  everything thrown or dropped in the page's own JS world, including code we never shipped —
+  extension scripts that run in the page's world (a wallet must, to define `window.ethereum`; an
+  isolated-world content script never reaches page listeners), third-party scripts we load,
+  userscripts, bookmarklets, console experiments. Three have paged. 2026-07-24: a
   Safari user's foreign script overflowed its own stack ("Maximum call stack size exceeded.",
   frames `@`/`Pk@`/`Nk@` with **no source URL** — JSC's rendering of code that has no script URL);
   rebuilding every deployed 1.0.0 bundle proved no DWEEB build contained those symbols (prod-vs-local
@@ -177,10 +178,21 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   connect to MetaMask`, one frame at `chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/…`, kind
   `unhandledrejection` — a fire-and-forget warm-up that rejects after a 10 s extension-detection
   timeout; DWEEB never touches `window.ethereum`), reported by build `e699a38eec`, ~25 days stale in
-  an SW cache, so **only the proxy could stop it**. Policy: `isForeignCodeError` (crashReport.ts)
-  and `is_foreign_code_error` (telemetry.rs — the authority, since SW-stale clients keep their
-  reporter for weeks), both pinned to the hand-written `server/src/foreign-code-vectors.json`. Both
-  judge the text as the proxy reads it — `clamp_field` turns control characters into spaces, and
+  an SW cache, so **only the proxy could stop it**. 2026-10-19: `Failed to fetch`, kind
+  `unhandledrejection`, `frames=mixed` from the live build — but the "page" frames were
+  **gtag.js's** (`wd`/`Ul`/`yR` at `https://www.googletagmanager.com/gtag/js…`, gtag's hit
+  sender), under two of Poper Blocker's
+  (`chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js`, a popup blocker).
+  Its page-world `window.fetch` wrapper passes each request to an async inspector whose promise it
+  **drops**; when the inspector is on and the URL is on its (remote) list it awaits the request, so
+  a failed GA hit (blocked, offline) rejects that dropped promise too. gtag catches its own
+  (`fetch(…).then(…).catch(…)`). Reproduced with the reporting build in headless Chrome 155 under a
+  faithful replica of the hook — the identical beacon, and the full 10-frame stack holds nothing of
+  ours; without the hook the same failed hits leak nothing. Policy: `isForeignCodeError`
+  (crashReport.ts) and `is_foreign_code_error` (telemetry.rs — the authority, since SW-stale
+  clients keep their reporter for weeks), both pinned to the hand-written
+  `server/src/foreign-code-vectors.json`. Both judge the text as the proxy reads it —
+  `clamp_field` turns control characters into spaces, and
   the client maps them the same way first (`asProxyReads`) — so newline vs space, or a `\n` inside
   a token, can never split the verdict; the Rust suite runs each case through `clamp_field`, the
   TS suite both as written *and* flattened, and both trim the muted-error check alike. A stack's
@@ -189,15 +201,27 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   malformed run count as ours, the paging side — plus Firefox's `<anonymous code>`, its deliberate
   name for every page-world extension script and for nothing else (without it the Gecko rendering of
   the same MetaMask rejection names no location and pages); location-less frames (`<anonymous>`,
-  `[native code]`, `async Promise.all (index 0)`) are ignored. Foreign = (1) **every** location an
-  extension's — `chrome-extension` (every Chromium browser, Edge included), `moz-extension`,
-  `safari-web-extension`, `safari-extension`, `webkit-masked-url` (Safari 16+ masks every extension
-  script URL and never an http(s)/blob one) — for `error` *and* `unhandledrejection`; (2) `error`
-  only, frames that name no location; (3) `error` only, the muted `Script error.` + empty stack.
-  The client drops these before the throttle; the proxy logs them at **info** (`web app
-  foreign-code error`, still under `web_crash`). Both that line and the paging `web app crash` carry
-  `frames=none|page|extension|mixed` right after `kind` — on a page, `frames=mixed` says an
-  extension was in the stack beside ours. Deliberately narrow: **all** locations, never the top
+  `[native code]`, `async Promise.all (index 0)`) are ignored. An `https` location is a
+  **third-party script's** only when a host in `THIRD_PARTY_SCRIPT_HOSTS` (today just
+  `www.googletagmanager.com`) follows its `://` directly *and then* `/`, host ASCII-case-insensitive
+  — how every engine prints a loaded script's URL — so a longer host, userinfo, a port, plain http,
+  the host in a path, or a URL clamped before its `/` all read as ours. Foreign = (1) **every**
+  location someone else's: an extension's — `chrome-extension` (every Chromium browser, Edge
+  included), `moz-extension`, `safari-web-extension`, `safari-extension`, `webkit-masked-url`
+  (Safari 16+ masks every extension script URL and never an http(s)/blob one) — or a third-party
+  script's, for `error` *and* `unhandledrejection`; (2) `error` only, frames that name no location;
+  (3) `error` only, the muted `Script error.` + empty stack. Any frame of ours keeps a stack ours,
+  `gtag-init.js` included (served from our origin; it sits under gtag's frames whenever our own
+  `gtag()` call fails), and our code never holds a gtag promise — the stub only pushes onto
+  `dataLayer`. The client drops these before the throttle; the proxy logs them at **info** (`web
+  app foreign-code error`, still under `web_crash`). Both that line and the paging `web app crash`
+  carry `frames=none|page|extension|third-party|mixed` right after `kind` — `third-party` = none
+  ours, at least one a third-party script's (extension frames beside it or not); on a page,
+  `frames=mixed` says someone else's code was in the stack beside ours. The same hook over a
+  request of **ours** still pages (`frames=mixed`): "Failed to fetch" stays page-worthy (see the
+  network-failure entry), and the stack cannot say whether we or the hook dropped it — if that ever
+  pages, check the `chrome-extension://` frames for a known fetch wrapper before hunting a leak of
+  ours. Deliberately narrow: **all** locations, never the top
   frame (Sentry's rule — it would silence our own misuse of an API a page-world extension wraps,
   since `History.pushState (chrome-extension://…)` sits *above* our frame); **at least one**
   location (a location-less rejection pages: our own failed `fetch` rejects with a header-only
@@ -210,18 +234,19 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   errors, a `DataCloneError` quoting source code) used to push every frame out and the unattributed
   rule silenced our own Chromium crash — and an extension's frame above ours, with the rest of the
   window naming nothing, would now do the same. So `reporter.ts` judges `topFrames(stack,
-  Infinity)` with the *resolved* kind, and `wireStack` promotes the first http(s) location (else any
-  non-extension location) into a window that lacks one — head lines, a `... N lines skipped ...`
-  marker when any were left out, then that line — budgeted first so no clamp can cut its
-  location (a scheme run too long to keep whole is dropped, never front-trimmed, since a trimmed run
-  could spell an extension's scheme). The search starts *below* line 1, V8's header, so a frame is
-  promoted rather than a message's tail, and line 1 always leads — a header whose only URL lies past
-  the window used to send that URL's tail alone. A seeded property test pins "client says ours ⇒
-  proxy says ours", `reporter.test.ts` pins the full stack and the resolved kind, and a log-capture
-  test (`log_crash`) pins the lines themselves — `INFO … foreign-code error … frames=extension` vs
-  `WARN … web app crash … frames=mixed`. Don't replace promotion with a client-set "ours" flag (the
-  `shellVerified` pattern): a verdict would freeze each bundle's policy into its beacons for as long
-  as the bundle lives in SW caches, where evidence leaves the policy with the proxy. Residue,
+  Infinity)` with the *resolved* kind, and `wireStack` promotes the first http(s) location **of
+  ours** (else any other location of ours) into a window that lacks one — head lines, a
+  `... N lines skipped ...` marker when any were left out, then that line — budgeted first so no
+  clamp can cut its location (a scheme run too long to keep whole is dropped, never front-trimmed,
+  since a trimmed run could spell an extension's scheme). The search starts *below* line 1, V8's
+  header, so a frame is promoted rather than a message's tail, and line 1 always leads — a header
+  whose only URL lies past the window used to send that URL's tail alone. A seeded property test
+  pins "client says ours ⇒ proxy says ours", `reporter.test.ts` pins the full stack and the resolved kind, and a log-capture
+  test (`log_crash`) pins the lines themselves — `INFO … foreign-code error … frames=extension` (or
+  `frames=third-party`) vs `WARN … web app crash … frames=mixed`. Don't replace promotion with a
+  client-set "ours" flag (the `shellVerified` pattern): a verdict would freeze each bundle's policy
+  into its beacons for as long as the bundle lives in SW caches, where evidence leaves the policy
+  with the proxy. Residue,
   accepted: a pre-promotion bundle's window is its first six lines / 800 units whatever they hold,
   and only locations count, so a single extension frame hides ours whenever the rest of that window
   names nothing of ours — a long or multi-line V8 message, or URL-less lines such as V8's builtins
@@ -232,8 +257,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   rejection carries only its own frame, is demoted for the visitors running it (the same bug pages
   from everyone else); a V8 header-only `kind=error` (a parse error in a classic script,
   `Error.stackTraceLimit = 0`) still reads as unattributed (pre-existing; Firefox/JSC report it with
-  an empty stack, which pages). Add a scheme only on evidence (a page naming it), to both lists
-  **and** the vector file — and never http(s): promotion relies on an http(s) location staying ours.
+  an empty stack, which pages); a misuse of gtag deeper than V8's ten frames never reaches our frame
+  and reads as gtag's, and a bundle older than the third-party list promotes only into a window
+  with no http(s) at all, so for it our frame under five lines of gtag's is hidden — both reachable
+  only through our own `gtag()` call, which nothing on screen waits on. Add a scheme only on
+  evidence (a page naming it), to both lists **and** the vector file — and never http(s) as a
+  scheme: promotion relies on every http(s) location not on a listed host staying ours. Add a
+  third-party host the same way — on evidence, lowercase, and only for code we load but never ship
+  (never a host that serves our bundle); the production CSP's `script-src` bounds the candidates,
+  and the other one, `js.stripe.com`, has not been seen in a beacon.
   The client's clamps never split a surrogate pair: the orphan serializes as a `\udXXX` escape
   serde refuses, losing the whole beacon. No deploy ordering (no new field or kind). `clamp_field`
   replaces control chars with spaces so a multi-line stack stays legible in the one-line log
@@ -1368,7 +1400,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   pair in one theme) through `ansiRender.tsx`, **loaded lazily**: `Markdown.tsx` is on the boot
   path, and after this the critical bundle measured 179,916 gzip / 586,481 raw bytes against the
   180,000 / 590,000 budgets — 84 bytes of gzip headroom, so the next boot-path addition needs a
-  budget decision, not a squeeze. `encodeAnsi` writes one `ESC[0;…m` per style change, which both
+  budget decision, not a squeeze. (That addition was the crash reporter's third-party attribution,
+  2026-10-19: 180,113 / 586,909, and the gzip budget became 182,000 — the rationale sits beside
+  the check in `scripts/seo/audit.ts`.) `encodeAnsi` writes one `ESC[0;…m` per style change, which both
   renderers read identically. Two guides carry tools built on it:
   `/guides/discord-colored-text/` (generator: its truth is styled runs, the contenteditable is
   re-read on every input and re-rendered, paste of a fenced ansi block restores colors) and

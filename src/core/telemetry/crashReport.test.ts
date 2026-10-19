@@ -25,6 +25,7 @@ import {
   moduleEntryFromHtml,
   resolveCrashKind,
   shellProbeVerdict,
+  THIRD_PARTY_SCRIPT_HOSTS,
   topFrames,
   wireStack,
   type CrashInput,
@@ -73,6 +74,11 @@ function isWellFormed(text: string): boolean {
 /** An http(s) location, read as a whole scheme run the way `frameOrigin`
  *  reads one. */
 const WEB_LOCATION = /(?:^|[^A-Za-z0-9+.-])https?:\/\//;
+/** An http(s) location of ours: any but an `https` one on gtag's host. Written
+ *  out rather than built from `THIRD_PARTY_SCRIPT_HOSTS`, so the property test
+ *  checks the implementation against an independent reading of the rule. */
+const OUR_WEB_LOCATION =
+  /(?:^|[^A-Za-z0-9+.-])(?:http:\/\/|https:\/\/(?!www\.googletagmanager\.com\/))/i;
 
 /** The 2026-09-14 page's one frame, and one of ours. */
 const METAMASK_FRAME =
@@ -763,6 +769,14 @@ describe("foreign-code spec (shared with telemetry.rs)", () => {
     expect(GECKO_MAIN_WORLD).toBe(foreignSpec.geckoMainWorld);
   });
 
+  it("lists exactly the third-party hosts the spec does, each lowercase", () => {
+    expect([...THIRD_PARTY_SCRIPT_HOSTS].sort()).toEqual(
+      [...foreignSpec.thirdPartyScriptHosts].sort(),
+    );
+    // The match folds the stack's case, never the list's.
+    for (const host of THIRD_PARTY_SCRIPT_HOSTS) expect(host).toBe(host.toLowerCase());
+  });
+
   // Each case as written (the client's newline-joined stack) and as the proxy
   // reads it (newlines turned into spaces); telemetry.rs runs the same file.
   it.each(cases)("$name", (c) => {
@@ -831,6 +845,40 @@ describe("wireStack", () => {
     ]);
     expect(proxyDemotes(topFrames(stack.join("\n")))).toBe(true);
     expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("promotes our frame from under a third-party script's frames", () => {
+    // gtag's http(s) frames are not ours, so a window holding only them (and
+    // the hook's) must not stop our own call into gtag from reaching the proxy.
+    const gtagFrame = (i: number) =>
+      `at g${i} (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:${i}:1)`;
+    const ours = "at window.gtag (https://dweeb.faizo.net/gtag-init.js:23:22)";
+    const stack = ["TypeError: x", ...Array.from({ length: 6 }, (_, i) => gtagFrame(i)), ours];
+    const wire = wireStack(stack.join("\n"));
+    expectBounded(wire);
+    expect(wire.split("\n").at(-1)).toBe(ours);
+    expect(proxyDemotes(topFrames(stack.join("\n")))).toBe(true);
+    expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("sends the 2026-10-19 stack as its plain window: nothing in it is ours", () => {
+    const full = [
+      "TypeError: Failed to fetch",
+      "at WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)",
+      "at window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)",
+      ...[
+        "wd (…:295:391)",
+        "Ul (…:453:1245)",
+        "yR (…:1017:183)",
+        "BR (…:1018:176)",
+        "l.flush (…:1028:170)",
+      ].map(
+        (frame) =>
+          `at ${frame.replace("…", "https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS")}`,
+      ),
+    ].join("\n");
+    expect(wireStack(full)).toBe(topFrames(full));
+    expect(proxyDemotes(wireStack(full))).toBe(true);
   });
 
   it("promotes our frame past a message that filled the window", () => {
@@ -976,6 +1024,15 @@ describe("wireStack", () => {
       "at d (data:text/javascript,foo:1:1)",
       "at b (://y:1:2)",
       `at y (${"a".repeat(300)}chrome-extension://abc/y.js:1:2)`,
+      "at wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)",
+      "at HTTPS://WWW.GOOGLETAGMANAGER.COM/gtag/js?id=G-GQRDJZRCTS:1024:404",
+      "at WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)",
+      "at window.gtag (https://dweeb.faizo.net/gtag-init.js:23:22)",
+      "at n (http://www.googletagmanager.com/gtag/js:1:1)",
+      // A host cut off before its "/" — and, adjacent to the next piece, a
+      // host whose "/" sits on the following line.
+      "at c (https://www.googletagmanager.com",
+      "/gtag/js:1:1)",
       "at Array.map (<anonymous>)",
       "at async Promise.all (index 0)",
       // Adjacent, these two spell the Gecko token across a newline.
@@ -990,6 +1047,7 @@ describe("wireStack", () => {
       "🦊",
       " (see https://discord.com/developers/docs)",
       " at chrome-extension://abc/h.js:1:1",
+      " (https://www.googletagmanager.com/gtag/js)",
     ];
     let seed = 7;
     const next = (n: number) => {
@@ -1013,8 +1071,8 @@ describe("wireStack", () => {
           failures.push(`${kind} demoted: ${JSON.stringify(full)}`);
         }
       }
-      if (WEB_LOCATION.test(full) && !WEB_LOCATION.test(wire)) {
-        failures.push(`http(s) lost: ${JSON.stringify(full)}`);
+      if (OUR_WEB_LOCATION.test(full) && !OUR_WEB_LOCATION.test(wire)) {
+        failures.push(`our http(s) lost: ${JSON.stringify(full)}`);
       }
       if (wire.length > 800 || wire.split("\n").length > 6 || !isWellFormed(wire)) {
         failures.push(`out of bounds: ${JSON.stringify(full)}`);

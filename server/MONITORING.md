@@ -144,13 +144,15 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
 
 # Someone else's code crashing in visitors' pages (INFO, never paged), counted
 # by whose: frames=extension is a browser extension (MetaMask & co.);
-# frames=none names no location at all — a userscript/console stack, a muted
-# cross-origin `Script error.`, or a V8 header-only stack (which can be ours:
-# see AGENTS.md). The proxy's fields are ANSI-coloured (`frames` and `=` wear
-# separate escape codes), so strip the colour before matching `frames=`.
+# frames=third-party is a script we load but don't ship (gtag.js), maybe with
+# an extension's frames beside it — e.g. a fetch hook dropping gtag's failed
+# hit; frames=none names no location at all — a userscript/console stack, a
+# muted cross-origin `Script error.`, or a V8 header-only stack (which can be
+# ours: see AGENTS.md). The proxy's fields are ANSI-coloured (`frames` and `=`
+# wear separate escape codes), so strip the colour before matching `frames=`.
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
   | sed 's/\x1b\[[0-9;]*m//g' \
-  | grep web_crash | grep 'foreign-code' | grep -o 'frames=[a-z]*' | sort | uniq -c
+  | grep web_crash | grep 'foreign-code' | grep -o 'frames=[a-z-]*' | sort | uniq -c
 
 # Work cancelled on purpose whose rejection somebody dropped (INFO, never paged)
 # — usually a page-world fetch hook; the stack only ever names our own abort()

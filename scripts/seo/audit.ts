@@ -860,9 +860,12 @@ async function main(): Promise<void> {
   // Raw raised 575k → 590k on 2026-10-05: the full audit's fixes (import-boundary
   // repair, undo origins, URL placeholder rules, editor keyboard/paste fixes)
   // added 10,624 raw / 3,475 gzip bytes to the boot path — measured against the
-  // pre-audit HEAD — where 575k had left ~5 KB of headroom. Gzip, the real
-  // transfer, still fits the original 180k, so it stays.
-  if (criticalRawBytes > 590_000 || criticalGzipBytes > 180_000) {
+  // pre-audit HEAD — where 575k had left ~5 KB of headroom. Gzip raised 180k →
+  // 182k on 2026-10-19: the 10-16 ansi preview had left 84 bytes (179,916), and
+  // the crash reporter's third-party attribution — it must judge a beacon on
+  // the boot path, since it reports the very chunk loads that fail — took it to
+  // 180,113. ~1.9 KB of headroom still trips on anything library-sized.
+  if (criticalRawBytes > 590_000 || criticalGzipBytes > 182_000) {
     errors.push(
       `/: critical JS/CSS budget exceeded (${criticalRawBytes} raw / ${criticalGzipBytes} gzip bytes)`,
     );

@@ -1,5 +1,5 @@
 {
-  "about": "Hand-written spec for which crash beacons report someone else's code: browser extensions, userscripts, muted cross-origin scripts. server/src/telemetry.rs judges every case as its handler does, through clamp_field (control characters turned into spaces); src/core/telemetry/crashReport.test.ts judges it twice, as written (the client's newline-joined stack) and flattened that same way, since the client must reach the proxy's verdict from either. 'frames' is frameOrigin / frame_origin; 'error' and 'unhandledrejection' are isForeignCodeError / is_foreign_code_error for that kind. Every other kind is never foreign, for any of these stacks. The verdicts ARE the policy: edit this file first, then both implementations, and never regenerate it from either one. See AGENTS.md, 'A crash beacon must be *our* crash before it may page'.",
+  "about": "Hand-written spec for which crash beacons report someone else's code: browser extensions, third-party scripts we load but don't ship (each one matched as an exact https://<host>/ prefix), userscripts, muted cross-origin scripts. server/src/telemetry.rs judges every case as its handler does, through clamp_field (control characters turned into spaces); src/core/telemetry/crashReport.test.ts judges it twice, as written (the client's newline-joined stack) and flattened that same way, since the client must reach the proxy's verdict from either. 'frames' is frameOrigin / frame_origin; 'error' and 'unhandledrejection' are isForeignCodeError / is_foreign_code_error for that kind. Every other kind is never foreign, for any of these stacks. The verdicts ARE the policy: edit this file first, then both implementations, and never regenerate it from either one. See AGENTS.md, 'A crash beacon must be *our* crash before it may page'.",
   "extensionSchemes": [
     "chrome-extension",
     "moz-extension",
@@ -8,6 +8,7 @@
     "webkit-masked-url"
   ],
   "geckoMainWorld": "<anonymous code>",
+  "thirdPartyScriptHosts": ["www.googletagmanager.com"],
   "cases": [
     {
       "name": "2026-09-14 page: MetaMask's rejection exactly as build e699a38eec sent it",
@@ -162,6 +163,54 @@
       "unhandledrejection": true
     },
     {
+      "name": "2026-10-19 page: Poper Blocker's fetch hook dropped gtag's failed hit, as build a3450ef53b sent it",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)\nat wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)\nat Ul (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:453:1245)\nat yR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1017:183)",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the same rejection's full stack, as the client judges it: V8's ten frames, every one gtag's or the hook's",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)\nat wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)\nat Ul (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:453:1245)\nat yR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1017:183)\nat BR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1018:176)\nat l.Xg (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1024:471)\nat l.add (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1026:6)\nat l.Gn (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1055:487)\nat l.Rt (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1055:410)",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the same hook dropping a hit gtag flushed from its own timer (an anonymous frame of gtag's)",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)\nat wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)\nat Ul (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:453:1245)\nat yR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1017:183)\nat BR (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1018:176)\nat l.flush (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1028:170)\nat https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1024:404",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Gecko-style frames (fn@url): the same hook, loaded by URL, over gtag's",
+      "message": "Failed to fetch",
+      "stack": "WnrW@moz-extension://0d9a1c2e-5b7f-4e3a-9c8d-1f2e3a4b5c6d/injectScriptAdjust.js:1:3061\nwindow.fetch@moz-extension://0d9a1c2e-5b7f-4e3a-9c8d-1f2e3a4b5c6d/injectScriptAdjust.js:1:4422\nwd@https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a third-party script we load (gtag) failing in its own code: Google's, and nothing on screen waits on it",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1:2)",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "hosts compare ASCII-case-insensitively too (RFC 3986)",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (HTTPS://WWW.GoogleTagManager.COM/gtag/js?id=G-GQRDJZRCTS:1:2)",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
       "name": "an extension frame above our own (web origin)",
       "message": "boom",
       "stack": "Error: boom\nat hook (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)\nat Xk (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:2)",
@@ -226,6 +275,30 @@
       "unhandledrejection": false
     },
     {
+      "name": "the same hook over a request of ours still pages: nothing in the stack says who dropped it",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)\nat Hs (https://dweeb.faizo.net/assets/previewSheet-DZGDMyw1.js:2:136038)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "our own gtag() call under gtag's frames: gtag-init.js is served from our origin",
+      "message": "boom",
+      "stack": "TypeError: boom\nat Xn (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1:2)\nat Array.push (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:3:4)\nat window.gtag (https://dweeb.faizo.net/gtag-init.js:23:22)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "gtag beside the hook beside a frame of ours",
+      "message": "boom",
+      "stack": "Error: boom\nat WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)\nat wd (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391)\nat Ks (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:41:9528)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
       "name": "an https URL in an extension's message keeps it paging (accepted)",
       "message": "RPC endpoint https://mainnet.infura.io/v3 failed",
       "stack": "Error: RPC endpoint https://mainnet.infura.io/v3 failed\nat r (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)",
@@ -266,9 +339,65 @@
       "unhandledrejection": false
     },
     {
-      "name": "a third-party script we load on purpose (gtag)",
+      "name": "decoy: a host that only starts with a listed one",
       "message": "boom",
-      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1:2)",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com.evil.example/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: a listed host as userinfo is not the host",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com@evil.example/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: a listed host in a path is not the host",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://evil.example/www.googletagmanager.com/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: the bare domain is not the host gtag is served from",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://googletagmanager.com/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: plain http is not how gtag is served",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (http://www.googletagmanager.com/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: a browser prints no default port, so a URL with one is not gtag's",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com:443/gtag/js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: a listed host cut off before its '/' reads as ours (fail toward paging)",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: js.stripe.com is not listed (the CSP allows it; no beacon has named it)",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://js.stripe.com/v3/fingerprinted/js/m-outer-abc.js:1:2)",
       "frames": "page",
       "error": false,
       "unhandledrejection": false

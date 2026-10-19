@@ -124,6 +124,40 @@ describe("the crash reporter's foreign-code gate", () => {
     expect(sent()[0]?.stack.split("\n").at(-1)).toBe(OUR_FRAME);
   });
 
+  it("never sends the 2026-10-19 rejection: a fetch hook dropping gtag's failed hit", () => {
+    // The full stack, as headless Chrome 155 rejected it under a replica of the
+    // hook: ten frames, every one the hook's or gtag's.
+    const gtag = "https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS";
+    const reason = errorWithStack("Failed to fetch", [
+      "TypeError: Failed to fetch",
+      "at WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)",
+      "at window.fetch (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:4422)",
+      `at wd (${gtag}:295:391)`,
+      `at Ul (${gtag}:453:1245)`,
+      `at yR (${gtag}:1017:183)`,
+      `at BR (${gtag}:1018:176)`,
+      `at l.Xg (${gtag}:1024:471)`,
+      `at l.add (${gtag}:1026:6)`,
+      `at l.Gn (${gtag}:1055:487)`,
+      `at l.Rt (${gtag}:1055:410)`,
+    ]);
+    fire("unhandledrejection", { reason });
+    expect(proxyFetch).not.toHaveBeenCalled();
+  });
+
+  it("still sends our own gtag() call failing, with the frame that makes it ours", () => {
+    const gtag = "https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS";
+    const ours = "at window.gtag (https://dweeb.faizo.net/gtag-init.js:23:22)";
+    const reason = errorWithStack("boom", [
+      "TypeError: boom",
+      ...Array.from({ length: 6 }, (_, i) => `at g${i} (${gtag}:${i}:1)`),
+      ours,
+    ]);
+    fire("unhandledrejection", { reason });
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]?.stack.split("\n").at(-1)).toBe(ours);
+  });
+
   it("judges the resolved kind, so a sparse chunk failure is never taken for foreign code", async () => {
     // Safari words a failed chunk load without a URL, and its stack can name
     // nothing. As a raw window error that reads as "unattributed"; resolved, it
