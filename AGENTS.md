@@ -920,21 +920,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   judged by the other panel's staff roles); (6) select `options[].emoji` must be an
   **object** (`{ name }` / `{ id, name, animated? }`) — the host's `sanitizeEmoji` silently
   drops a string, which is how every topic emoji (the presets' too) vanished from posted menus
-  until 0.3. **The production app has no Message Content intent** (neither
-  `GATEWAY_MESSAGE_CONTENT` nor `_LIMITED` in `/applications/@me` flags, 385 servers,
-  checked 2026-09-27), and Discord withholds members' message text, attachments and embeds
-  from REST reads too — so transcripts carry who took part and when plus the bot's own
-  messages, and say so (`transcript::looks_withheld` + `/api/meta` `messageContent`). Real
-  transcripts need the intent, and for this app that is an application, not a toggle: the
-  portal refuses the switch ("exposed to a high user count" — review applies from 10,000
-  users) and its **Apply** button opens a Request Intents form. The application filed
-  2026-09-27 certifies what the code does: the history is read once at close and only when
-  the panel has transcripts on, nothing is stored off Discord or logged, nothing trains a
-  model, and members can't opt out individually (the server's managers control transcripts).
-  The Tickets item in `public/privacy.html` §5 says the same — any change to what Tickets
-  reads or keeps must keep that item and those answers true. Don't "fix" empty transcripts in
-  code; once the intent is granted `looks_withheld` stops firing on its own, and the feature
-  FAQ (`scripts/seo/features.ts`) may promise the conversation's text again. Tests: `flow_tests.rs` drives the real router with signed
+  until 0.3. **The production app holds the Message Content intent, granted by Discord's
+  review on 2026-10-22** (`GATEWAY_MESSAGE_CONTENT`, flag `1<<18`, in `/applications/@me`).
+  Without it Discord withholds members' message text, attachments and embeds from REST reads
+  too, so a transcript carries only who took part and when plus the bot's own messages, and
+  says so (`transcript::looks_withheld` + `/api/meta` `messageContent`). That is still the
+  path for a self-hosted app without the intent. Granting it needed no restart: the history
+  read is REST, judged by Discord per request, and the plugin re-reads the flag at most
+  hourly (`INTENT_TTL`, refreshed from `/api/meta`). For this app the intent was an
+  application, not a toggle: the portal refuses the switch ("exposed to a high user count";
+  review applies from 10,000 users) and its **Apply** button opens a Request Intents form.
+  The application (filed 2026-09-27) certifies what the code does: the history is read once
+  at close and only when the panel has transcripts on, nothing is stored off Discord or
+  logged, nothing trains a model, and members can't opt out individually (the server's
+  managers control transcripts). **The grant rests on those answers**, and the Tickets item in
+  `public/privacy.html` §5 says the same. Any change to what Tickets reads or keeps (storing
+  text, a new reader of message content, a gateway connection) must keep that item and those
+  answers true, or go back to Discord first. Tests: `flow_tests.rs` drives the real router with signed
   interactions against an in-process fake Discord — extend it for any new flow; a debug build
   (`cargo run`) honours `DISCORD_API_BASE` for clicking through the config UI against a
   stand-in, and release builds ignore it.

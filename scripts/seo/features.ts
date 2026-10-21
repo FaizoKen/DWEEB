@@ -213,7 +213,7 @@ export const FEATURES: FeatureSeo[] = [
       },
       {
         q: "Is a transcript saved when a ticket closes?",
-        a: "Yes. When a ticket closes, Tickets can file an HTML transcript to your log channel and DM a copy to the member who opened it, so you keep a record after the channel is gone.",
+        a: "Yes. When a ticket closes, Tickets can file an HTML transcript of the conversation, including what members and staff wrote and their attachments, to your log channel and DM a copy to the member who opened it, so you keep a record after the channel is gone.",
       },
     ],
     keywords: [
@@ -963,7 +963,9 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`.
  *  2026-09-22: the embedded template previews render real sample images.
  *  2026-09-27: the ticket bot's transcript answer no longer promises the
- *  conversation's text (it needs Discord's Message Content intent). */
-export const FEATURES_LASTMOD = "2026-09-27";
+ *  conversation's text (it needs Discord's Message Content intent).
+ *  2026-10-22: Discord granted that intent, so the answer promises the
+ *  conversation again. */
+export const FEATURES_LASTMOD = "2026-10-22";
 
 export { ACCENT_BLURPLE };
