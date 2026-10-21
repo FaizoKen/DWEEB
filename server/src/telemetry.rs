@@ -480,8 +480,11 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 ///    hook's over gtag.js's — see [`THIRD_PARTY_SCRIPT_HOSTS`]), reported by
 ///    the live build. Every bundle up to it sends that shape, so this function
 ///    is again what stops it paging.
+///  - 2026-10-21: a Safari extension dropped its own failed
+///    `runtime.sendMessage()` — no stack at all; see
+///    [`is_web_extension_api_error`].
 ///
-/// Three shapes are demoted to `info` (still greppable under `web_crash`, never
+/// Four shapes are demoted to `info` (still greppable under `web_crash`, never
 /// a page):
 ///
 ///  - **Someone else's only** (`error` and `unhandledrejection`): the stack
@@ -495,12 +498,15 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 ///    the host URL even for eval, so there this stays conservative.)
 ///  - **Muted cross-origin error** (`error` only): the literal `Script error.`
 ///    with an empty stack — the browser withheld everything about it.
+///  - **A browser-extension API's own error** (`error` and
+///    `unhandledrejection`): WebKit's wording for a failed WebExtension call
+///    ([`is_web_extension_api_error`]) with a stack naming no location.
 ///
 /// Deliberately narrow, mirroring [`is_routine_stale_chunk`]'s posture:
 /// `boundary`/`boot` beacons page whatever their stack (the app went down, and
 /// an extension-only stack there is a real outage), a rejection that names no
 /// location pages (our own failed `fetch` rejects with a header-only
-/// `TypeError`), and an empty stack with an ordinary message pages (our own
+/// `TypeError`) unless its wording is an extension API's, and an empty stack with an ordinary message pages (our own
 /// code can `throw "string"`).
 ///
 /// This sees only the wire stack — six lines at most, the first of them V8's
@@ -529,10 +535,48 @@ fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
             someone_elses
                 || (!stack.is_empty() && origin == FrameOrigin::None)
                 || (stack.is_empty() && is_muted_script_error(message))
+                || (origin == FrameOrigin::None && is_web_extension_api_error(message))
         }
-        "unhandledrejection" => someone_elses,
+        "unhandledrejection" => {
+            someone_elses || (origin == FrameOrigin::None && is_web_extension_api_error(message))
+        }
         _ => false,
     }
+}
+
+/// Whether `message` is WebKit's wording for a failed WebExtension API call
+/// (`toErrorString` in WebKit's `WebExtensionUtilities.cpp`): `Invalid call to
+/// <namespace>.<method>(). ` and then the reason — an error only an extension
+/// can be handed, because only an extension holds the API.
+///
+/// On 2026-10-21 six beacons paged from the live build (`f3c91a6544`), reading
+/// `Invalid call to runtime.sendMessage(). Tab not found.`,
+/// `kind=unhandledrejection frames=none`, with an empty stack: WebKit answering
+/// an extension's content script that messaged its background page from a tab
+/// Safari no longer tracks (`WebExtensionContextAPIRuntimeCocoa.mm`), and the
+/// script dropping the rejection. Safari rejects an extension API call with a
+/// stackless error, so [`frame_origin`] has nothing to attribute; the wording is
+/// the evidence. The app calls no extension API anywhere.
+///
+/// [`is_foreign_code_error`] applies it only to a stack naming no location (so a
+/// frame of ours keeps a beacon ours), for both window traps. Only WebKit's exact
+/// shape — a dotted lowercase API name, then `(). ` — and no other engine's
+/// wording until a beacon shows one. Mirrors `isWebExtensionApiError` in
+/// `src/core/telemetry/crashReport.ts`; both are pinned to
+/// `foreign-code-vectors.json`.
+fn is_web_extension_api_error(message: &str) -> bool {
+    let Some(rest) = message.strip_prefix("Invalid call to ") else {
+        return false;
+    };
+    let Some((api, _reason)) = rest.split_once("(). ") else {
+        return false;
+    };
+    let segment = |s: &str| {
+        let mut chars = s.chars();
+        chars.next().is_some_and(|c| c.is_ascii_lowercase())
+            && chars.all(|c| c.is_ascii_alphanumeric())
+    };
+    api.split('.').count() >= 2 && api.split('.').all(segment)
 }
 
 /// What Chromium calls the reason it gives an `AbortController` whose `abort()`
@@ -1459,6 +1503,43 @@ mod tests {
             ours.contains("kind=unhandledrejection frames=mixed"),
             "{ours}"
         );
+    }
+
+    /// The 2026-10-21 page (×6), as build `f3c91a6544` sent it: a Safari
+    /// extension's content script dropped the rejection WebKit hands a
+    /// `runtime.sendMessage()` from a tab it no longer tracks. Stackless, so only
+    /// the wording can attribute it. Every bundle up to that build sends this
+    /// shape, so this side fixes it for all of them.
+    #[test]
+    fn the_2026_10_21_safari_extension_api_rejection_is_demoted_not_paged() {
+        let body: CrashBody = serde_json::from_str(
+            r#"{"kind":"unhandledrejection",
+                "message":"Invalid call to runtime.sendMessage(). Tab not found.",
+                "stack":"","version":"1.4.0","build":"f3c91a6544","surface":"web","path":"/"}"#,
+        )
+        .expect("payload shape");
+        let kind = clamp_field(&body.kind, KIND_MAX);
+        let message = clamp_field(&body.message, MESSAGE_MAX);
+        let stack = clamp_field(&body.stack, STACK_MAX);
+        // No earlier branch claims it…
+        assert!(!is_non_crash(&body.message));
+        assert!(!pages_as_broken_deploy(&kind, &message));
+        assert!(!is_routine_stale_chunk(&kind, &message));
+        assert!(!is_repaired_dom_desync(&kind));
+        // …so the foreign-code branch does, at info, with `frames=none`.
+        assert_eq!(frame_origin(&stack), FrameOrigin::None);
+        assert!(is_foreign_code_error(&kind, &message, &stack));
+        let line = logged_line(&kind, &message, &stack);
+        assert!(line.contains(" INFO "), "{line}");
+        assert!(line.contains("web app foreign-code error"), "{line}");
+        assert!(
+            line.contains("kind=unhandledrejection frames=none"),
+            "{line}"
+        );
+        // Any other stackless rejection still pages: our own dropped `fetch`
+        // reads exactly that way.
+        let ours = logged_line("unhandledrejection", "Failed to fetch", "");
+        assert!(ours.contains(" WARN "), "{ours}");
     }
 
     /// The 2026-09-25 page, byte for byte as build `e87dcd0497` sent it. The

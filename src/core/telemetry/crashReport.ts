@@ -750,8 +750,10 @@ export function canBeForeign(kind: CrashKind): boolean {
  *  - 2026-10-19: a popup blocker's fetch hook dropped its own inspection of
  *    gtag's failed analytics request — `Failed to fetch`, two frames of the
  *    hook's over gtag.js's (see [`THIRD_PARTY_SCRIPT_HOSTS`]).
+ *  - 2026-10-21: a Safari extension dropped its own failed
+ *    `runtime.sendMessage()` — no stack at all (see [`isWebExtensionApiError`]).
  *
- * Three shapes qualify:
+ * Four shapes qualify:
  *
  *  - **Someone else's only** (`error` and `unhandledrejection`): the stack
  *    names at least one location and every one is an extension's or a
@@ -761,11 +763,15 @@ export function canBeForeign(kind: CrashKind): boolean {
  *  - **Unattributed** (`error` only): frames exist but none names a location.
  *  - **Muted cross-origin error** (`error` only): the literal "Script error."
  *    with an empty stack — the browser withheld everything about it.
+ *  - **A browser-extension API's own error** (`error` and `unhandledrejection`):
+ *    the message is WebKit's wording for a failed WebExtension call
+ *    ([`isWebExtensionApiError`]) and the stack names no location at all.
  *
  * Deliberately narrow, like [`isNonCrashMessage`]: `boundary` and `boot` mean
  * the app went down and keep flowing whatever their stack (an extension-only
  * stack there is a real outage); a rejection that names no location keeps
- * flowing (our own failed `fetch` rejects with a header-only `TypeError`); an
+ * flowing (our own failed `fetch` rejects with a header-only `TypeError`)
+ * unless its wording is an extension API's, which no code of ours can earn; an
  * empty stack with an ordinary message keeps flowing (our code can
  * `throw "string"`).
  *
@@ -782,9 +788,43 @@ export function isForeignCodeError(kind: CrashKind, message: string, stack: stri
   if (!canBeForeign(kind)) return false;
   const origin = frameOrigin(stack);
   if (origin === "extension" || origin === "third-party") return true;
+  if (origin === "none" && isWebExtensionApiError(message)) return true;
   if (kind !== "error") return false;
   if (stack.length > 0 && origin === "none") return true;
   return stack.length === 0 && asProxyReads(message).trimStart().startsWith("Script error");
+}
+
+/**
+ * WebKit's wording for a failed WebExtension API call (`toErrorString` in
+ * WebKit's `WebExtensionUtilities.cpp`): `Invalid call to <namespace>.<method>().`
+ * and then the reason, e.g. `Invalid call to runtime.sendMessage(). Tab not
+ * found.` Mirrored by `is_web_extension_api_error` in `telemetry.rs`.
+ */
+const WEB_EXTENSION_API_ERROR = /^Invalid call to [a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+\(\)\. /;
+
+/**
+ * Whether `message` is a Safari extension's API call failing: an error only an
+ * extension can be handed, because only an extension holds the API.
+ *
+ * On 2026-10-21 six beacons paged from the live build (`f3c91a6544`), reading
+ * `Invalid call to runtime.sendMessage(). Tab not found.`,
+ * `kind=unhandledrejection frames=none`, with an empty stack. WebKit answers
+ * that when an extension's content script messages its background page from a
+ * tab Safari no longer tracks (`WebExtensionContextAPIRuntimeCocoa.mm`), and
+ * the script dropped the rejection. Safari rejects an extension API call with a
+ * stackless error, so [`frameOrigin`] has nothing to attribute; the wording is
+ * the evidence. DWEEB calls no extension API (`runtime`, `tabs`, `storage`, …)
+ * anywhere.
+ *
+ * Narrow like the other foreign rules: only WebKit's exact shape (a dotted
+ * lowercase API name, then `(). `), and [`isForeignCodeError`] applies it only
+ * to a stack naming no location, so a frame of ours keeps the report ours.
+ * Chromium's and Gecko's extension wordings ("Could not establish connection.
+ * Receiving end does not exist.") are deliberately absent: add one only on a
+ * beacon's evidence, to both twins and `foreign-code-vectors.json`.
+ */
+export function isWebExtensionApiError(message: string): boolean {
+  return WEB_EXTENSION_API_ERROR.test(asProxyReads(message));
 }
 
 /**

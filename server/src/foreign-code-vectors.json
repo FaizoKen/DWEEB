@@ -577,6 +577,70 @@
       "frames": "none",
       "error": false,
       "unhandledrejection": false
+    },
+    {
+      "name": "2026-10-21 page: a Safari extension's dropped runtime.sendMessage() exactly as build f3c91a6544 sent it",
+      "message": "Invalid call to runtime.sendMessage(). Tab not found.",
+      "stack": "",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "WebKit's other extension-API shape, a nested namespace naming the bad value",
+      "message": "Invalid call to storage.local.get(). The 'keys' value is invalid, because a string or an array is expected.",
+      "stack": "",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an extension-API error under location-less frames only",
+      "message": "Invalid call to runtime.sendMessage(). Tab not found.",
+      "stack": "sendMessage@[native code]\n@\n@",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an extension-API error with a frame of ours in the stack stays ours",
+      "message": "Invalid call to runtime.sendMessage(). Tab not found.",
+      "stack": "sendMessage@[native code]\nKs@https://dweeb.faizo.net/assets/index-DcBtb6aN.js:41:9528",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "the extension-API wording must lead the message",
+      "message": "Error: Invalid call to runtime.sendMessage(). Tab not found.",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an API name without a namespace is not WebKit's extension shape",
+      "message": "Invalid call to sendMessage(). Tab not found.",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an API name without its call parentheses is not WebKit's extension shape",
+      "message": "Invalid call to runtime.sendMessage. Tab not found.",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an API name that is not a dotted identifier is not WebKit's extension shape",
+      "message": "Invalid call to runtime.send Message(). Tab not found.",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
     }
   ]
 }

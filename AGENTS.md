@@ -210,7 +210,14 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   included), `moz-extension`, `safari-web-extension`, `safari-extension`, `webkit-masked-url`
   (Safari 16+ masks every extension script URL and never an http(s)/blob one) — or a third-party
   script's, for `error` *and* `unhandledrejection`; (2) `error` only, frames that name no location;
-  (3) `error` only, the muted `Script error.` + empty stack. Any frame of ours keeps a stack ours,
+  (3) `error` only, the muted `Script error.` + empty stack; (4) both traps, a stack naming **no
+  location** whose message is WebKit's wording for a failed WebExtension API call —
+  `Invalid call to <ns>.<method>(). …` (`isWebExtensionApiError` / `is_web_extension_api_error`;
+  2026-10-21, six pages from the live build: `Invalid call to runtime.sendMessage(). Tab not
+  found.`, `frames=none`, empty stack — a Safari extension's content script dropping the rejection
+  WebKit hands it for a tab it no longer tracks; Safari rejects extension API calls stackless, so
+  only the wording attributes it, and DWEEB calls no extension API). Only WebKit's exact shape;
+  Chromium/Gecko extension wordings are added only on a beacon's evidence. Any frame of ours keeps a stack ours,
   `gtag-init.js` included (served from our origin; it sits under gtag's frames whenever our own
   `gtag()` call fails), and our code never holds a gtag promise — the stub only pushes onto
   `dataLayer`. The client drops these before the throttle; the proxy logs them at **info** (`web
