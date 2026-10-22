@@ -6,12 +6,14 @@ const {
   fetchLibraryEntriesMock,
   listLibraryMock,
   updateLibraryEntryMock,
+  verifyLibraryPostedMock,
 } = vi.hoisted(() => ({
   createLibraryEntryMock: vi.fn(),
   deleteLibraryEntryMock: vi.fn(),
   fetchLibraryEntriesMock: vi.fn(),
   listLibraryMock: vi.fn(),
   updateLibraryEntryMock: vi.fn(),
+  verifyLibraryPostedMock: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -22,6 +24,7 @@ vi.mock("./api", () => ({
   LIBRARY_DETAIL_BATCH_SIZE: 64,
   listLibrary: listLibraryMock,
   updateLibraryEntry: updateLibraryEntryMock,
+  verifyLibraryPosted: verifyLibraryPostedMock,
 }));
 
 import { libraryEntryHasDetails, pendingLibraryDetailIds, useLibraryStore } from "./libraryStore";
@@ -312,5 +315,72 @@ describe("libraryStore.saveDraft", () => {
     await useLibraryStore.getState().saveDraft(GUILD_A, "Protocol notes", message);
 
     expect(createLibraryEntryMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("libraryStore.verifyPosted", () => {
+  function postedEntry(id: string, messageId: string): LibraryEntryView {
+    return {
+      id,
+      guild_id: GUILD_A,
+      label: "posted",
+      message_id: messageId,
+      created_by: "333333333333333333",
+      created_at: 1_700_000_000,
+      updated_at: 1_700_000_000,
+    };
+  }
+
+  beforeEach(() => {
+    useLibraryStore.getState().reset();
+    resetStore();
+    verifyLibraryPostedMock.mockReset();
+    useLibraryStore.setState({
+      entries: [
+        postedEntry("posted-01", "901"),
+        postedEntry("posted-02", "902"),
+        draftEntry(GUILD_A, simpleTextMessage("Draft")),
+      ],
+      posted: { used: 2, quota: 10 },
+    });
+  });
+
+  it("drops the posts Discord no longer has and returns them", async () => {
+    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: ["posted-02"] });
+    const removed = await useLibraryStore
+      .getState()
+      .verifyPosted(GUILD_A, ["posted-01", "posted-02", "draft-1"]);
+    // Only posted entries are asked about.
+    expect(verifyLibraryPostedMock).toHaveBeenCalledWith(GUILD_A, ["posted-01", "posted-02"]);
+    expect(removed.map((entry) => entry.message_id)).toEqual(["902"]);
+    const state = useLibraryStore.getState();
+    expect(state.entries.map((entry) => entry.id)).toEqual(["posted-01", "draft-1"]);
+    expect(state.posted).toEqual({ used: 1, quota: 10 });
+  });
+
+  it("asks about each entry at most once per interval", async () => {
+    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: [] });
+    await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
+    await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01", "posted-02"]);
+    expect(verifyLibraryPostedMock).toHaveBeenNthCalledWith(2, GUILD_A, ["posted-02"]);
+    await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01", "posted-02"]);
+    expect(verifyLibraryPostedMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps everything when the check can't run", async () => {
+    verifyLibraryPostedMock.mockResolvedValue({ ok: false, error: "Not found", status: 404 });
+    const removed = await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
+    expect(removed).toEqual([]);
+    expect(useLibraryStore.getState().entries).toHaveLength(3);
+  });
+
+  it("ignores an answer for a server the user has since left", async () => {
+    const answer = deferred<{ ok: true; gone: string[] }>();
+    verifyLibraryPostedMock.mockReturnValue(answer.promise);
+    const pending = useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
+    useLibraryStore.setState({ guildId: GUILD_B, entries: [postedEntry("posted-01", "901")] });
+    answer.resolve({ ok: true, gone: ["posted-01"] });
+    expect(await pending).toEqual([]);
+    expect(useLibraryStore.getState().entries).toHaveLength(1);
   });
 });

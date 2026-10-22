@@ -30,6 +30,7 @@ import {
   LIBRARY_DETAIL_BATCH_SIZE,
   listLibrary,
   updateLibraryEntry,
+  verifyLibraryPosted,
   type LibraryBucketUsage,
   type LibraryEntryResult,
   type LibraryEntryView,
@@ -79,6 +80,12 @@ interface LibraryState {
   /** Ensure one row has details (used when a user clicks before its preview
    * batch settles), returning null if it can no longer be read. */
   hydrateOne(guildId: string, id: string): Promise<LibraryEntryView | null>;
+  /** Check the given posted entries against Discord (server-side) and drop
+   * the ones whose message was deleted there. Resolves with the dropped
+   * entries. Each entry is asked about at most once a minute per tab (the
+   * proxy enforces the same interval across tabs and teammates); failures are
+   * silent — an entry nobody could check just stays. */
+  verifyPosted(guildId: string, ids: string[]): Promise<LibraryEntryView[]>;
   /** Record a just-posted message (label `posted`, upserted by message id).
    *  Fire-and-forget: any failure is swallowed — the send already succeeded. */
   recordPosted(guildId: string, input: RecordLibraryPostInput): Promise<void>;
@@ -146,6 +153,13 @@ const detailTasks = new Map<string, Promise<void>>();
 const detailTaskKey = (guildId: string, id: string) => `${guildId}:${id}`;
 let accountGeneration = 0;
 
+/** Mirrors the proxy's per-entry check interval (`CHECK_INTERVAL_SECS`), so
+ * scrolling or re-rendering a directory doesn't re-send ids the proxy would
+ * skip anyway. */
+export const POSTED_VERIFY_INTERVAL_MS = 60_000;
+/** When this tab last asked about each entry, keyed like `detailTasks`. */
+const verifyAskedAt = new Map<string, number>();
+
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   guildId: null,
   entries: [],
@@ -159,6 +173,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   reset() {
     accountGeneration += 1;
     detailTasks.clear();
+    verifyAskedAt.clear();
     set({
       guildId: null,
       entries: [],
@@ -320,6 +335,46 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (accountGeneration !== generation) return null;
     const hydrated = get().entries.find((entry) => entry.id === id);
     return hydrated && libraryEntryHasDetails(hydrated) ? hydrated : null;
+  },
+
+  async verifyPosted(guildId, ids) {
+    if (!isLibraryConfigured() || get().guildId !== guildId) return [];
+    const generation = accountGeneration;
+    const now = Date.now();
+    const postedIds = new Set(
+      get()
+        .entries.filter((entry) => entry.label === "posted")
+        .map((entry) => entry.id),
+    );
+    const due = [...new Set(ids)].filter((id) => {
+      if (!postedIds.has(id)) return false;
+      const asked = verifyAskedAt.get(detailTaskKey(guildId, id));
+      return asked === undefined || now - asked >= POSTED_VERIFY_INTERVAL_MS;
+    });
+    if (due.length === 0) return [];
+    for (const id of due) verifyAskedAt.set(detailTaskKey(guildId, id), now);
+
+    const removed: LibraryEntryView[] = [];
+    for (let offset = 0; offset < due.length; offset += LIBRARY_DETAIL_BATCH_SIZE) {
+      const res = await verifyLibraryPosted(
+        guildId,
+        due.slice(offset, offset + LIBRARY_DETAIL_BATCH_SIZE),
+      );
+      // An old proxy (404), a signed-out tab, a network blip: nothing to do.
+      if (!res.ok) break;
+      if (accountGeneration !== generation || get().guildId !== guildId) return removed;
+      if (res.gone.length === 0) continue;
+      const gone = new Set(res.gone);
+      const dropped = get().entries.filter((entry) => gone.has(entry.id));
+      if (dropped.length === 0) continue;
+      removed.push(...dropped);
+      const droppedPosted = dropped.filter((entry) => entry.label === "posted").length;
+      set((state) => ({
+        entries: state.entries.filter((entry) => !gone.has(entry.id)),
+        posted: { ...state.posted, used: Math.max(0, state.posted.used - droppedPosted) },
+      }));
+    }
+    return removed;
   },
 
   async recordPosted(guildId, input) {

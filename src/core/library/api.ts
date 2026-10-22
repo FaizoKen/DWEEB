@@ -204,6 +204,47 @@ export async function fetchLibraryEntries(
   return { ok: true, items: data?.items ?? [] };
 }
 
+export type LibraryVerifyResult =
+  | { ok: true; gone: string[] }
+  | { ok: false; error: string; status: number };
+
+/** Ask the proxy whether the listed posted entries' Discord messages still
+ * exist. Entries whose message was deleted are removed server-side and named
+ * in `gone`; anything Discord couldn't settle stays. The proxy asks about each
+ * entry at most once a minute, so repeat calls are cheap. Bounded like detail
+ * hydration. */
+export async function verifyLibraryPosted(
+  guildId: string,
+  ids: string[],
+): Promise<LibraryVerifyResult> {
+  if (!isLibraryConfigured()) {
+    return {
+      ok: false,
+      error: "The message library isn't configured on this deployment.",
+      status: 0,
+    };
+  }
+  if (ids.length > LIBRARY_DETAIL_BATCH_SIZE) {
+    return { ok: false, error: "Too many library entries requested.", status: 400 };
+  }
+  let res: Response;
+  try {
+    res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/library/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the library service.", status: 0 };
+  }
+  if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
+  const data = (await res.json().catch(() => null)) as { gone?: unknown } | null;
+  const gone = Array.isArray(data?.gone)
+    ? data.gone.filter((id): id is string => typeof id === "string")
+    : [];
+  return { ok: true, gone };
+}
+
 /**
  * Recover one posted message's update credential by its Discord message id.
  * This boot path must stay narrow: listing the library would transfer and ask

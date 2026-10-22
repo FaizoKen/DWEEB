@@ -1885,6 +1885,35 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   blocking pool, and reset/invalidate all decrypted rows on sign-out or a 401/403. Async draft
   origin recovery must also retain the editor's whole-document generation; a template/import/clear
   while the lookup is pending must never arm the replacement message with the old webhook secret.
+- **Posted history drops a message deleted on Discord — checked at read time, removed only on
+  proof** (`server/src/library_verify.rs`, 2026-10-22). Nothing tells DWEEB when someone deletes
+  a posted message in Discord (no gateway, and the bot may not be in the server), so the
+  directory kept showing it, with Load/Update aimed at nothing. While a Posted shelf is on
+  screen, both directories (`usePostedVerify`) send the visible card ids to
+  `POST /api/guilds/:g/library/verify` (dual-credential, ≤64 ids); the proxy asks Discord,
+  deletes the rows whose message is gone, answers `{gone: [ids]}`, and the store drops them with
+  a toast. Load-bearing: (1) **a false removal is the bug to fear**, so only proof removes —
+  `verdict` is a pure function over a `Prober` trait, pinned by scripted tests. The posting
+  webhook is asked first (no bot needed), but Discord reads webhook messages in the webhook's
+  *current* channel, so an Unknown Message (10008) counts only after the webhook is confirmed
+  still in the message's channel and asked again — under `lock_custom_hook` for a custom bot,
+  whose webhook roams on every post. A row without a thread is also checked as thread
+  `message_id` (a forum post's thread id is its starter message's), since older/scheduled rows
+  record a forum post without its thread. The bot is asked only when the webhook can't settle it
+  (deleted webhook, moved webhook, Unknown Channel for a thread) **and** the bot is in the
+  server, where Unknown Channel (10003) means the channel is gone (a hidden one is a 403). Rate
+  limits, 5xx, 403s and a bare 404 with no JSON code are never a verdict
+  (`classify_message_probe`). (2) **Each row is probed at most once a minute** —
+  `claim_check` stamps `checked_at` with one conditional UPDATE before any request, and every
+  record/refresh of a post stamps it too (the send just proved the message exists); requests are
+  paced per webhook/channel on `X-RateLimit-Remaining`/`Reset-After` (429s count toward
+  Cloudflare's invalid-request ban on our shared IP), with an 8 s pass budget and at most four
+  passes process-wide (shed, not queued — unclaimed rows are asked next time). (3) **A deleted
+  message's never-expire slot is released with its row** (it can protect nothing; message ids
+  are never reused), so it doesn't linger as an orphan. No deploy ordering: an old proxy 404s
+  the route and the FE ignores it. Guarded by `library_verify::tests`, the `claim`/`remove`
+  store tests in library.rs, `classify_message_probe` tests in discord.rs, and
+  `libraryStore.verifyPosted` in `libraryStore.test.ts`.
 - Keep the default `webhook.incoming` OAuth path. Custom bots must not collect bot tokens;
   their OAuth create flow uses the popup/localStorage handshake because Discord can sever
   `window.opener`.

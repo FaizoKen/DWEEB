@@ -134,6 +134,16 @@ pub struct OriginRow {
     pub application_id: Option<String>,
 }
 
+/// What an existence check reads for one posted row (`library_verify.rs`).
+pub struct CheckRow {
+    pub id: String,
+    pub message_id: String,
+    pub channel_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub webhook_sealed: Option<String>,
+    pub application_id: Option<String>,
+}
+
 /// List-card metadata. Deliberately excludes both sealed columns, so opening
 /// the directory does not pull large ciphertext blobs through SQLite merely to
 /// learn which chips/cards exist. Details are fetched in bounded batches when
@@ -302,6 +312,21 @@ impl LibraryStore {
                 conn.execute_batch("ALTER TABLE library_messages ADD COLUMN application_id TEXT;")
                     .map_err(|e| format!("migrate application_id: {e}"))?;
             }
+            // When a posted row's message was last confirmed on Discord (or
+            // claimed for a check) — see `library_verify.rs`. NULL = never
+            // checked, which every row recorded before this column is.
+            let has_checked: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_messages') \
+                     WHERE name = 'checked_at'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has_checked == 0 {
+                conn.execute_batch("ALTER TABLE library_messages ADD COLUMN checked_at INTEGER;")
+                    .map_err(|e| format!("migrate checked_at: {e}"))?;
+            }
             // One posted row per message in a server. `upsert` checks and
             // inserts under one write lock, so new duplicates can't arise; this
             // index makes it the schema's guarantee too. A database that already
@@ -359,7 +384,9 @@ impl LibraryStore {
     /// Insert `n`, or — when it's a posted entry whose `message_id` already has
     /// a posted row in the guild — refresh that row in place (re-posting or
     /// updating a live message must never pile up duplicates).
-    /// Returns the entry's id (existing on refresh, `n_id` on insert).
+    /// Returns the entry's id (existing on refresh, `n_id` on insert). Both
+    /// stamp `checked_at`: the post or edit being recorded has just proved the
+    /// message exists, so the existence check leaves it alone for a while.
     ///
     /// `limit_override` is the destination server's plan-tier cap **for `n`'s
     /// label** (the posted window or the draft quota), falling back to the
@@ -419,7 +446,7 @@ impl LibraryStore {
                          application_id=COALESCE(?5, application_id), \
                          channel_id=COALESCE(?6, channel_id), thread_id=?7, \
                          dest_label=COALESCE(?8, dest_label), \
-                         title=COALESCE(?9, title), updated_at=?10 \
+                         title=COALESCE(?9, title), updated_at=?10, checked_at=?10 \
                          WHERE id=?1",
                         params![
                             id,
@@ -460,8 +487,8 @@ impl LibraryStore {
             "INSERT INTO library_messages \
              (id, guild_id, label, title, payload_sealed, webhook_sealed, webhook_id, \
               application_id, channel_id, message_id, thread_id, dest_label, created_by, \
-              created_at, updated_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",
+              created_at, updated_at, checked_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14,?14)",
             params![
                 n_id,
                 n.guild_id,
@@ -680,6 +707,87 @@ impl LibraryStore {
             .execute(
                 "DELETE FROM library_messages WHERE guild_id=?1 AND id=?2",
                 params![guild, id],
+            )
+            .map_err(e2s)?;
+        if n > 0 {
+            self.count.fetch_sub(n as i64, Ordering::Relaxed);
+        }
+        Ok(n > 0)
+    }
+
+    /// The posted rows among `ids` (guild-scoped) that name a Discord message
+    /// — what an existence check needs, and nothing it doesn't (no payload).
+    pub fn check_rows(&self, guild: &str, ids: &[String]) -> Result<Vec<CheckRow>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.lock();
+        let placeholders = (2..=ids.len() + 1)
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, message_id, channel_id, thread_id, webhook_sealed, application_id \
+             FROM library_messages \
+             WHERE guild_id=?1 AND label='posted' AND message_id IS NOT NULL \
+               AND id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare_cached(&sql).map_err(e2s)?;
+        let values = std::iter::once(guild).chain(ids.iter().map(String::as_str));
+        let rows = stmt
+            .query_map(params_from_iter(values), |r| {
+                Ok(CheckRow {
+                    id: r.get(0)?,
+                    message_id: r.get(1)?,
+                    channel_id: r.get(2)?,
+                    thread_id: r.get(3)?,
+                    webhook_sealed: r.get(4)?,
+                    application_id: r.get(5)?,
+                })
+            })
+            .map_err(e2s)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
+    }
+
+    /// Claim one posted row for an existence check: stamps `checked_at = now`
+    /// unless it was checked (or claimed) after `cutoff`. True = this caller
+    /// won the claim and should check it. One conditional UPDATE, so two
+    /// directory tabs open at once never both probe the same message, and a
+    /// row is probed at most once per check interval however often it's asked.
+    pub fn claim_check(
+        &self,
+        guild: &str,
+        id: &str,
+        now: i64,
+        cutoff: i64,
+    ) -> Result<bool, String> {
+        let conn = self.lock();
+        let n = conn
+            .execute(
+                "UPDATE library_messages SET checked_at=?3 \
+                 WHERE guild_id=?1 AND id=?2 AND label='posted' \
+                   AND (checked_at IS NULL OR checked_at <= ?4)",
+                params![guild, id, now, cutoff],
+            )
+            .map_err(e2s)?;
+        Ok(n > 0)
+    }
+
+    /// Remove a posted row whose message Discord confirmed deleted. Keyed on
+    /// the message id as well as the row id, so it can only ever remove the
+    /// record of the message that was checked. True when a row was removed.
+    pub fn remove_deleted_message(
+        &self,
+        guild: &str,
+        id: &str,
+        message_id: &str,
+    ) -> Result<bool, String> {
+        let conn = self.lock();
+        let n = conn
+            .execute(
+                "DELETE FROM library_messages \
+                 WHERE guild_id=?1 AND id=?2 AND label='posted' AND message_id=?3",
+                params![guild, id, message_id],
             )
             .map_err(e2s)?;
         if n > 0 {
@@ -1041,7 +1149,7 @@ pub async fn library_entries(
     let mut seen = HashSet::with_capacity(body.ids.len());
     let mut ids = Vec::with_capacity(body.ids.len());
     for id in body.ids {
-        if id.len() != ID_LEN || !id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        if !is_entry_id(&id) {
             return Err(bad_request("Invalid library entry id."));
         }
         if seen.insert(id.clone()) {
@@ -1422,7 +1530,7 @@ fn cap_json(cap: Option<i64>) -> Value {
     }
 }
 
-fn store(st: &AppState) -> Result<Arc<LibraryStore>, AppError> {
+pub(crate) fn store(st: &AppState) -> Result<Arc<LibraryStore>, AppError> {
     if !st.config.library_enabled {
         return Err(AppError::Status {
             status: StatusCode::NOT_IMPLEMENTED,
@@ -1473,6 +1581,11 @@ fn over_quota(limit: i64) -> AppError {
         ),
         retry_after: None,
     }
+}
+
+/// Whether `id` has the shape of a library entry id (base62, [`ID_LEN`]).
+pub(crate) fn is_entry_id(id: &str) -> bool {
+    id.len() == ID_LEN && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 /// base62 entry id — the same unbiased construction as the schedule ids.
@@ -2079,6 +2192,85 @@ mod tests {
             h.join().unwrap().unwrap();
         }
         assert_eq!(store.counts_for_guild("g1").unwrap(), (1, 0));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_existence_check_claims_each_posted_row_once_per_interval() {
+        let (store, path) = temp_store("verify-claim", 1000, 10, 50);
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-post-001",
+            100,
+            None,
+        )
+        .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "draft", None),
+            "id-draf-001",
+            100,
+            None,
+        )
+        .unwrap();
+        let ids = vec!["id-post-001".to_string(), "id-draf-001".to_string()];
+
+        // Only the posted row is a candidate, and only in its own server.
+        let rows = store.check_rows("g1", &ids).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].message_id, "m1");
+        assert!(store.check_rows("g2", &ids).unwrap().is_empty());
+
+        // Recording the post stamped it as just confirmed.
+        assert!(!store.claim_check("g1", "id-post-001", 130, 70).unwrap());
+        // Past the interval, exactly one claimant wins.
+        assert!(store.claim_check("g1", "id-post-001", 200, 140).unwrap());
+        assert!(!store.claim_check("g1", "id-post-001", 201, 141).unwrap());
+        // Drafts and other servers' rows are never claimed.
+        assert!(!store.claim_check("g1", "id-draf-001", 200, 140).unwrap());
+        assert!(!store.claim_check("g2", "id-post-001", 400, 340).unwrap());
+
+        // A refresh of the message (a re-send) re-stamps it.
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-post-002",
+            300,
+            None,
+        )
+        .unwrap();
+        assert!(!store.claim_check("g1", "id-post-001", 330, 270).unwrap());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn removing_a_deleted_message_touches_only_that_messages_record() {
+        let (store, path) = temp_store("verify-remove", 1000, 10, 50);
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-post-001",
+            1,
+            None,
+        )
+        .unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-draf-001", 1, None).unwrap();
+        // A different message id, another server, or a draft: nothing goes.
+        assert!(!store
+            .remove_deleted_message("g1", "id-post-001", "m2")
+            .unwrap());
+        assert!(!store
+            .remove_deleted_message("g2", "id-post-001", "m1")
+            .unwrap());
+        assert!(!store
+            .remove_deleted_message("g1", "id-draf-001", "m1")
+            .unwrap());
+        assert!(store
+            .remove_deleted_message("g1", "id-post-001", "m1")
+            .unwrap());
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (0, 1));
+        assert_eq!(store.count.load(Ordering::Relaxed), 1);
         let _ = std::fs::remove_file(path);
     }
 }

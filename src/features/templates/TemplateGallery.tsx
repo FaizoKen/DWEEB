@@ -64,6 +64,7 @@ import {
   pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
+import { removedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
 import { interactiveComponents } from "@/core/plugins/targets";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { attachEditorFields } from "@/core/serialization/normalize";
@@ -890,6 +891,21 @@ export function TemplateGallery() {
     hydrateLibrary,
     libDetailError,
   ]);
+  // Drop posted cards whose Discord message was deleted. Their never-expire
+  // slot is released server-side with them, so the slot strip reloads.
+  usePostedVerify(
+    connectedGuildId,
+    activeLibraryLabel === "posted",
+    activeLibraryEntries,
+    effectiveVisibleCount,
+    (removed) => {
+      pushToast(removedPostsMessage(removed.length));
+      if (!connectedGuildId) return;
+      fetchPermanentSlots(connectedGuildId)
+        .then(setPermanent)
+        .catch(() => {});
+    },
+  );
   const librarySearchPending =
     deferredQuery.trim().length > 0 &&
     activeLibraryLabel !== null &&

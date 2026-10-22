@@ -470,6 +470,97 @@ impl AppLookup {
     }
 }
 
+/// What Discord said when asked whether one message still exists — read by
+/// the message library's existence check (`library_verify.rs`), which removes
+/// a posted entry only on an answer that can't mean anything but "deleted".
+/// The split keeps every "couldn't tell" apart from every "no": a rate limit,
+/// a 5xx, a dropped connection, a permission refusal and a bare 404 without
+/// Discord's JSON error code all land in `Inconclusive`, never in a verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageProbe {
+    Exists,
+    /// 404 `10008 Unknown Message` — no such message where we looked.
+    UnknownMessage,
+    /// 404 `10003 Unknown Channel` — the channel/thread we looked in doesn't
+    /// exist (for a webhook read with `thread_id`, it may also be a thread
+    /// outside the webhook's channel; the caller decides what that proves).
+    UnknownChannel,
+    /// 404 `10015 Unknown Webhook`, or a 401 on a webhook-token call (the
+    /// token was reset): this credential can't answer any more. Says nothing
+    /// about the message — a webhook's messages outlive the webhook.
+    UnknownWebhook,
+    Inconclusive,
+}
+
+/// A [`MessageProbe`] plus how long to wait before the next call in the same
+/// rate-limit bucket: Discord's `X-RateLimit-Remaining: 0` with its
+/// `X-RateLimit-Reset-After`. Pacing on that header (rather than on the 429
+/// that follows ignoring it) keeps a sweep of one webhook's messages from
+/// collecting 429s, which count toward Cloudflare's invalid-request ban on
+/// the proxy's shared address.
+#[derive(Debug, Clone, Copy)]
+pub struct Probe {
+    pub outcome: MessageProbe,
+    pub pause: Option<Duration>,
+}
+
+/// Classify a message read's status + Discord's JSON error `code`. `bot` is
+/// true for a bot-token read, where a 401 is our token, not a reset webhook.
+pub(crate) fn classify_message_probe(status: u16, code: Option<u64>, bot: bool) -> MessageProbe {
+    match (status, code) {
+        (200..=299, _) => MessageProbe::Exists,
+        (404, Some(10008)) => MessageProbe::UnknownMessage,
+        (404, Some(10003)) => MessageProbe::UnknownChannel,
+        (404, Some(10015)) if !bot => MessageProbe::UnknownWebhook,
+        (401, _) if !bot => MessageProbe::UnknownWebhook,
+        _ => MessageProbe::Inconclusive,
+    }
+}
+
+/// The wait Discord asks for before the bucket's next request, when the one
+/// just made spent its last slot. `None` while requests remain, or when the
+/// headers are absent/garbled (the 429 retry in [`send_with_retry`] is then
+/// the backstop).
+pub(crate) fn bucket_pause(remaining: Option<&str>, reset_after: Option<&str>) -> Option<Duration> {
+    if remaining?.trim() != "0" {
+        return None;
+    }
+    parse_retry_after(reset_after?)
+}
+
+/// Read a message-existence answer off a response. The body is only read for
+/// a 404 (for its error code), and never decoded into a message.
+async fn probe_from(resp: reqwest::Response, bot: bool) -> Probe {
+    let header = |name: &str| {
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let pause = bucket_pause(
+        header("x-ratelimit-remaining").as_deref(),
+        header("x-ratelimit-reset-after").as_deref(),
+    );
+    let status = resp.status().as_u16();
+    let code = if status == 404 {
+        resp.json::<Value>()
+            .await
+            .ok()
+            .and_then(|v| v.get("code").and_then(Value::as_u64))
+    } else {
+        None
+    };
+    Probe {
+        outcome: classify_message_probe(status, code, bot),
+        pause,
+    }
+}
+
+const INCONCLUSIVE: Probe = Probe {
+    outcome: MessageProbe::Inconclusive,
+    pause: None,
+};
+
 impl Discord {
     pub fn new(token: String, max_concurrency: usize) -> Self {
         let http = Client::builder()
@@ -845,6 +936,48 @@ impl Discord {
             return Ok(None);
         }
         Err(webhook_error_from(resp).await)
+    }
+
+    /// Ask, with the webhook token, whether one of its messages still exists.
+    /// Unlike [`Self::webhook_message`] this never fails: every transport or
+    /// status problem is [`MessageProbe::Inconclusive`]. Note what an answer
+    /// can mean — Discord resolves the read inside the webhook's *current*
+    /// channel (or the named thread), so `UnknownMessage` from a webhook that
+    /// has since moved channels says nothing about the message.
+    pub async fn probe_webhook_message(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        message_id: &str,
+        thread_id: Option<&str>,
+    ) -> Probe {
+        let mut url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        if push_thread_param(&mut url, '?', thread_id).is_err() {
+            return INCONCLUSIVE;
+        }
+        match send_with_retry(self.http.get(&url)).await {
+            Ok(resp) => probe_from(resp, false).await,
+            Err(_) => INCONCLUSIVE,
+        }
+    }
+
+    /// Ask, with the bot token, whether a message exists in a channel or
+    /// thread. Needs the bot to see the channel and read its history; a
+    /// refusal is `Inconclusive`. Holds the bot rate-budget permit.
+    pub async fn probe_channel_message(&self, channel_id: &str, message_id: &str) -> Probe {
+        let Ok(_permit) = self.bot_sem.acquire().await else {
+            return INCONCLUSIVE;
+        };
+        let req = self
+            .http
+            .get(format!(
+                "{API_BASE}/channels/{channel_id}/messages/{message_id}"
+            ))
+            .header(AUTHORIZATION, self.bot_auth.as_str());
+        match send_with_retry(req).await {
+            Ok(resp) => probe_from(resp, true).await,
+            Err(_) => INCONCLUSIVE,
+        }
     }
 
     /// Edit a webhook's own message by id, with the webhook token. `body` is a
@@ -1986,6 +2119,59 @@ mod tests {
             upload_bytes(&[file("files[0]", 100), file("files[1]", 923)]),
             1023
         );
+    }
+
+    #[test]
+    fn only_discords_own_error_codes_classify_a_message_as_missing() {
+        use MessageProbe::*;
+        assert_eq!(classify_message_probe(200, None, false), Exists);
+        assert_eq!(
+            classify_message_probe(404, Some(10008), false),
+            UnknownMessage
+        );
+        assert_eq!(
+            classify_message_probe(404, Some(10008), true),
+            UnknownMessage
+        );
+        assert_eq!(
+            classify_message_probe(404, Some(10003), true),
+            UnknownChannel
+        );
+        assert_eq!(
+            classify_message_probe(404, Some(10015), false),
+            UnknownWebhook
+        );
+        assert_eq!(
+            classify_message_probe(401, Some(50027), false),
+            UnknownWebhook
+        );
+        // A bare 404 (an edge or proxy page, no JSON code) proves nothing.
+        assert_eq!(classify_message_probe(404, None, false), Inconclusive);
+        // The bot's own 401 is our token, never a verdict about a webhook.
+        assert_eq!(classify_message_probe(401, None, true), Inconclusive);
+        assert_eq!(classify_message_probe(404, Some(10015), true), Inconclusive);
+        for status in [400, 403, 429, 500, 502, 503] {
+            assert_eq!(
+                classify_message_probe(status, Some(10008), false),
+                Inconclusive
+            );
+            assert_eq!(
+                classify_message_probe(status, Some(10008), true),
+                Inconclusive
+            );
+        }
+    }
+
+    #[test]
+    fn a_spent_bucket_pauses_for_its_reset() {
+        assert_eq!(
+            bucket_pause(Some("0"), Some("1.5")),
+            Some(Duration::from_millis(1550))
+        );
+        assert_eq!(bucket_pause(Some("3"), Some("1.5")), None);
+        assert_eq!(bucket_pause(None, Some("1.5")), None);
+        assert_eq!(bucket_pause(Some("0"), None), None);
+        assert_eq!(bucket_pause(Some("0"), Some("soon")), None);
     }
 
     #[test]

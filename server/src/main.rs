@@ -26,6 +26,7 @@ mod entitlement;
 mod error;
 mod feedback;
 mod library;
+mod library_verify;
 mod live_build;
 mod mcp;
 mod ratelimit;
@@ -769,6 +770,13 @@ async fn run() {
         .route(
             "/api/guilds/:guild_id/library/entries",
             post(library::library_entries).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        // Read-time existence check for the posted cards a directory shows:
+        // removes entries whose Discord message was deleted (`library_verify.rs`).
+        .route(
+            "/api/guilds/:guild_id/library/verify",
+            post(library_verify::library_verify)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
         .route(
             "/api/guilds/:guild_id/library/origin/:message_id",

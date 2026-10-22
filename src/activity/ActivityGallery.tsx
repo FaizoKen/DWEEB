@@ -41,6 +41,7 @@ import {
   pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
+import { removedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
 import type { PermanentSlots } from "@/core/guild/api";
 import {
   addActivityPermanentMessage,
@@ -528,6 +529,21 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     hydrateLibrary,
     libDetailError,
   ]);
+  // Drop posted cards whose Discord message was deleted. Their never-expire
+  // slot is released server-side with them, so the pin chips reload.
+  usePostedVerify(
+    targetGuildId,
+    activeLibraryLabel === "posted",
+    activeLibraryEntries,
+    effectiveVisibleCount,
+    (removed) => {
+      pushToast(removedPostsMessage(removed.length));
+      if (!targetGuildId) return;
+      fetchActivityPermanentSlots(targetGuildId)
+        .then(setPermanent)
+        .catch(() => {});
+    },
+  );
   const librarySearchPending =
     deferredQuery.trim().length > 0 &&
     activeLibraryLabel !== null &&
