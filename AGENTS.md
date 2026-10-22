@@ -940,6 +940,38 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   interactions against an in-process fake Discord — extend it for any new flow; a debug build
   (`cargo run`) honours `DISCORD_API_BASE` for clicking through the config UI against a
   stand-in, and release builds ignore it.
+- **Tickets' thread mode: a ticket can be a private thread instead of a channel** (0.4,
+  2026-10-23; panel `mode: "thread"` + `thread_channel_id`, per-topic `thread_channel_id`).
+  Facts it rests on (Discord's thread docs, re-read before changing it): a private thread can
+  only be made in a plain **text** channel (type 0 — not announcement/forum); it shows only to
+  its **members** plus holders of **Manage Threads** in the parent, and members still need View
+  Channel on the parent; talking in it takes **Send Messages in Threads** (plain Send Messages
+  does nothing there); **deleting a thread and changing `locked` need Manage Threads**, while
+  renaming/archiving/removing members are allowed to the thread's creator (the bot); an
+  **archived** thread refuses edits and member adds (50083) but a post wakes it unless it's
+  locked; threads have **no overwrites**. Hence: (1) **each row records its own `kind`** — a panel
+  switched to threads keeps closing its old channel tickets the channel way, and every in-ticket
+  flow branches on `ticket.kind`, never on the panel's current `mode`; (2) the opener gets in by
+  `PUT …/thread-members/{id}` (the thread is created `invitable: false`, so only moderators —
+  the bot, via Manage Threads — can add), and an open whose opener can't be added rolls the
+  thread back (delete, or archive when even that's refused); (3) **staff get in by being
+  mentioned**: with `ping_staff` on, the thread welcome mentions every staff role (any the template
+  doesn't already mention go on an appended `-#` line kept whole under the cap) — listing a
+  role's members needs the privileged GUILD_MEMBERS intent prod doesn't hold, so there is no
+  other way; roles with Manage Threads in the parent see every ticket regardless, and the config
+  pre-flight (`ChannelView.threads`: bot gaps, `@everyone` gaps, `moderator_roles`,
+  `bot_mentions_any_role`) warns per staff role which of the two it relies on, and when it has
+  neither; (4) **lock = Discord's own `locked` flag** (read-only for non-moderators), in the
+  channel lock's order — lock (+unarchive) first, banner, record `locked`, retire old controls,
+  rename, records, then **archive**; reopen unlocks+unarchives first; nothing per-member, so
+  `muted_by_lock` stays NULL; (5) anything that edits or adds in an idle thread wakes it first:
+  Claim reads `interaction.channel.thread_metadata.archived` and answers DEFERRED_UPDATE + wake +
+  `PATCH @original` instead of the in-place UPDATE; Members wakes on that flag *and* retries once
+  on a 50083 the flag didn't predict. Needs the bot to hold Manage Threads, Create Private Threads
+  and Send Messages in Threads — added to the shared invite union for it (see the union entry), so
+  a server invited earlier fixes it with one re-add. Guarded by the thread tests at the end of
+  `flow_tests.rs` (the fake refuses edits in archived threads and lock changes without Manage
+  Threads, so a mis-ordered flow fails there).
 - **A plugin may only answer 5xx for its own faults — 5xx is the paging channel.**
   `TraceLayer::new_for_http()`'s default classifier reports every 5xx through `on_failure` at
   ERROR level, and `dweeb-alerts` forwards backend ERRORs to Discord. So a status code is an
@@ -1742,8 +1774,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   key and `scripts/seo/submit-indexnow.mjs`. The notification is best-effort and must never fail
   or roll back an otherwise healthy deploy.
 - **Share-token golden fixtures**: regenerate only via `bun run gen:golden` after a version bump — never hand-edit.
-- **Bot permission union** is `805306385`; changing it requires editing
-  `src/core/guild/config.ts` + 4 plugin `config.rs` files and per-server bot re-invites.
+- **Bot permission union** is `361582559249` (since 2026-10-23; was `805306385`): Create
+  Instant Invite + Manage Channels + Manage Roles + Manage Webhooks + Manage Threads +
+  Create Private Threads + Send Messages in Threads — the last three for Tickets' thread mode.
+  Changing it requires editing `src/core/guild/config.ts` (pinned by `config.test.ts`) + the 6
+  plugin `config.rs` files (tickets, self-role, giveaway, poll, quick-replies, directory — each
+  pins the literal) and per-server bot re-invites: a server invited before a bump keeps its old
+  grant until it re-adds the bot (or gives the bot's role the new bits by hand).
 - Command-set changes must keep `scripts/register-commands.mjs`,
   `server/src/discord.rs::command_set()`, and dispatcher command names/matches aligned.
 - Plans (Free/Plus/Pro) are **quota-raising only** — a plan must never lock a feature outright.

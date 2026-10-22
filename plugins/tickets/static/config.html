@@ -164,7 +164,7 @@
       .add { margin-top: 8px; }
 
       /* A problem the bot has with the picked category / log channel. */
-      .warn-text { font-size: 12px; color: var(--yellow); margin-top: 6px; }
+      .warn-text { font-size: 12px; color: var(--yellow); margin-top: 6px; white-space: pre-line; }
       .warn-text:empty { display: none; }
 
       /* Per-topic routing (category + extra staff). */
@@ -209,19 +209,32 @@
     <h2><span class="step-num" id="staffStepNum">2</span> Who handles tickets
       <span class="count" id="staffCount"></span></h2>
     <div id="staffSection" class="locked">
+      <label class="lbl">Each ticket is…</label>
+      <div class="seg" id="modeSeg">
+        <button type="button" data-mode="channel" class="sel">A private channel</button>
+        <button type="button" data-mode="thread">A private thread</button>
+      </div>
+      <div class="hint" id="modeHint"></div>
+
       <label class="lbl">Staff roles — they can see &amp; reply in every ticket</label>
       <input id="staffSearch" class="search" type="text" placeholder="Search roles…" />
       <div id="staffRoles" class="list"></div>
-      <div class="hint" id="staffHint">
-        No role is required — server admins always see tickets — but adding your
-        support role is the usual setup. Staff get <b>Claim</b> and <b>Members</b>
-        (add or remove people) buttons in every ticket.
+      <div class="hint" id="staffHint"></div>
+      <div class="warn-text" id="staffWarn"></div>
+
+      <div id="categoryBlock">
+        <label class="lbl" for="category">Create ticket channels under…</label>
+        <select id="category"></select>
+        <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root. If the category fills up (Discord allows 50 channels) or the bot can't use it, tickets open at the top level instead of failing.</div>
+        <div class="warn-text" id="categoryWarn"></div>
       </div>
 
-      <label class="lbl" for="category">Create ticket channels under…</label>
-      <select id="category"></select>
-      <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root. If the category fills up (Discord allows 50 channels) or the bot can't use it, tickets open at the top level instead of failing.</div>
-      <div class="warn-text" id="categoryWarn"></div>
+      <div id="threadBlock" style="display: none">
+        <label class="lbl" for="threadChannel">Open ticket threads in…</label>
+        <select id="threadChannel"></select>
+        <div class="hint">Usually your support channel. Members need to see it to see their ticket — they don't need to post there. Discord only makes private threads in text channels, not announcement or forum channels.</div>
+        <div class="warn-text" id="threadWarn"></div>
+      </div>
 
       <label class="lbl" for="logChannel">Log &amp; transcript channel</label>
       <select id="logChannel"></select>
@@ -235,7 +248,7 @@
       <textarea id="welcome" rows="4" maxlength="1500"></textarea>
       <div class="hint">
         Placeholders: <code>{user}</code> (mention) · <code>{username}</code> ·
-        <code>{ticket}</code> (channel) · <code>{topic}</code> ·
+        <code>{ticket}</code> (link to the ticket) · <code>{topic}</code> ·
         <code>{staff}</code> (your staff roles).
       </div>
 
@@ -252,8 +265,8 @@
         <div id="intake" class="editor"></div>
         <button type="button" id="addField" class="add">+ Add question</button>
 
-        <h2 style="margin-top:20px"><span class="step-num">+</span> Channel &amp; pings</h2>
-        <label class="lbl">Channel name</label>
+        <h2 style="margin-top:20px"><span class="step-num">+</span> Names &amp; pings</h2>
+        <label class="lbl">Ticket name</label>
         <div class="seg" id="namingSeg">
           <button type="button" data-naming="number" class="sel">Numbered · ticket-0001</button>
           <button type="button" data-naming="username">Username · ticket-name</button>
@@ -261,15 +274,15 @@
         <label class="check"><input type="checkbox" id="pingOpener" checked />
           <span><span class="t">Ping the opener</span><div class="d">Mention them in the welcome so they get a notification.</div></span></label>
         <label class="check"><input type="checkbox" id="pingStaff" />
-          <span><span class="t">Ping staff roles</span><div class="d">Notify your staff roles when a ticket opens (roles must be mentionable).</div></span></label>
+          <span><span class="t" id="pingStaffT">Ping staff roles</span><div class="d" id="pingStaffD">Notify your staff roles when a ticket opens (roles must be mentionable).</div></span></label>
 
         <h2 style="margin-top:20px"><span class="step-num">+</span> Closing</h2>
         <label class="lbl">When a ticket is closed</label>
         <div class="seg" id="closeSeg">
-          <button type="button" data-close="delete" class="sel">Delete the channel</button>
-          <button type="button" data-close="lock">Lock &amp; keep it</button>
+          <button type="button" data-close="delete" class="sel" id="closeDeleteBtn">Delete the channel</button>
+          <button type="button" data-close="lock" id="closeLockBtn">Lock &amp; keep it</button>
         </div>
-        <div class="hint" id="closeHint">Deleting is cleanest. Locking keeps the channel (read-only) with Reopen / Delete buttons for the record.</div>
+        <div class="hint" id="closeHint"></div>
         <label class="check"><input type="checkbox" id="closeConfirm" checked />
           <span><span class="t">Ask for a reason on close</span><div class="d">Pops a quick box (also guards against an accidental close).</div></span></label>
         <label class="check"><input type="checkbox" id="openerClose" checked />
@@ -361,10 +374,20 @@
       // Server-wide permissions the bot lacks (from the connect pre-flight).
       let botMissingRequired = [];
       let botMissingOptional = [];
+      // …and the ones thread mode needs instead.
+      let botMissingThread = [];
       let roles = []; // [{ id, name, color, mentionable }]
       let categories = []; // [{ id, name, bot_missing }]
-      let textChannels = []; // [{ id, name, parent_id, bot_missing }]
+      // [{ id, name, kind, parent_id, bot_missing, threads? }] — `threads` (text
+      // channels only) judges the channel as a home for ticket threads:
+      // { bot_missing, members_missing, moderator_roles, bot_mentions_any_role }.
+      let textChannels = [];
 
+      // "channel" — each ticket is a private channel; "thread" — a private
+      // thread inside one channel.
+      let mode = "channel";
+      let threadChannelId = "";
+      let threadChannelName = "";
       let staffSelected = new Set();
       let categoryId = "";
       let categoryName = "";
@@ -373,6 +396,9 @@
       let naming = "number";
       let pingOpener = true;
       let pingStaff = false;
+      // In thread mode a staff role gets into a ticket by being mentioned, so
+      // picking threads turns "ping staff" on — unless the admin already chose.
+      let pingStaffTouched = false;
       let intake = []; // [{ id, label, style, required, placeholder }]
       // [{ id, label, emoji, description, category_id, staff_roles: [{ id, name, color }] }]
       let topics = [];
@@ -399,6 +425,9 @@
         String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
       const autoMode = () => defaultBot && autoGuild;
+      const threads = () => mode === "thread";
+      // Text channels a private thread can be made in.
+      const threadHosts = () => textChannels.filter((c) => c.kind === 0 && c.threads);
 
       function botInviteUrl() {
         if (!inviteUrl) return null;
@@ -467,6 +496,17 @@
       // defaults from @everyone are where that bites.
       function preflightHtml() {
         const recheck = ` <a href="#" id="retryLink2">Re-check</a>`;
+        if (threads()) {
+          // Threads carry no overwrites, so the optional grants don't apply:
+          // what members may do in a ticket thread is the channel's own say.
+          if (!botMissingThread.length) return "";
+          const invite = botInviteUrl();
+          const viaInvite = ["Manage Threads", "Create Private Threads", "Send Messages in Threads"];
+          const add = invite && botMissingThread.some((n) => viaInvite.includes(n))
+            ? ` The quickest fix: <a href="${invite}" target="_blank" rel="noopener">re-add the bot</a> — its invite now includes the thread permissions.`
+            : "";
+          return `<div class="callout bad">⚠️ Ticket threads can't open yet: the bot's role is missing ${boldList(botMissingThread)}. Give the DWEEB bot's role those in <b>Server Settings → Roles</b>.${add}${recheck}</div>`;
+        }
         if (botMissingRequired.length) {
           const invite = botInviteUrl();
           const add = invite && (!botCanManageChannels || !botCanManageRoles)
@@ -491,6 +531,7 @@
 
       // The bot's trouble with the picked category / log channel, if any.
       function renderChannelWarnings() {
+        renderThreadWarnings();
         const cat = categories.find((c) => c.id === categoryId);
         const catLacks = (cat && cat.bot_missing) || [];
         $("categoryWarn").textContent = catLacks.length
@@ -506,6 +547,106 @@
             : `⚠ The bot can't post in #${log.name}: it lacks ${lacks.join(", ")} there. Allow ${lacks.length === 1 ? "it" : "them"} for the DWEEB bot's role in the channel's permissions.`;
         sendResize();
       }
+
+      const plural = (list, one, many) => (list.length === 1 ? one : many);
+
+      // Thread mode: what's wrong with the picked channel, and which staff
+      // roles won't see the tickets in it. A private thread shows only to the
+      // people in it plus anyone holding Manage Threads there, and a role gets
+      // in by being mentioned — which "ping staff" does, if the role can be
+      // mentioned.
+      function renderThreadWarnings() {
+        const home = threadHosts().find((c) => c.id === threadChannelId);
+        const t = home && home.threads;
+        const lines = [];
+        if (t && t.bot_missing.length) {
+          lines.push(`⚠ The bot can't run ticket threads in #${home.name}: it lacks ${t.bot_missing.join(", ")} there. Allow ${plural(t.bot_missing, "it", "them")} for the DWEEB bot's role in the channel's permissions.`);
+        }
+        if (t && t.members_missing.length) {
+          lines.push(`⚠ @everyone can't ${t.members_missing.join(", ")} in #${home.name}, so members need ${plural(t.members_missing, "it", "them")} from another role to see or reply in their ticket — fine if a member role grants ${plural(t.members_missing, "it", "them")}.`);
+        }
+        $("threadWarn").textContent = lines.join("\n");
+
+        const staff = [];
+        if (threads() && t) {
+          const unseen = [];
+          const unmentionable = [];
+          for (const r of roles.filter((x) => staffSelected.has(x.id))) {
+            if (t.moderator_roles.includes(r.id)) continue;
+            if (!pingStaff) unseen.push(r.name);
+            else if (r.mentionable === false && !t.bot_mentions_any_role) unmentionable.push(r.name);
+          }
+          if (unseen.length) {
+            staff.push(`⚠ ${unseen.join(", ")} won't see ticket threads: turn on “Add staff to each ticket” under Advanced options, or give ${plural(unseen, "the role", "the roles")} Manage Threads in #${home.name}.`);
+          }
+          if (unmentionable.length) {
+            staff.push(`⚠ ${unmentionable.join(", ")} can't be mentioned, so ${plural(unmentionable, "it", "they")} won't be added to ticket threads: make ${plural(unmentionable, "it", "them")} mentionable in Server Settings → Roles, or give ${plural(unmentionable, "it", "them")} Manage Threads in #${home.name}.`);
+          }
+        }
+        $("staffWarn").textContent = staff.join("\n");
+        sendResize();
+      }
+
+      // Everything whose wording or visibility follows the ticket type.
+      function renderMode() {
+        for (const b of $("modeSeg").children) b.classList.toggle("sel", b.dataset.mode === mode);
+        const t = threads();
+        $("modeHint").innerHTML = t
+          ? "Each ticket is a private thread in one channel — no channel clutter, and none of Discord's channel limits. Only the people in a thread, and anyone with <b>Manage Threads</b> in that channel, can see it."
+          : "Each ticket gets its own channel, hidden from everyone but the person who opened it and your staff.";
+        $("staffHint").innerHTML = t
+          ? "Staff join a ticket thread by being mentioned in it — keep <b>Add staff to each ticket</b> on (Advanced options) — and roles with <b>Manage Threads</b> in the ticket channel see every ticket. Staff get <b>Claim</b> and <b>Members</b> buttons in every ticket."
+          : "No role is required — server admins always see tickets — but adding your support role is the usual setup. Staff get <b>Claim</b> and <b>Members</b> (add or remove people) buttons in every ticket.";
+        $("categoryBlock").style.display = t ? "none" : "";
+        $("threadBlock").style.display = t ? "" : "none";
+        $("pingStaffT").textContent = t ? "Add staff to each ticket" : "Ping staff roles";
+        $("pingStaffD").textContent = t
+          ? "Mentions your staff roles in every new ticket — how Discord adds them to a private thread. Roles must be mentionable."
+          : "Notify your staff roles when a ticket opens (roles must be mentionable).";
+        $("closeDeleteBtn").textContent = t ? "Delete the thread" : "Delete the channel";
+        $("closeLockBtn").textContent = t ? "Lock & archive it" : "Lock & keep it";
+        $("closeHint").textContent = t
+          ? "Deleting is cleanest. Locking keeps the thread for the record — read-only, archived, with Reopen / Delete buttons."
+          : "Deleting is cleanest. Locking keeps the channel (read-only) with Reopen / Delete buttons for the record.";
+        $("pingStaff").checked = pingStaff;
+        renderBotIntro();
+        renderThreadWarnings();
+      }
+
+      function setMode(m) {
+        mode = m === "thread" ? "thread" : "channel";
+        if (threads() && !pingStaffTouched) pingStaff = true;
+        renderMode();
+        renderStaff();
+        renderTopics();
+      }
+
+      function renderThreadSelect() {
+        const sel = $("threadChannel");
+        sel.innerHTML = "";
+        sel.appendChild(new Option("Pick a channel…", ""));
+        const catName = new Map(categories.map((c) => [c.id, c.name]));
+        let group = null;
+        let groupKey;
+        for (const c of threadHosts()) {
+          const key = c.parent_id || "";
+          if (group === null || key !== groupKey) {
+            groupKey = key;
+            group = document.createElement("optgroup");
+            group.label = key ? catName.get(key) || "Other" : "No category";
+            sel.appendChild(group);
+          }
+          const flagged = c.threads.bot_missing.length;
+          group.appendChild(new Option(`#${c.name}${flagged ? "  ⚠" : ""}`, c.id));
+        }
+        sel.value = threadChannelId;
+        renderThreadWarnings();
+      }
+      $("threadChannel").addEventListener("change", (e) => {
+        threadChannelId = e.target.value;
+        threadChannelName = threadHosts().find((c) => c.id === threadChannelId)?.name || "";
+        renderThreadWarnings();
+      });
 
       // ── Connect (auto, with the shared bot) ──────────────────────────────
       async function connect() {
@@ -538,6 +679,7 @@
           botCanManageRoles = data.bot_can_manage_roles !== false;
           botMissingRequired = Array.isArray(data.bot_missing_required) ? data.bot_missing_required : [];
           botMissingOptional = Array.isArray(data.bot_missing_optional) ? data.bot_missing_optional : [];
+          botMissingThread = Array.isArray(data.bot_missing_thread) ? data.bot_missing_thread : [];
           roles = Array.isArray(data.roles) ? data.roles : [];
           categories = Array.isArray(data.categories) ? data.categories : [];
           textChannels = Array.isArray(data.text_channels) ? data.text_channels : [];
@@ -548,9 +690,12 @@
           if (categoryId && !catIds.has(categoryId)) { categoryId = ""; categoryName = ""; }
           const chIds = new Set(textChannels.map((c) => c.id));
           if (logChannelId && !chIds.has(logChannelId)) { logChannelId = ""; logChannelName = ""; }
+          const hostIds = new Set(threadHosts().map((c) => c.id));
+          if (threadChannelId && !hostIds.has(threadChannelId)) { threadChannelId = ""; threadChannelName = ""; }
           for (const t of topics) {
             t.staff_roles = t.staff_roles.filter((r) => roleIds.has(r.id));
             if (t.category_id && !catIds.has(t.category_id)) t.category_id = "";
+            if (t.thread_channel_id && !hostIds.has(t.thread_channel_id)) t.thread_channel_id = "";
           }
           connected = true;
           rolesLive = true;
@@ -559,6 +704,7 @@
           unlock();
           renderStaff();
           renderCategorySelect();
+          renderThreadSelect();
           renderLogSelect();
           renderTranscriptsState();
           renderTopics();
@@ -590,6 +736,7 @@
             if (input.checked) staffSelected.add(r.id);
             else staffSelected.delete(r.id);
             updateStaffCount();
+            renderThreadWarnings();
           });
           const dot = document.createElement("span");
           dot.className = "dot";
@@ -608,6 +755,7 @@
           wrap.appendChild(row);
         }
         updateStaffCount();
+        renderThreadWarnings();
         sendResize();
       }
       function updateStaffCount() {
@@ -693,6 +841,7 @@
         emoji: t.emoji || "",
         description: t.description || "",
         category_id: t.category_id || "",
+        thread_channel_id: t.thread_channel_id || "",
         staff_roles: Array.isArray(t.staff_roles)
           ? t.staff_roles.map((r) => ({ id: r.id, name: r.name || r.id, color: r.color || 0 }))
           : [],
@@ -764,7 +913,7 @@
         });
         const summary = document.createElement("summary");
         const bits = [];
-        if (t.category_id) bits.push("own category");
+        if (threads() ? t.thread_channel_id : t.category_id) bits.push(threads() ? "own channel" : "own category");
         if (t.staff_roles.length) bits.push(`${t.staff_roles.length} extra staff role${t.staff_roles.length === 1 ? "" : "s"}`);
         summary.textContent = "Routing";
         if (bits.length) {
@@ -776,15 +925,25 @@
         const body = document.createElement("div");
         body.className = "route-body";
 
+        // Where this topic's tickets open: a category in channel mode, a text
+        // channel in thread mode. Each keeps its own pick for a switch back.
         const catLbl = document.createElement("label");
         catLbl.className = "lbl";
-        catLbl.textContent = "Create these tickets under…";
         const cat = document.createElement("select");
-        cat.setAttribute("aria-label", `Category for “${t.label || "this topic"}” tickets`);
         cat.appendChild(new Option("Same as the panel", ""));
-        for (const c of categories) cat.appendChild(new Option(categoryLabel(c), c.id));
-        cat.value = t.category_id || "";
-        cat.addEventListener("change", () => { t.category_id = cat.value; renderTopics(); });
+        if (threads()) {
+          catLbl.textContent = "Open these ticket threads in…";
+          cat.setAttribute("aria-label", `Channel for “${t.label || "this topic"}” ticket threads`);
+          for (const c of threadHosts()) cat.appendChild(new Option(`#${c.name}`, c.id));
+          cat.value = t.thread_channel_id || "";
+          cat.addEventListener("change", () => { t.thread_channel_id = cat.value; renderTopics(); });
+        } else {
+          catLbl.textContent = "Create these tickets under…";
+          cat.setAttribute("aria-label", `Category for “${t.label || "this topic"}” tickets`);
+          for (const c of categories) cat.appendChild(new Option(categoryLabel(c), c.id));
+          cat.value = t.category_id || "";
+          cat.addEventListener("change", () => { t.category_id = cat.value; renderTopics(); });
+        }
 
         const staffLbl = document.createElement("label");
         staffLbl.className = "lbl";
@@ -927,6 +1086,16 @@
             { label: "What's the problem?", style: "paragraph", required: true },
           ],
         },
+        {
+          // The one preset that picks the ticket type: each ticket a private
+          // thread in one support channel (picked below, like the staff role).
+          id: "ticket-threads", name: "Thread help desk", icon: "🧵", hint: "A private thread per ticket",
+          mode: "thread",
+          welcome: "Thanks for opening a ticket, {user}! 🧵\n\nThis thread is just you and {staff}. Describe your issue below and we'll be with you shortly.",
+          intake: [
+            { label: "What do you need help with?", style: "paragraph", required: true },
+          ],
+        },
       ];
 
       const PRESETS_SELECT = [
@@ -988,6 +1157,7 @@
           topics = (p.topics || []).map((t) =>
             newTopic({ label: t.label, emoji: t.emoji, description: t.description }),
           );
+        if (p.mode) setMode(p.mode);
         activePreset = p.id;
         editedSincePreset = false;
         renderTopics();
@@ -1011,6 +1181,7 @@
           });
         }
       }
+      wireSeg("modeSeg", (d) => { setMode(d.mode); });
       wireSeg("namingSeg", (d) => { naming = d.naming; });
       wireSeg("closeSeg", (d) => { closeMode = d.close; });
       wireSeg("replySeg", (d) => {
@@ -1021,7 +1192,11 @@
       });
 
       $("pingOpener").addEventListener("change", (e) => { pingOpener = e.target.checked; });
-      $("pingStaff").addEventListener("change", (e) => { pingStaff = e.target.checked; renderStaff(); });
+      $("pingStaff").addEventListener("change", (e) => {
+        pingStaff = e.target.checked;
+        pingStaffTouched = true;
+        renderStaff();
+      });
       $("closeConfirm").addEventListener("change", (e) => { closeConfirmation = e.target.checked; });
       $("openerClose").addEventListener("change", (e) => { allowOpenerClose = e.target.checked; });
       $("claimEnabled").addEventListener("change", (e) => { claimEnabled = e.target.checked; });
@@ -1068,6 +1243,7 @@
         target = msg.target === "string_select" ? "string_select" : "button";
         $("welcome").value = welcome;
         applyTargetVisibility();
+        renderMode();
 
         await loadMeta();
 
@@ -1142,10 +1318,10 @@
         rolesLive = false;
         connected = false;
         staffSelected = new Set();
-        categoryId = ""; logChannelId = "";
+        categoryId = ""; logChannelId = ""; threadChannelId = "";
         roles = []; categories = []; textChannels = [];
-        // Routing named the old server's roles and categories.
-        for (const t of topics) { t.staff_roles = []; t.category_id = ""; }
+        // Routing named the old server's roles and channels.
+        for (const t of topics) { t.staff_roles = []; t.category_id = ""; t.thread_channel_id = ""; }
         autoState = "connecting";
         renderStaff();
         renderTopics();
@@ -1193,11 +1369,15 @@
           roles = (d.staff_roles || []).map((r) => ({ id: r.id, name: r.name || r.id, color: r.color || 0, mentionable: true }));
           categoryId = d.category_id || ""; categoryName = d.category_name || "";
           logChannelId = d.log_channel_id || ""; logChannelName = d.log_channel_name || "";
+          mode = d.mode === "thread" ? "thread" : "channel";
+          threadChannelId = d.thread_channel_id || ""; threadChannelName = d.thread_channel_name || "";
           naming = d.naming || "number";
           welcome = typeof d.welcome === "string" ? d.welcome : DEFAULT_WELCOME;
           $("welcome").value = welcome;
           pingOpener = d.ping_opener !== false;
           pingStaff = !!d.ping_staff;
+          // A saved panel's ping choice is deliberate.
+          pingStaffTouched = true;
           intake = Array.isArray(d.intake) ? d.intake.map((f) => ({ id: f.id || genId(), label: f.label || "", style: f.style === "paragraph" ? "paragraph" : "short", required: !!f.required, placeholder: f.placeholder || "" })) : [];
           topics = Array.isArray(d.topics) ? d.topics.map((t) => newTopic(t)) : [];
           // A topic's routed staff join the role list too, so their chips name
@@ -1227,6 +1407,7 @@
             connected = false;
             renderStaff();
             renderCategorySelect();
+            renderThreadSelect();
             renderLogSelect();
             return;
           }
@@ -1247,7 +1428,9 @@
         $("claimEnabled").checked = claimEnabled;
         $("maxOpen").value = maxOpen;
         $("cooldown").value = cooldown;
+        renderMode();
         renderCategorySelect();
+        renderThreadSelect();
         renderLogSelect();
         renderTranscriptsState();
         renderTopics();
@@ -1278,6 +1461,7 @@
         for (const f of intake) {
           if (!f.label.trim()) return fail("An intake question is missing its text — fill it in or remove it.");
         }
+        if (threads() && !threadChannelId) return fail("Pick the channel ticket threads should open in.");
         const replyText = $("replyText").value.trim();
         if (replyMode === "custom" && !replyText) return fail("Type your custom reply, or switch to the automatic summary.");
         if (transcripts && !logChannelId && !transcriptDm)
@@ -1286,12 +1470,16 @@
         const staffRoles = roles.filter((r) => staffSelected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
         const cleanTopics = topics.filter((t) => t.label.trim()).map((t) => {
           const cat = t.category_id ? categories.find((c) => c.id === t.category_id) : null;
+          const home = t.thread_channel_id ? threadHosts().find((c) => c.id === t.thread_channel_id) : null;
           return {
             id: t.id,
             label: t.label.trim().slice(0, 100),
             ...(t.emoji && t.emoji.trim() ? { emoji: t.emoji.trim().slice(0, 64) } : {}),
             ...(t.description && t.description.trim() ? { description: t.description.trim().slice(0, 100) } : {}),
             ...(t.category_id ? { category_id: t.category_id, category_name: cat ? cat.name : "" } : {}),
+            ...(t.thread_channel_id
+              ? { thread_channel_id: t.thread_channel_id, thread_channel_name: home ? home.name : "" }
+              : {}),
             ...(t.staff_roles.length ? { staff_roles: t.staff_roles.slice(0, 10) } : {}),
           };
         });
@@ -1307,7 +1495,10 @@
           target,
           guild_id: guildId,
           guild_name: guildName || "",
+          mode,
           staff_roles: staffRoles,
+          thread_channel_id: threadChannelId || null,
+          thread_channel_name: threadChannelName || "",
           category_id: categoryId || null,
           category_name: categoryName || "",
           log_channel_id: logChannelId || null,
@@ -1365,9 +1556,10 @@
               setBusy(false);
               return fail("The plugin service did not return edit access. Reload and try again.");
             }
-            const desc = isSelect()
+            const base = isSelect()
               ? `${cleanTopics.length} topic${cleanTopics.length === 1 ? "" : "s"}`
               : (staffRoles.length ? `${staffRoles.length} staff role${staffRoles.length === 1 ? "" : "s"}` : "private support");
+            const desc = threads() ? `${base} · private threads` : base;
             parent.postMessage(
               {
                 type: "dweeb:plugin:save",

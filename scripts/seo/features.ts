@@ -193,7 +193,7 @@ export const FEATURES: FeatureSeo[] = [
     configurable: [
       "A button panel or a topic menu with several support categories",
       "An optional intake form so members arrive with the details you need",
-      "Where ticket channels are created and which staff roles can see them",
+      "A private channel or a private thread per ticket, where they open, and which staff roles can see them",
       "Staff claim, so it's clear who's handling each ticket",
       "Close with a saved transcript for your records",
     ],
@@ -210,6 +210,10 @@ export const FEATURES: FeatureSeo[] = [
       {
         q: "Can members pick a ticket category?",
         a: "Yes. Use a topic menu instead of a single button and each option can open a different kind of ticket — general support, reports, billing and so on — each routed to the right staff.",
+      },
+      {
+        q: "Can tickets open as threads instead of channels?",
+        a: "Yes. Switch the panel to private threads and each ticket becomes a private thread in one channel you pick, so nothing piles up in your channel list and Discord's per-category channel limit never applies. The member who opened it is added to the thread, your staff roles are mentioned in, and closing locks and archives the thread or deletes it.",
       },
       {
         q: "Is a transcript saved when a ticket closes?",
@@ -965,7 +969,8 @@ export function resolveAllFeatures(): ResolvedFeature[] {
  *  2026-09-27: the ticket bot's transcript answer no longer promises the
  *  conversation's text (it needs Discord's Message Content intent).
  *  2026-10-22: Discord granted that intent, so the answer promises the
- *  conversation again. */
-export const FEATURES_LASTMOD = "2026-10-22";
+ *  conversation again.
+ *  2026-10-23: the ticket bot can open private threads instead of channels. */
+export const FEATURES_LASTMOD = "2026-10-23";
 
 export { ACCENT_BLURPLE };

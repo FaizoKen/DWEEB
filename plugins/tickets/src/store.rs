@@ -8,8 +8,12 @@
 //!     reconfiguration, and only its SHA-256 digest is stored. The shared bot
 //!     does all the Discord work, so no secret is stored per instance and reads
 //!     need no masking (see [`MaskedInstance`]).
-//!   • `tickets` — one row per ticket, keyed by its channel id. This is also the
-//!     anti-spam ledger: the open cap and the cooldown are read from it.
+//!   • `tickets` — one row per ticket, keyed by its channel id (a thread's id is
+//!     a channel id too). This is also the anti-spam ledger: the open cap and
+//!     the cooldown are read from it. Each row records whether its ticket is a
+//!     channel or a thread ([`TicketKind`]) — a panel can switch modes while
+//!     tickets of the old kind are still open, and those must keep working
+//!     the way they were made.
 //!   • `counters` — a monotonic per-instance ticket number, so channels read
 //!     `ticket-0001`, `ticket-0002`, … even after restarts.
 //!
@@ -92,6 +96,12 @@ pub struct Topic {
     pub category_id: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub category_name: String,
+    /// Thread mode: the channel this topic's ticket threads open in. None ⇒
+    /// the panel's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_channel_id: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thread_channel_name: String,
 }
 
 /// How the opener is acknowledged (ephemerally) the moment their ticket opens.
@@ -122,6 +132,9 @@ fn default_welcome() -> String {
 fn default_naming() -> String {
     "number".to_string()
 }
+fn default_mode() -> String {
+    "channel".to_string()
+}
 fn default_close_mode() -> String {
     "delete".to_string()
 }
@@ -146,9 +159,22 @@ pub struct InstanceConfig {
     #[serde(default)]
     pub guild_name: String,
 
-    /// Roles that can see/answer every ticket (channel permission overwrite).
+    /// `"channel"` — each ticket is a private channel (the default, and every
+    /// panel saved before 0.4) — or `"thread"` — each ticket is a private
+    /// thread inside one channel: no channel clutter, and none of Discord's
+    /// per-category or per-server channel limits.
+    #[serde(default = "default_mode")]
+    pub mode: String,
+
+    /// Roles that can see/answer every ticket (channel permission overwrite;
+    /// in thread mode, mentioned into each thread — see `discord.rs`).
     #[serde(default)]
     pub staff_roles: Vec<StaffRole>,
+    /// Thread mode: the text channel ticket threads are created in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_channel_id: Option<String>,
+    #[serde(default)]
+    pub thread_channel_name: String,
     /// Category the ticket channels are created under. None ⇒ guild root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category_id: Option<String>,
@@ -221,6 +247,13 @@ impl InstanceConfig {
         }
         self.topics.iter().find(|t| t.id == id)
     }
+
+    /// Whether new tickets from this panel open as private threads. (A
+    /// ticket's own kind is on its row: tickets opened before a switch keep
+    /// theirs.)
+    pub fn opens_threads(&self) -> bool {
+        self.mode == "thread"
+    }
 }
 
 /// A read view for the config UI. Carries the instance `id` (which
@@ -280,9 +313,45 @@ impl Status {
     }
 }
 
+/// What a ticket is in Discord.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TicketKind {
+    /// A private channel: who sees it is its permission overwrites.
+    Channel,
+    /// A private thread: who sees it is its member list (plus anyone with
+    /// Manage Threads in its parent), and a close locks or deletes it.
+    Thread,
+}
+
+impl TicketKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TicketKind::Channel => "channel",
+            TicketKind::Thread => "thread",
+        }
+    }
+
+    /// Unknown text reads as a channel — what every row before 0.4 is.
+    pub fn parse(s: &str) -> TicketKind {
+        match s {
+            "thread" => TicketKind::Thread,
+            _ => TicketKind::Channel,
+        }
+    }
+
+    /// The word for it in what members and staff read.
+    pub fn noun(self) -> &'static str {
+        match self {
+            TicketKind::Channel => "channel",
+            TicketKind::Thread => "thread",
+        }
+    }
+}
+
 /// One ticket row.
 #[derive(Debug, Clone)]
 pub struct Ticket {
+    /// The ticket's channel — or thread — id.
     pub channel_id: String,
     pub instance_id: String,
     pub guild_id: String,
@@ -304,13 +373,15 @@ pub struct Ticket {
     /// The members a lock muted — exactly whom a reopen gives their voice
     /// back, never someone staff muted by hand. `None` on a ticket locked by
     /// an older build (or never locked), whose reopen falls back to restoring
-    /// every muted member.
+    /// every muted member. Always `None` on a thread: a thread's lock is its
+    /// own `locked` flag, not per-member overwrites.
     pub lock_muted: Option<Vec<String>>,
+    pub kind: TicketKind,
 }
 
 const TICKET_COLS: &str = "channel_id, instance_id, guild_id, number, opener_id, opener_name, \
      topic, topic_id, channel_name, claimed_by, status, created_at, closed_at, closed_by, \
-     muted_by_lock";
+     muted_by_lock, kind";
 
 fn ticket_from_row(r: &Row) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
@@ -332,6 +403,7 @@ fn ticket_from_row(r: &Row) -> rusqlite::Result<Ticket> {
         lock_muted: r
             .get::<_, Option<String>>(14)?
             .and_then(|json| serde_json::from_str(&json).ok()),
+        kind: TicketKind::parse(&r.get::<_, String>(15)?),
     })
 }
 
@@ -588,7 +660,7 @@ impl Store {
         tx.execute(
             &format!(
                 "INSERT OR REPLACE INTO tickets ({TICKET_COLS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
             ),
             rusqlite::params![
                 ticket.channel_id,
@@ -606,6 +678,7 @@ impl Store {
                 ticket.closed_at,
                 ticket.closed_by,
                 lock_muted_json(ticket.lock_muted.as_deref()),
+                ticket.kind.as_str(),
             ],
         )?;
         tx.commit()
@@ -948,6 +1021,8 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     // Added after 0.3: who a lock muted (a JSON array of user ids). NULL on
     // older rows — read as unknown, so their reopen keeps the old rule.
     ensure_column(conn, "tickets", "muted_by_lock", "TEXT")?;
+    // Added in 0.4 with thread mode. Every older row is a channel.
+    ensure_column(conn, "tickets", "kind", "TEXT NOT NULL DEFAULT 'channel'")?;
     Ok(())
 }
 
@@ -1053,6 +1128,7 @@ mod tests {
             closed_at: None,
             closed_by: None,
             lock_muted: None,
+            kind: TicketKind::Channel,
         };
         s.activate(&key, &t).unwrap();
         t
@@ -1376,6 +1452,8 @@ mod tests {
         assert_eq!((t.number, t.status), (7, Status::Open));
         assert_eq!(t.channel_name, "");
         assert_eq!(t.topic_id, "");
+        // Every ticket from before thread mode is a channel.
+        assert_eq!(t.kind, TicketKind::Channel);
         assert!(s
             .transition("c1", &[Status::Open], Status::Closing)
             .unwrap()
@@ -1418,10 +1496,56 @@ mod tests {
         }))
         .unwrap();
         assert!(!cfg.transcript_dm);
+        // A panel saved before thread mode opens channels, as it always did.
+        assert_eq!(cfg.mode, "channel");
+        assert!(!cfg.opens_threads());
+        assert!(cfg.thread_channel_id.is_none());
         let t = cfg.topic("t1").unwrap();
         assert!(t.staff_roles.is_empty());
         assert!(t.category_id.is_none());
+        assert!(t.thread_channel_id.is_none());
         assert!(cfg.topic("").is_none());
         assert!(cfg.topic("zz").is_none());
+    }
+
+    #[test]
+    fn a_tickets_kind_is_stored_with_it() {
+        let s = store();
+        let Reserve::Reserved { key, number } = s
+            .reserve_open(&req("i", "u", unix_millis()), |_| None::<()>)
+            .unwrap()
+        else {
+            panic!("expected a reservation");
+        };
+        let t = Ticket {
+            channel_id: "th1".into(),
+            instance_id: "i".into(),
+            guild_id: "g".into(),
+            number,
+            opener_id: "u".into(),
+            opener_name: "Ada".into(),
+            topic: String::new(),
+            topic_id: String::new(),
+            channel_name: "ticket-0001".into(),
+            claimed_by: None,
+            status: Status::Open,
+            created_at: unix_millis(),
+            closed_at: None,
+            closed_by: None,
+            lock_muted: None,
+            kind: TicketKind::Thread,
+        };
+        s.activate(&key, &t).unwrap();
+        assert_eq!(
+            s.get_ticket("th1").unwrap().unwrap().kind,
+            TicketKind::Thread
+        );
+        // A move through the lifecycle keeps it.
+        let before = s
+            .transition("th1", &[Status::Open], Status::Closing)
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.kind, TicketKind::Thread);
+        assert_eq!(TicketKind::parse("hologram"), TicketKind::Channel);
     }
 }

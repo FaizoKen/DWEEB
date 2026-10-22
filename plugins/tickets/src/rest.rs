@@ -8,8 +8,9 @@
 //!     ever clicks;
 //!   • click time, on the 3s path — at most a quick existence probe
 //!     (`channel_exists`), used only when a member is refused at the open cap;
-//!   • click time, deferred — create the private channel, post into it,
-//!     rename/lock/delete, manage overwrites, pull history for the transcript.
+//!   • click time, deferred — create the private channel (or thread), post
+//!     into it, rename/lock/delete, manage overwrites (or thread members),
+//!     pull history for the transcript.
 //!
 //! Every call goes to `discord.com` (the base is a constant; only tests point it
 //! elsewhere), so there is no SSRF surface even though the token is
@@ -51,6 +52,11 @@ pub const HISTORY_PAGES: usize = 5;
 const CHANNEL_GUILD_TEXT: u8 = 0;
 const CHANNEL_GUILD_CATEGORY: u8 = 4;
 const CHANNEL_GUILD_ANNOUNCEMENT: u8 = 5;
+/// What a ticket thread is created as.
+const CHANNEL_PRIVATE_THREAD: u8 = 12;
+/// The longest a thread may sit idle before Discord archives it, in minutes
+/// (a week — open to every server since Discord dropped its boost gate).
+const THREAD_AUTO_ARCHIVE_MINUTES: u32 = 10080;
 
 /// A channel a log line or transcript can be posted to.
 pub fn is_text_channel(kind: u8) -> bool {
@@ -60,6 +66,12 @@ pub fn is_text_channel(kind: u8) -> bool {
 /// A category tickets can be created under.
 pub fn is_category(kind: u8) -> bool {
     kind == CHANNEL_GUILD_CATEGORY
+}
+
+/// A channel ticket threads can be created in. Discord makes private threads
+/// only in plain text channels — not announcement, forum or media channels.
+pub fn hosts_private_threads(kind: u8) -> bool {
+    kind == CHANNEL_GUILD_TEXT
 }
 
 /// The application flags that mean "may read message content".
@@ -173,6 +185,12 @@ pub enum Refusal {
     CategoryProblem,
     /// 30013 — the server is at Discord's channel cap.
     ChannelLimit,
+    /// 160006 — the server is at Discord's cap on active threads.
+    ThreadLimit,
+    /// 50083 — the thread is archived, and the call was one an archived
+    /// thread refuses (editing a message, adding someone). Unarchiving it
+    /// first makes the same call work.
+    Archived,
     /// 50007 — the user doesn't accept DMs from this bot.
     CannotDm,
     Other,
@@ -194,8 +212,12 @@ pub fn classify_refusal(status: u16, body: &str) -> Refusal {
         .ok()
         .and_then(|v| v.get("code").and_then(Value::as_u64));
     match code {
-        Some(50013 | 50001) => Refusal::MissingPermissions,
+        // 160005 Thread is locked: what a bot without Manage Threads hears
+        // when it posts in a locked thread — a permission it lacks.
+        Some(50013 | 50001 | 160005) => Refusal::MissingPermissions,
         Some(30013) => Refusal::ChannelLimit,
+        Some(160006) => Refusal::ThreadLimit,
+        Some(50083) => Refusal::Archived,
         Some(50007) => Refusal::CannotDm,
         Some(50035) if body.contains("parent_id") => Refusal::CategoryProblem,
         Some(10007 | 10013) => Refusal::UnknownMember,
@@ -244,6 +266,8 @@ pub struct RoleView {
 pub struct ChannelView {
     pub id: String,
     pub name: String,
+    /// Discord's channel type: 0 text, 4 category, 5 announcement.
+    pub kind: u8,
     pub position: i64,
     /// The category a text channel sits in (None at the top level).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,6 +278,30 @@ pub struct ChannelView {
     /// missing server-wide is reported once, in `bot_missing_required` /
     /// `bot_missing_optional`, not flagged on every channel.
     pub bot_missing: Vec<&'static str>,
+    /// Text channels only — what thread mode needs to know about this one as
+    /// the place ticket threads open in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<ThreadHost>,
+}
+
+/// A text channel judged as the home of ticket threads.
+#[derive(Debug, Serialize)]
+pub struct ThreadHost {
+    /// What the bot has server-wide but loses here, out of
+    /// [`perms::THREAD_PARENT_BITS`] (server-wide gaps are reported once, in
+    /// `bot_missing_thread`).
+    pub bot_missing: Vec<&'static str>,
+    /// What `@everyone` lacks here for a member to use a thread they're added
+    /// to. Members may hold these through another role (a verified-member
+    /// role, say), so this is a hint, never a block.
+    pub members_missing: Vec<&'static str>,
+    /// Roles that hold Manage Threads here — so see every ticket thread
+    /// without being added to it. A staff role not in this list only sees the
+    /// tickets it is mentioned into.
+    pub moderator_roles: Vec<String>,
+    /// Whether the bot may mention a role that isn't mentionable here, which
+    /// is how a staff role gets added to a private thread.
+    pub bot_mentions_any_role: bool,
 }
 
 /// Everything `POST /api/connect` returns on success.
@@ -272,6 +320,9 @@ pub struct ConnectResult {
     /// Server-wide permissions without which tickets open, but members can't
     /// attach files, embed links or react in them.
     pub bot_missing_optional: Vec<&'static str>,
+    /// Server-wide permissions thread mode needs that the bot lacks — what
+    /// `bot_missing_required` is for channel mode.
+    pub bot_missing_thread: Vec<&'static str>,
     pub roles: Vec<RoleView>,
     pub categories: Vec<ChannelView>,
     pub text_channels: Vec<ChannelView>,
@@ -702,6 +753,122 @@ impl Discord {
             .map_err(|_| RestError::Busy)
     }
 
+    /// Create a ticket's private thread in `parent` and return its id.
+    ///
+    /// `invitable: false` keeps the thread's members from adding others —
+    /// only the bot (a moderator, holding Manage Threads) and staff with
+    /// Manage Threads can, the same say staff have over a ticket channel. No
+    /// message is posted in the parent: a private thread made this way
+    /// announces itself nowhere.
+    pub async fn create_thread(
+        &self,
+        parent_id: &str,
+        name: &str,
+        reason: &str,
+    ) -> Result<String, RestError> {
+        let body = serde_json::json!({
+            "name": clamp(name, 100),
+            "type": CHANNEL_PRIVATE_THREAD,
+            "auto_archive_duration": THREAD_AUTO_ARCHIVE_MINUTES,
+            "invitable": false,
+        });
+        let url = self.url(&format!("/channels/{parent_id}/threads"));
+        let reason = audit_reason(reason);
+        let resp = self
+            .send(
+                || {
+                    self.http
+                        .post(&url)
+                        .header("Authorization", self.auth())
+                        .header("X-Audit-Log-Reason", &reason)
+                        .json(&body)
+                },
+                Replay::OnlyIfUntouched,
+                BACKGROUND_TIMEOUT,
+            )
+            .await?;
+        #[derive(Deserialize)]
+        struct Created {
+            id: String,
+        }
+        resp.json::<Created>()
+            .await
+            .map(|c| c.id)
+            .map_err(|_| RestError::Busy)
+    }
+
+    /// Add someone to a thread (`PUT …/thread-members/{user}`) — the only way
+    /// into a private thread short of Manage Threads. Already a member counts
+    /// as done. Refused while the thread is archived ([`Refusal::Archived`]).
+    pub async fn add_thread_member(&self, thread_id: &str, user_id: &str) -> Result<(), RestError> {
+        let url = self.url(&format!("/channels/{thread_id}/thread-members/{user_id}"));
+        self.send(
+            || self.http.put(&url).header("Authorization", self.auth()),
+            Replay::Idempotent,
+            BACKGROUND_TIMEOUT,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Take someone out of a thread. The bot made every ticket thread, and a
+    /// private thread's creator may remove members without Manage Threads.
+    /// Someone already out counts as done.
+    pub async fn remove_thread_member(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+    ) -> Result<(), RestError> {
+        let url = self.url(&format!("/channels/{thread_id}/thread-members/{user_id}"));
+        match self
+            .send(
+                || self.http.delete(&url).header("Authorization", self.auth()),
+                Replay::Idempotent,
+                BACKGROUND_TIMEOUT,
+            )
+            .await
+        {
+            Err(e) if e.is_not_found() => Ok(()),
+            other => other.map(drop),
+        }
+    }
+
+    /// Set a thread's `archived` / `locked` flags (either may be left as it
+    /// is). A locked thread takes posts and edits only from Manage Threads
+    /// holders — the thread's own read-only mode, which is how a ticket
+    /// thread is locked; changing `locked` needs Manage Threads. Unarchiving
+    /// needs only membership (the bot is in every ticket thread it made).
+    pub async fn set_thread_state(
+        &self,
+        thread_id: &str,
+        state: ThreadState,
+        reason: &str,
+    ) -> Result<(), RestError> {
+        let mut body = serde_json::Map::new();
+        if let Some(archived) = state.archived {
+            body.insert("archived".into(), archived.into());
+        }
+        if let Some(locked) = state.locked {
+            body.insert("locked".into(), locked.into());
+        }
+        let body = Value::Object(body);
+        let url = self.url(&format!("/channels/{thread_id}"));
+        let reason = audit_reason(reason);
+        self.send(
+            || {
+                self.http
+                    .patch(&url)
+                    .header("Authorization", self.auth())
+                    .header("X-Audit-Log-Reason", &reason)
+                    .json(&body)
+            },
+            Replay::Idempotent,
+            BACKGROUND_TIMEOUT,
+        )
+        .await
+        .map(drop)
+    }
+
     /// Post a message; returns its id.
     pub async fn post_message(
         &self,
@@ -1025,6 +1192,23 @@ impl Discord {
     }
 }
 
+/// The thread flags a [`Discord::set_thread_state`] call sets; `None` leaves
+/// one as it is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ThreadState {
+    pub archived: Option<bool>,
+    pub locked: Option<bool>,
+}
+
+impl ThreadState {
+    /// Active again — what anything that edits or adds to a thread needs
+    /// first, since an archived thread refuses both.
+    pub const AWAKE: ThreadState = ThreadState {
+        archived: Some(false),
+        locked: None,
+    };
+}
+
 /// Everything a ticket channel is created with.
 pub struct ChannelSpec<'a> {
     pub name: &'a str,
@@ -1064,6 +1248,19 @@ pub fn preflight(
         .filter(|c| c.kind == CHANNEL_GUILD_CATEGORY)
         .map(|c| (c.id.as_str(), c.position))
         .collect();
+    // Each role as if a member held it alone (with @everyone): whether that
+    // makes them a thread moderator in a channel is the question the staff
+    // picker asks. Managed (integration/booster) roles are never staff.
+    let lone_roles: Vec<(&str, u64)> = roles
+        .iter()
+        .filter(|r| r.id != guild_id && !r.managed)
+        .map(|r| {
+            (
+                r.id.as_str(),
+                perms::guild_permissions(everyone, [perms::parse_bits(&r.permissions)]),
+            )
+        })
+        .collect();
     let mut sort_keys: Vec<(i64, i64)> = Vec::new();
     for c in &channels {
         let overwrites: Vec<Overwrite> = c
@@ -1076,11 +1273,45 @@ pub fn preflight(
             CHANNEL_GUILD_CATEGORY => categories.push(ChannelView {
                 id: c.id.clone(),
                 name: c.name.clone(),
+                kind: c.kind,
                 position: c.position,
                 parent_id: None,
                 bot_missing: perms::missing(here, perms::CATEGORY_BITS & base, Scope::Category),
+                threads: None,
             }),
             CHANNEL_GUILD_TEXT | CHANNEL_GUILD_ANNOUNCEMENT => {
+                let threads = hosts_private_threads(c.kind).then(|| {
+                    let members = perms::channel_permissions(
+                        perms::guild_permissions(everyone, []),
+                        guild_id,
+                        "",
+                        &[],
+                        &overwrites,
+                    );
+                    ThreadHost {
+                        bot_missing: perms::missing(
+                            here,
+                            perms::THREAD_PARENT_BITS & base,
+                            Scope::Channel,
+                        ),
+                        members_missing: perms::missing(
+                            members,
+                            perms::THREAD_MEMBER_BITS,
+                            Scope::Channel,
+                        ),
+                        moderator_roles: lone_roles
+                            .iter()
+                            .filter(|(id, bits)| {
+                                let ids = [id.to_string()];
+                                perms::channel_permissions(*bits, guild_id, "", &ids, &overwrites)
+                                    & perms::MANAGE_THREADS
+                                    != 0
+                            })
+                            .map(|(id, _)| id.to_string())
+                            .collect(),
+                        bot_mentions_any_role: here & perms::MENTION_EVERYONE != 0,
+                    }
+                });
                 // Top-level channels list first, then each category's in order.
                 let parent_pos = c
                     .parent_id
@@ -1092,9 +1323,11 @@ pub fn preflight(
                 text_channels.push(ChannelView {
                     id: c.id.clone(),
                     name: c.name.clone(),
+                    kind: c.kind,
                     position: c.position,
                     parent_id: c.parent_id.clone(),
                     bot_missing: perms::missing(here, perms::LOG_BITS & base, Scope::Channel),
+                    threads,
                 });
             }
             _ => {}
@@ -1135,6 +1368,7 @@ pub fn preflight(
             Scope::Server,
         ),
         bot_missing_optional: perms::missing(base, perms::OPTIONAL_SERVER_BITS, Scope::Server),
+        bot_missing_thread: perms::missing(base, perms::THREAD_PARENT_BITS, Scope::Server),
         roles: role_views,
         categories,
         text_channels,
@@ -1214,6 +1448,11 @@ fn collect_text_displays(components: &[Value], out: &mut Vec<String>) {
 
 fn system_description(kind: u8) -> &'static str {
     match kind {
+        // In a thread: someone added or removed by someone else, and a
+        // rename (a locked ticket thread is renamed `closed-…`).
+        1 => "added someone to the ticket",
+        2 => "removed someone from the ticket",
+        4 => "renamed the ticket",
         6 => "pinned a message",
         7 => "joined the server",
         8..=11 => "boosted the server",
@@ -1560,6 +1799,24 @@ mod tests {
             classify_refusal(403, r#"{"code":50007}"#),
             Refusal::CannotDm
         );
+        // Thread refusals: the server's active-thread cap, an archived thread
+        // (wake it and the call works), and a locked one the bot can't post
+        // in without Manage Threads.
+        assert_eq!(
+            classify_refusal(
+                400,
+                r#"{"message":"Maximum number of active threads reached","code":160006}"#
+            ),
+            Refusal::ThreadLimit
+        );
+        assert_eq!(
+            classify_refusal(400, r#"{"code":50083,"message":"Thread is archived"}"#),
+            Refusal::Archived
+        );
+        assert_eq!(
+            classify_refusal(403, r#"{"code":160005,"message":"Thread is locked"}"#),
+            Refusal::MissingPermissions
+        );
         // Without a body the status decides.
         assert_eq!(classify_refusal(403, ""), Refusal::MissingPermissions);
         assert_eq!(classify_refusal(404, "<html>"), Refusal::NotFound);
@@ -1695,6 +1952,99 @@ mod tests {
         assert_eq!(r.text_channels[2].bot_missing, vec!["Send Messages"]);
         // Roles: @everyone dropped.
         assert!(r.roles.iter().all(|x| x.id != guild));
+    }
+
+    #[test]
+    fn preflight_judges_each_text_channel_as_a_home_for_ticket_threads() {
+        let guild = "100";
+        let bot = BotUser {
+            id: "900".into(),
+            name: "DWEEB".into(),
+        };
+        let everyone = perms::VIEW_CHANNEL
+            | perms::SEND_MESSAGES
+            | perms::READ_MESSAGE_HISTORY
+            | perms::CREATE_PRIVATE_THREADS
+            | perms::SEND_MESSAGES_IN_THREADS;
+        // The bot's role carries the shared invite's bits — Manage Threads
+        // among them; "300" is a moderator role, "400" an ordinary one.
+        let roles = vec![
+            role(guild, everyone),
+            role(
+                "200",
+                perms::MANAGE_CHANNELS | perms::MANAGE_ROLES | perms::MANAGE_THREADS,
+            ),
+            role("300", perms::MANAGE_THREADS),
+            role("400", 0),
+        ];
+        let channels = vec![
+            // Fine for everyone.
+            channel("20", 0, 0, None, vec![]),
+            // Members may look but not talk in threads; a channel override
+            // makes "400" a thread moderator here; the bot lost Manage Threads.
+            channel(
+                "21",
+                0,
+                1,
+                None,
+                vec![
+                    raw_ow(guild, 0, perms::SEND_MESSAGES_IN_THREADS),
+                    raw_ow("400", perms::MANAGE_THREADS, 0),
+                    raw_ow("200", 0, perms::MANAGE_THREADS),
+                ],
+            ),
+            // An announcement channel can't hold private threads.
+            channel("22", 5, 2, None, vec![]),
+        ];
+        let r = preflight(
+            guild,
+            "Srv".into(),
+            &bot,
+            roles,
+            channels,
+            &["200".to_string()],
+        );
+        assert!(r.bot_missing_thread.is_empty());
+        let host = |id: &str| {
+            r.text_channels
+                .iter()
+                .find(|c| c.id == id)
+                .unwrap()
+                .threads
+                .as_ref()
+        };
+        let fine = host("20").unwrap();
+        assert!(fine.bot_missing.is_empty() && fine.members_missing.is_empty());
+        assert_eq!(fine.moderator_roles, ["200", "300"]);
+        let tight = host("21").unwrap();
+        // The @everyone denial binds the bot too, unless its role is let back in.
+        assert_eq!(
+            tight.bot_missing,
+            ["Send Messages in Threads", "Manage Threads"]
+        );
+        assert_eq!(tight.members_missing, ["Send Messages in Threads"]);
+        assert_eq!(tight.moderator_roles, ["300", "400"]);
+        assert!(!tight.bot_mentions_any_role);
+        assert!(host("22").is_none());
+
+        // Server-wide, a bot without the thread bits is told so once.
+        let r = preflight(
+            guild,
+            "Srv".into(),
+            &bot,
+            vec![role(guild, perms::VIEW_CHANNEL | perms::SEND_MESSAGES)],
+            vec![],
+            &[],
+        );
+        assert_eq!(
+            r.bot_missing_thread,
+            [
+                "Send Messages in Threads",
+                "Read Message History",
+                "Create Private Threads",
+                "Manage Threads"
+            ]
+        );
     }
 
     #[test]

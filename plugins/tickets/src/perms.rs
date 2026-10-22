@@ -16,7 +16,13 @@
 //! - **The config pre-flight.** Before a panel is saved, the config UI shows
 //!   exactly which permission is missing and where: server-wide, in the ticket
 //!   category (a private "Tickets" category that hides itself from the bot is
-//!   the classic setup mistake), or in the log channel.
+//!   the classic setup mistake), in the channel a thread-mode panel opens its
+//!   threads in, or in the log channel.
+//!
+//! Thread mode leans on a different set: a private thread has no overwrites
+//! of its own, so who sees it is who was added to it plus whoever holds
+//! Manage Threads in its parent channel ([`THREAD_PARENT_BITS`],
+//! [`THREAD_MEMBER_BITS`]).
 //!
 //! The effective-permission algorithm is Discord's own (Topics → Permissions →
 //! "Permission Overwrites"): the base is `@everyone` plus every role the member
@@ -34,7 +40,13 @@ pub const SEND_MESSAGES: u64 = 1 << 11;
 pub const EMBED_LINKS: u64 = 1 << 14;
 pub const ATTACH_FILES: u64 = 1 << 15;
 pub const READ_MESSAGE_HISTORY: u64 = 1 << 16;
+pub const MENTION_EVERYONE: u64 = 1 << 17;
 pub const MANAGE_ROLES: u64 = 1 << 28;
+/// Delete, lock and archive threads, and see every private thread.
+pub const MANAGE_THREADS: u64 = 1 << 34;
+pub const CREATE_PRIVATE_THREADS: u64 = 1 << 36;
+/// What talking in a thread takes — `SEND_MESSAGES` has no effect there.
+pub const SEND_MESSAGES_IN_THREADS: u64 = 1 << 38;
 
 /// Every bit — what Administrator amounts to.
 const ALL: u64 = u64::MAX;
@@ -108,6 +120,22 @@ pub const OPTIONAL_SERVER_BITS: u64 = EMBED_LINKS | ATTACH_FILES | ADD_REACTIONS
 pub const CATEGORY_BITS: u64 = VIEW_CHANNEL | MANAGE_CHANNELS | MANAGE_ROLES;
 /// In the log channel the bot posts open/close lines and uploads transcripts.
 pub const LOG_BITS: u64 = VIEW_CHANNEL | SEND_MESSAGES | ATTACH_FILES;
+
+/// What the bot needs in the channel a thread-mode panel opens its tickets
+/// in: see it, read it back, make a private thread, talk in it — and Manage
+/// Threads, without which a ticket thread can't be locked or deleted, and the
+/// bot (not being a moderator) can't add anyone to a thread whose members
+/// may not invite others. Threads carry no overwrites of their own, so this
+/// mode needs neither Manage Channels nor Manage Roles.
+pub const THREAD_PARENT_BITS: u64 = VIEW_CHANNEL
+    | READ_MESSAGE_HISTORY
+    | CREATE_PRIVATE_THREADS
+    | SEND_MESSAGES_IN_THREADS
+    | MANAGE_THREADS;
+/// What a member needs in that channel to use the ticket thread they're added
+/// to: a private thread still needs its parent visible, and talking in it
+/// takes Send Messages in Threads (plain Send Messages has no effect there).
+pub const THREAD_MEMBER_BITS: u64 = VIEW_CHANNEL | READ_MESSAGE_HISTORY | SEND_MESSAGES_IN_THREADS;
 
 /// One channel permission overwrite, bitfields already parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,18 +228,26 @@ pub fn missing(have: u64, wanted: u64, scope: Scope) -> Vec<&'static str> {
             (EMBED_LINKS, _) => "Embed Links",
             (ADD_REACTIONS, _) => "Add Reactions",
             (CREATE_INSTANT_INVITE, _) => "Create Invite",
+            (CREATE_PRIVATE_THREADS, _) => "Create Private Threads",
+            (SEND_MESSAGES_IN_THREADS, _) => "Send Messages in Threads",
+            (MANAGE_THREADS, _) => "Manage Threads",
+            (MENTION_EVERYONE, _) => "Mention @everyone, @here, and All Roles",
             _ => "an unnamed permission",
         }
     };
-    const ORDER: [u64; 9] = [
+    const ORDER: [u64; 13] = [
         VIEW_CHANNEL,
         SEND_MESSAGES,
+        SEND_MESSAGES_IN_THREADS,
         READ_MESSAGE_HISTORY,
         MANAGE_CHANNELS,
         MANAGE_ROLES,
+        CREATE_PRIVATE_THREADS,
+        MANAGE_THREADS,
         ATTACH_FILES,
         EMBED_LINKS,
         ADD_REACTIONS,
+        MENTION_EVERYONE,
         CREATE_INSTANT_INVITE,
     ];
     ORDER
@@ -361,6 +397,25 @@ mod tests {
         for bits in [full.bot(), full.locked_allow(), full.locked_deny()] {
             assert_eq!(bits & !(REQUIRED_SERVER_BITS | OPTIONAL_SERVER_BITS), 0);
         }
+    }
+
+    #[test]
+    fn thread_bits_have_names_and_stay_out_of_channel_mode() {
+        assert_eq!(
+            missing(0, THREAD_PARENT_BITS, Scope::Channel),
+            vec![
+                "View Channel",
+                "Send Messages in Threads",
+                "Read Message History",
+                "Create Private Threads",
+                "Manage Threads",
+            ]
+        );
+        // A thread needs no overwrite, so this mode asks for neither bit
+        // channel mode stands on.
+        assert_eq!(THREAD_PARENT_BITS & (MANAGE_CHANNELS | MANAGE_ROLES), 0);
+        // Plain Send Messages does nothing in a thread.
+        assert_eq!(THREAD_MEMBER_BITS & SEND_MESSAGES, 0);
     }
 
     #[test]

@@ -40,10 +40,11 @@ use crate::discord::{self, Action, Fallback, Interaction, OpenFailure, OpenGate,
 use crate::perms::{self, Grants, Overwrite, OVERWRITE_MEMBER};
 use crate::rest::{
     self, BotUser, ChannelSpec, ConnectError, Discord, History, Probe, Refusal, RestError,
+    ThreadState,
 };
 use crate::store::{
     unix_millis, ClaimOutcome, EditLookup, InstanceConfig, MaskedInstance, OpenRequest, OpenStats,
-    Reserve, Status, Store, Ticket, Topic, UnclaimOutcome,
+    Reserve, Status, Store, Ticket, TicketKind, Topic, UnclaimOutcome,
 };
 use crate::tasks::Tasks;
 use crate::transcript;
@@ -127,7 +128,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "tickets",
             "name": "Tickets",
-            "description": "Private support tickets from a button or topic menu — per-ticket channel, optional intake form, staff claim and members, close with transcript.",
+            "description": "Private support tickets from a button or topic menu — a private channel or private thread per ticket, optional intake form, staff claim and members, close with transcript.",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/tickets",
@@ -267,16 +268,37 @@ pub async fn update_instance(
 /// point its log at a channel in *another* server the shared bot can reach,
 /// and every ticket opened would post there as the DWEEB bot — a relay for
 /// spam into someone else's community. Categories are held to the same rule
-/// so a config never names a place its tickets can't go.
+/// so a config never names a place its tickets can't go — and so are the
+/// channels a thread-mode panel opens its threads in, which must also be
+/// plain text channels (the only kind a private thread can be made in).
+/// Only the mode in use is checked: a panel switched to threads keeps its old
+/// category choices for a switch back, and they're checked then.
 /// Returns the refusal to send, or `None` when every channel checks out.
 async fn verify_placement(state: &AppState, cfg: &InstanceConfig) -> Option<Response> {
-    let categories: Vec<&str> = cfg
-        .category_id
-        .iter()
-        .chain(cfg.topics.iter().filter_map(|t| t.category_id.as_ref()))
-        .map(String::as_str)
-        .collect();
-    if cfg.log_channel_id.is_none() && categories.is_empty() {
+    let threads = cfg.opens_threads();
+    let categories: Vec<&str> = if threads {
+        Vec::new()
+    } else {
+        cfg.category_id
+            .iter()
+            .chain(cfg.topics.iter().filter_map(|t| t.category_id.as_ref()))
+            .map(String::as_str)
+            .collect()
+    };
+    let thread_homes: Vec<&str> = if threads {
+        cfg.thread_channel_id
+            .iter()
+            .chain(
+                cfg.topics
+                    .iter()
+                    .filter_map(|t| t.thread_channel_id.as_ref()),
+            )
+            .map(String::as_str)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if cfg.log_channel_id.is_none() && categories.is_empty() && thread_homes.is_empty() {
         return None;
     }
     if !state.discord.has_token() {
@@ -293,6 +315,20 @@ async fn verify_placement(state: &AppState, cfg: &InstanceConfig) -> Option<Resp
             Some(c) if rest::is_text_channel(c.kind) => None,
             Some(_) => Some("The log channel must be a text channel."),
             None => Some("That log channel isn't in this server — pick one from the list."),
+        };
+        if let Some(text) = refusal {
+            return Some(bad_request(text.into()));
+        }
+    }
+    for id in thread_homes {
+        let refusal = match channels.iter().find(|c| c.id == id) {
+            Some(c) if rest::hosts_private_threads(c.kind) => None,
+            Some(_) => Some(
+                "Ticket threads need a plain text channel — Discord can't make private threads in announcement, forum or voice channels.",
+            ),
+            None => Some(
+                "A ticket channel isn't in this server any more — pick it again from the list.",
+            ),
         };
         if let Some(text) = refusal {
             return Some(bad_request(text.into()));
@@ -443,7 +479,7 @@ fn load_ticket(
     match state.store.get_ticket(channel_id) {
         Ok(Some(t)) if t.instance_id == id => Ok((cfg, t)),
         Ok(Some(_)) => Err("These controls don't belong to this ticket."),
-        Ok(None) => Err("This doesn't look like a ticket channel."),
+        Ok(None) => Err("This doesn't look like a ticket."),
         Err(e) => {
             tracing::error!(error = %e, "ticket lookup");
             Err(SOMETHING_WRONG)
@@ -781,15 +817,25 @@ impl OpenTask {
                 if let Err(e) = self.state.store.release(&self.key) {
                     tracing::error!(error = %e, "release ticket reservation");
                 }
-                discord::open_failure_text(failure).to_string()
+                discord::open_failure_text(failure, self.kind())
             }
         };
         say(&self.state, &Some(self.handle.clone()), &text).await;
     }
 
+    /// What this panel makes a new ticket as.
+    fn kind(&self) -> TicketKind {
+        if self.cfg.opens_threads() {
+            TicketKind::Thread
+        } else {
+            TicketKind::Channel
+        }
+    }
+
     /// Returns the opener's success reply.
     async fn open(&self) -> Result<String, OpenFailure> {
         let bot = ensure_bot(&self.state).await.ok_or(OpenFailure::Busy)?;
+        let kind = self.kind();
         let topic_id = self.topic.as_ref().map(|t| t.id.as_str()).unwrap_or("");
         let topic_label = self
             .topic
@@ -798,33 +844,37 @@ impl OpenTask {
             .unwrap_or_default();
         let staff = discord::staff_ids(&self.cfg, topic_id);
         let name = discord::channel_name(&self.cfg.naming, self.number, &self.opener_handle);
-        let category = self
-            .topic
-            .as_ref()
-            .and_then(|t| t.category_id.clone())
-            .or_else(|| self.cfg.category_id.clone());
-        let channel_topic = if topic_label.is_empty() {
-            format!(
-                "Ticket #{:04} · opened by <@{}>",
-                self.number, self.opener_id
-            )
-        } else {
-            format!(
-                "Ticket #{:04} · {topic_label} · opened by <@{}>",
-                self.number, self.opener_id
-            )
-        };
         let reason = format!("Ticket #{:04} opened by {}", self.number, self.opener_name);
-        let (channel_id, fallback) = self
-            .create_channel(
-                &bot,
-                &staff,
-                &name,
-                category.as_deref(),
-                &channel_topic,
-                &reason,
-            )
-            .await?;
+        let (channel_id, fallback) = match kind {
+            TicketKind::Channel => {
+                let category = self
+                    .topic
+                    .as_ref()
+                    .and_then(|t| t.category_id.clone())
+                    .or_else(|| self.cfg.category_id.clone());
+                let channel_topic = if topic_label.is_empty() {
+                    format!(
+                        "Ticket #{:04} · opened by <@{}>",
+                        self.number, self.opener_id
+                    )
+                } else {
+                    format!(
+                        "Ticket #{:04} · {topic_label} · opened by <@{}>",
+                        self.number, self.opener_id
+                    )
+                };
+                self.create_channel(
+                    &bot,
+                    &staff,
+                    &name,
+                    category.as_deref(),
+                    &channel_topic,
+                    &reason,
+                )
+                .await?
+            }
+            TicketKind::Thread => self.create_thread(&name, &reason).await?,
+        };
 
         let ticket = Ticket {
             channel_id: channel_id.clone(),
@@ -842,6 +892,7 @@ impl OpenTask {
             closed_at: None,
             closed_by: None,
             lock_muted: None,
+            kind,
         };
         if let Err(e) = self.state.store.activate(&self.key, &ticket) {
             tracing::error!(error = %e, "record ticket");
@@ -860,7 +911,7 @@ impl OpenTask {
             topic: &topic_label,
             staff_mentions: &mentions,
         };
-        let welcome = discord::welcome_message(&self.cfg, &self.instance_id, &ctx, &staff);
+        let welcome = discord::welcome_message(&self.cfg, &self.instance_id, &ctx, &staff, kind);
         if let Err(e) = self.state.discord.post_message(&channel_id, &welcome).await {
             tracing::warn!(?e, "post welcome — rolling the ticket back");
             self.roll_back(&channel_id).await;
@@ -903,7 +954,7 @@ impl OpenTask {
                     .await;
             }
             (None, Some(why)) => {
-                tracing::info!(?why, channel = %channel_id, "ticket opened outside its category");
+                tracing::info!(?why, channel = %channel_id, "ticket opened outside its configured place");
             }
             (None, None) => {}
         }
@@ -993,14 +1044,97 @@ impl OpenTask {
         Err(OpenFailure::MissingPermissions)
     }
 
-    async fn roll_back(&self, channel_id: &str) {
-        if let Err(e) = self
+    /// Make the ticket's private thread and put the opener in it: in the
+    /// topic's own channel when it has one, falling back to the panel's when
+    /// that one is gone or closed to the bot (the log says so). Returns why
+    /// it left the topic's channel, if it did.
+    async fn create_thread(
+        &self,
+        name: &str,
+        reason: &str,
+    ) -> Result<(String, Option<Fallback>), OpenFailure> {
+        let mut plan: Vec<&str> = Vec::with_capacity(2);
+        if let Some(topic_home) = self
+            .topic
+            .as_ref()
+            .and_then(|t| t.thread_channel_id.as_deref())
+        {
+            plan.push(topic_home);
+        }
+        if let Some(panel_home) = self.cfg.thread_channel_id.as_deref() {
+            if !plan.contains(&panel_home) {
+                plan.push(panel_home);
+            }
+        }
+        let mut failure = OpenFailure::ThreadChannelUnavailable;
+        for (attempt, home) in plan.into_iter().enumerate() {
+            match self.state.discord.create_thread(home, name, reason).await {
+                Ok(thread) => {
+                    self.add_opener(&thread).await?;
+                    let left_topic = attempt > 0;
+                    return Ok((thread, left_topic.then_some(Fallback::TopicThreadChannel)));
+                }
+                // Somewhere else may work: the next channel is tried.
+                Err(RestError::Refused(Refusal::MissingPermissions)) => {
+                    failure = OpenFailure::MissingPermissions;
+                }
+                Err(RestError::Refused(Refusal::NotFound | Refusal::Other)) => {
+                    failure = OpenFailure::ThreadChannelUnavailable;
+                }
+                // Server-wide: no other channel changes it.
+                Err(RestError::Refused(Refusal::ThreadLimit)) => {
+                    return Err(OpenFailure::ThreadLimit)
+                }
+                Err(RestError::Refused(_)) => return Err(OpenFailure::Rejected),
+                Err(RestError::Busy) => return Err(OpenFailure::Busy),
+            }
+        }
+        Err(failure)
+    }
+
+    /// The opener into their thread. A private thread shows only to its
+    /// members, so a ticket thread the opener isn't in is no ticket at all:
+    /// if they can't be added, the thread goes.
+    async fn add_opener(&self, thread: &str) -> Result<(), OpenFailure> {
+        let Err(e) = self
             .state
             .discord
+            .add_thread_member(thread, &self.opener_id)
+            .await
+        else {
+            return Ok(());
+        };
+        tracing::warn!(
+            ?e,
+            "add the opener to their ticket thread — rolling it back"
+        );
+        self.roll_back(thread).await;
+        Err(match e {
+            RestError::Refused(Refusal::MissingPermissions) => OpenFailure::MissingPermissions,
+            RestError::Busy | RestError::Refused(Refusal::NotFound) => OpenFailure::Busy,
+            RestError::Refused(_) => OpenFailure::Rejected,
+        })
+    }
+
+    async fn roll_back(&self, channel_id: &str) {
+        let d = &self.state.discord;
+        let Err(e) = d
             .delete_channel(channel_id, "Ticket couldn't be set up")
             .await
-        {
-            tracing::warn!(?e, channel = %channel_id, "couldn't roll back a half-made ticket");
+        else {
+            return;
+        };
+        tracing::warn!(?e, channel = %channel_id, "couldn't roll back a half-made ticket");
+        // Deleting a thread takes Manage Threads; archiving the bot's own
+        // thread doesn't, and takes a half-made one out of everyone's list.
+        if self.kind() == TicketKind::Thread {
+            let archived = ThreadState {
+                archived: Some(true),
+                locked: None,
+            };
+            let _ = d
+                .set_thread_state(channel_id, archived, "Ticket couldn't be set up")
+                .await;
         }
     }
 }
@@ -1028,8 +1162,34 @@ fn claim(state: &AppState, ix: &Interaction, id: &str, take: bool) -> Response {
         .as_ref()
         .and_then(|m| m.content.as_deref())
         .unwrap_or("");
-    let update =
-        |claimer: Option<&str>| Json(discord::claim_update(id, existing, claimer)).into_response();
+    // An archived thread refuses the in-place edit a claim answers with
+    // (Discord archives a ticket thread left idle a week). There the claim
+    // is acknowledged, the thread woken, and the buttons flipped after.
+    let wake = ticket.kind == TicketKind::Thread && ix.in_archived_thread();
+    let update = |claimer: Option<&str>| {
+        if !wake {
+            return Json(discord::claim_update(id, existing, claimer)).into_response();
+        }
+        let Some(handle) = reply_handle(ix) else {
+            return reply("Discord didn't send enough to do that — try again.");
+        };
+        let body = discord::claim_message(id, existing, claimer);
+        let state = state.clone();
+        let thread = ticket.channel_id.clone();
+        state.tasks.clone().spawn(async move {
+            let d = &state.discord;
+            if let Err(e) = d
+                .set_thread_state(&thread, ThreadState::AWAKE, "Ticket claimed")
+                .await
+            {
+                tracing::warn!(?e, "wake an archived ticket thread for a claim");
+            }
+            if let Err(e) = d.edit_original(&handle.app_id, &handle.token, &body).await {
+                tracing::warn!(?e, "show a claim in an archived ticket thread");
+            }
+        });
+        Json(discord::deferred_update()).into_response()
+    };
     if take {
         match state.store.claim(&ticket.channel_id, actor) {
             Ok(ClaimOutcome::Claimed) => update(Some(actor)),
@@ -1176,10 +1336,10 @@ struct CloseTask {
 
 impl CloseTask {
     async fn run(self) {
-        if self.cfg.close_mode == "lock" {
-            self.lock().await;
-        } else {
-            self.delete().await;
+        match (self.cfg.close_mode == "lock", self.ticket.kind) {
+            (true, TicketKind::Channel) => self.lock().await,
+            (true, TicketKind::Thread) => self.lock_thread().await,
+            (false, _) => self.delete().await,
         }
     }
 
@@ -1196,18 +1356,24 @@ impl CloseTask {
     async fn delete(self) {
         let d = &self.state.discord;
         let channel = &self.ticket.channel_id;
+        let kind = self.ticket.kind;
         let started = Instant::now();
         let delete_at = unix_millis() / 1000 + self.state.delete_grace.as_secs() as i64;
+        // In an idle, archived thread this post wakes it up — Discord
+        // unarchives a thread that isn't locked when a message is sent in it.
         let _ = d
             .post_message(
                 channel,
-                &discord::closing_notice(&self.closer_id, &self.reason, delete_at),
+                &discord::closing_notice(&self.closer_id, &self.reason, delete_at, kind),
             )
             .await;
         say(
             &self.state,
             &self.handle,
-            "\u{1F512} Closing — this channel is about to be deleted.",
+            &format!(
+                "\u{1F512} Closing — this {} is about to be deleted.",
+                kind.noun()
+            ),
         )
         .await;
         let history = if self.wants_transcript() {
@@ -1239,9 +1405,9 @@ impl CloseTask {
                     .store
                     .transition(channel, &[Status::Closing], Status::Open);
                 let _ = d
-                    .post_message(channel, &discord::close_failed_notice())
+                    .post_message(channel, &discord::close_failed_notice(kind))
                     .await;
-                say(&self.state, &self.handle, close_failure_text(e)).await;
+                say(&self.state, &self.handle, close_failure_text(e, kind)).await;
             }
         }
     }
@@ -1268,7 +1434,12 @@ impl CloseTask {
         if let Some(e) = change.error {
             tracing::warn!(?e, channel = %channel, "lock couldn't change member access");
             self.undo_lock(&muted, &audit).await;
-            say(&self.state, &self.handle, lock_failure_text(e)).await;
+            say(
+                &self.state,
+                &self.handle,
+                lock_failure_text(e, TicketKind::Channel),
+            )
+            .await;
             return;
         }
         // Who this lock muted, kept before anything else can be interrupted:
@@ -1293,7 +1464,12 @@ impl CloseTask {
         {
             tracing::warn!(?e, channel = %channel, "post locked banner — undoing the lock");
             self.undo_lock(&muted, &audit).await;
-            say(&self.state, &self.handle, lock_failure_text(e)).await;
+            say(
+                &self.state,
+                &self.handle,
+                lock_failure_text(e, TicketKind::Channel),
+            )
+            .await;
             return;
         }
         // Locked from here, and recorded so *before* the old controls are
@@ -1379,6 +1555,112 @@ impl CloseTask {
             .state
             .store
             .transition(channel, &[Status::Closing], Status::Open);
+    }
+
+    /// Lock mode for a thread. Discord's own lock is the mute: a locked thread
+    /// takes posts only from Manage Threads holders, so the opener, anyone
+    /// added, and staff without it can still read but no longer write — no
+    /// per-member overwrite to remember, and nobody muted by hand to spare.
+    /// The order is a channel lock's: the lock first (the step it can't do
+    /// without), then the closed banner with Reopen/Delete, then the record,
+    /// and only then the old controls retired, the rename and the records —
+    /// and last the archive, which takes it out of the channel's thread list
+    /// (and the server's active-thread count).
+    async fn lock_thread(self) {
+        let d = &self.state.discord;
+        let thread = &self.ticket.channel_id;
+        let audit = self.audit();
+        // Unarchived in the same call: a thread left idle a week is archived,
+        // and an archived thread refuses the edits below.
+        let locked = ThreadState {
+            archived: Some(false),
+            locked: Some(true),
+        };
+        if let Err(e) = d.set_thread_state(thread, locked, &audit).await {
+            tracing::warn!(?e, channel = %thread, "lock couldn't lock the ticket thread");
+            let _ = self
+                .state
+                .store
+                .transition(thread, &[Status::Closing], Status::Open);
+            say(
+                &self.state,
+                &self.handle,
+                lock_failure_text(e, TicketKind::Thread),
+            )
+            .await;
+            return;
+        }
+        if let Err(e) = d
+            .post_message(
+                thread,
+                &discord::locked_message(&self.ticket.instance_id, &self.closer_id, &self.reason),
+            )
+            .await
+        {
+            tracing::warn!(?e, channel = %thread, "post locked banner — unlocking the thread");
+            let unlocked = ThreadState {
+                archived: None,
+                locked: Some(false),
+            };
+            if let Err(e) = d.set_thread_state(thread, unlocked, &audit).await {
+                tracing::warn!(?e, channel = %thread, "couldn't unlock after a failed lock");
+            }
+            let _ = self
+                .state
+                .store
+                .transition(thread, &[Status::Closing], Status::Open);
+            say(
+                &self.state,
+                &self.handle,
+                lock_failure_text(e, TicketKind::Thread),
+            )
+            .await;
+            return;
+        }
+        let now = unix_millis();
+        match self.state.store.finish_close(
+            thread,
+            Status::Closing,
+            Status::Locked,
+            &self.closer_id,
+            now,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::warn!(channel = %thread, "a lock lost its claim before it finished");
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "record locked ticket");
+                say(&self.state, &self.handle, SOMETHING_WRONG).await;
+                return;
+            }
+        }
+        if let Some(m) = &self.control_message {
+            let _ = d.edit_message(thread, m, &discord::retire_controls()).await;
+        }
+        // Best-effort, like a channel's: renames are rate-limited.
+        let _ = d
+            .rename_channel(
+                thread,
+                &discord::closed_name(&self.ticket.channel_name, self.ticket.number),
+                &audit,
+            )
+            .await;
+        let history = if self.wants_transcript() {
+            Some(d.fetch_history(thread).await)
+        } else {
+            None
+        };
+        self.file_records(history, now).await;
+        let archived = ThreadState {
+            archived: Some(true),
+            locked: None,
+        };
+        if let Err(e) = d.set_thread_state(thread, archived, &audit).await {
+            tracing::info!(?e, channel = %thread, "couldn't archive a locked ticket thread");
+        }
+        say(&self.state, &self.handle, "\u{1F512} Ticket closed.").await;
     }
 
     fn wants_transcript(&self) -> bool {
@@ -1498,48 +1780,86 @@ impl CloseTask {
     }
 }
 
-fn close_failure_text(e: RestError) -> &'static str {
-    match e {
-        RestError::Refused(Refusal::MissingPermissions) => {
+/// Why a delete-mode close didn't delete the ticket. A thread is deleted
+/// under Manage Threads, a channel under Manage Channels.
+fn close_failure_text(e: RestError, kind: TicketKind) -> &'static str {
+    match (e, kind) {
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Channel) => {
             "I couldn't delete this channel — the bot needs **Manage Channels** here. The ticket stays open; ask an admin to check the bot's permissions."
         }
-        RestError::Busy => "Discord was busy and the ticket didn't close — try again in a moment.",
-        RestError::Refused(_) => "Discord wouldn't delete this channel, so the ticket stays open.",
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Thread) => {
+            "I couldn't delete this thread — the bot needs **Manage Threads** in this channel. The ticket stays open; ask an admin to check the bot's permissions."
+        }
+        (RestError::Busy, _) => {
+            "Discord was busy and the ticket didn't close — try again in a moment."
+        }
+        (RestError::Refused(_), TicketKind::Channel) => {
+            "Discord wouldn't delete this channel, so the ticket stays open."
+        }
+        (RestError::Refused(_), TicketKind::Thread) => {
+            "Discord wouldn't delete this thread, so the ticket stays open."
+        }
     }
 }
 
-fn lock_failure_text(e: RestError) -> &'static str {
-    match e {
-        RestError::Refused(Refusal::MissingPermissions) => {
+/// A channel is locked through member overwrites (Manage Roles); a thread
+/// through its own `locked` flag (Manage Threads).
+fn lock_failure_text(e: RestError, kind: TicketKind) -> &'static str {
+    match (e, kind) {
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Channel) => {
             "I couldn't lock this ticket — the bot needs **Manage Roles** (Manage Permissions in this channel). The ticket stays open."
         }
-        RestError::Busy => "Discord was busy and the ticket didn't close — try again in a moment.",
-        RestError::Refused(_) => "Discord refused to lock this ticket, so it stays open.",
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Thread) => {
+            "I couldn't lock this ticket — the bot needs **Manage Threads** in this channel. The ticket stays open."
+        }
+        (RestError::Busy, _) => {
+            "Discord was busy and the ticket didn't close — try again in a moment."
+        }
+        (RestError::Refused(_), _) => "Discord refused to lock this ticket, so it stays open.",
     }
 }
 
 /// A lock-mode Delete that didn't go through — the ticket is still *closed*
 /// (locked), which the delete-mode close's "stays open" wording got wrong.
-fn delete_failure_text(e: RestError) -> &'static str {
-    match e {
-        RestError::Refused(Refusal::MissingPermissions) => {
+fn delete_failure_text(e: RestError, kind: TicketKind) -> &'static str {
+    match (e, kind) {
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Channel) => {
             "I couldn't delete this channel — the bot needs **Manage Channels** here. The ticket stays closed; ask an admin to check the bot's permissions."
         }
-        RestError::Busy => {
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Thread) => {
+            "I couldn't delete this thread — the bot needs **Manage Threads** in this channel. The ticket stays closed; ask an admin to check the bot's permissions."
+        }
+        (RestError::Busy, TicketKind::Channel) => {
             "Discord was busy and the channel wasn't deleted — try again in a moment."
         }
-        RestError::Refused(_) => "Discord wouldn't delete this channel, so the ticket stays closed.",
+        (RestError::Busy, TicketKind::Thread) => {
+            "Discord was busy and the thread wasn't deleted — try again in a moment."
+        }
+        (RestError::Refused(_), TicketKind::Channel) => {
+            "Discord wouldn't delete this channel, so the ticket stays closed."
+        }
+        (RestError::Refused(_), TicketKind::Thread) => {
+            "Discord wouldn't delete this thread, so the ticket stays closed."
+        }
     }
 }
 
 /// Same three-way split as a lock's: a permanent refusal is never "busy".
-fn reopen_failure_text(e: RestError) -> &'static str {
-    match e {
-        RestError::Refused(Refusal::MissingPermissions) => {
+fn reopen_failure_text(e: RestError, kind: TicketKind) -> &'static str {
+    match (e, kind) {
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Channel) => {
             "I couldn't reopen this ticket — the bot needs **Manage Roles** (Manage Permissions in this channel)."
         }
-        RestError::Busy => "Discord was busy and the ticket didn't reopen — try again in a moment.",
-        RestError::Refused(_) => "Discord refused to reopen this ticket, so it stays closed.",
+        (RestError::Refused(Refusal::MissingPermissions), TicketKind::Thread) => {
+            "I couldn't reopen this ticket — the bot needs **Manage Threads** in this channel."
+        }
+        (RestError::Refused(Refusal::ThreadLimit), _) => {
+            "This server is at Discord's limit on active threads, so the ticket can't be reopened until some are archived."
+        }
+        (RestError::Busy, _) => {
+            "Discord was busy and the ticket didn't reopen — try again in a moment."
+        }
+        (RestError::Refused(_), _) => "Discord refused to reopen this ticket, so it stays closed.",
     }
 }
 
@@ -1752,21 +2072,48 @@ impl ReopenTask {
     async fn run(self) {
         let d = &self.state.discord;
         let channel = &self.ticket.channel_id;
+        let kind = self.ticket.kind;
         let audit = format!(
             "Ticket #{:04} reopened by {}",
             self.ticket.number, self.reopener_name
         );
-        // Exactly the members the lock muted. A ticket an older build locked
-        // has no list, and restores every muted member, as it always did.
-        let only = self.ticket.lock_muted.as_deref();
-        let change =
-            set_member_access(&self.state, channel, Access::Participant, only, &audit).await;
-        if let Some(e) = change.error {
-            tracing::warn!(?e, channel = %channel, "reopen couldn't restore member access");
-            self.relock(&change.changed, &audit).await;
-            say(&self.state, &self.handle, reopen_failure_text(e)).await;
-            return;
-        }
+        // Give everyone their voice back: a channel through exactly the
+        // member overwrites its lock changed, a thread by lifting its own
+        // lock (and the archive a lock ends with).
+        let unmuted: Vec<String> = match kind {
+            TicketKind::Channel => {
+                // Exactly the members the lock muted. A ticket an older build
+                // locked has no list, and restores every muted member, as it
+                // always did.
+                let only = self.ticket.lock_muted.as_deref();
+                let change =
+                    set_member_access(&self.state, channel, Access::Participant, only, &audit)
+                        .await;
+                if let Some(e) = change.error {
+                    tracing::warn!(?e, channel = %channel, "reopen couldn't restore member access");
+                    self.relock(&change.changed, &audit).await;
+                    say(&self.state, &self.handle, reopen_failure_text(e, kind)).await;
+                    return;
+                }
+                change.changed
+            }
+            TicketKind::Thread => {
+                let open = ThreadState {
+                    archived: Some(false),
+                    locked: Some(false),
+                };
+                if let Err(e) = d.set_thread_state(channel, open, &audit).await {
+                    tracing::warn!(?e, channel = %channel, "reopen couldn't unlock the ticket thread");
+                    let _ =
+                        self.state
+                            .store
+                            .transition(channel, &[Status::Reopening], Status::Locked);
+                    say(&self.state, &self.handle, reopen_failure_text(e, kind)).await;
+                    return;
+                }
+                Vec::new()
+            }
+        };
         // New controls first, the locked banner's retired only after: if they
         // can't be posted, the ticket goes back to locked, whose Reopen still
         // works.
@@ -1778,8 +2125,8 @@ impl ReopenTask {
         );
         if let Err(e) = d.post_message(channel, &msg).await {
             tracing::warn!(?e, channel = %channel, "post reopened controls — staying locked");
-            self.relock(&change.changed, &audit).await;
-            say(&self.state, &self.handle, reopen_failure_text(e)).await;
+            self.relock(&unmuted, &audit).await;
+            say(&self.state, &self.handle, reopen_failure_text(e, kind)).await;
             return;
         }
         if let Err(e) = self.state.store.finish_reopen(channel) {
@@ -1810,7 +2157,20 @@ impl ReopenTask {
     /// locked. The lock's list stays as it was: they're its again.
     async fn relock(&self, unmuted: &[String], audit: &str) {
         let channel = &self.ticket.channel_id;
-        if !unmuted.is_empty() {
+        if self.ticket.kind == TicketKind::Thread {
+            let locked = ThreadState {
+                archived: Some(true),
+                locked: Some(true),
+            };
+            if let Err(e) = self
+                .state
+                .discord
+                .set_thread_state(channel, locked, audit)
+                .await
+            {
+                tracing::warn!(?e, channel = %channel, "couldn't re-lock a thread after a failed reopen");
+            }
+        } else if !unmuted.is_empty() {
             let relocked =
                 set_member_access(&self.state, channel, Access::Locked, Some(unmuted), audit).await;
             if let Some(e) = relocked.error {
@@ -1866,7 +2226,7 @@ fn delete(state: &AppState, ix: &Interaction, id: &str) -> Response {
                             state
                                 .store
                                 .transition(channel, &[Status::Deleting], Status::Locked);
-                        say(&state, &handle, delete_failure_text(e)).await;
+                        say(&state, &handle, delete_failure_text(e, ticket.kind)).await;
                     }
                 }
             });
@@ -1897,7 +2257,12 @@ fn members(state: &AppState, ix: &Interaction, id: &str) -> Response {
     if !actor_is_staff(ix, &cfg, &ticket) {
         return reply("Only staff can add or remove people.");
     }
-    Json(discord::ephemeral_message(discord::members_panel(id, None))).into_response()
+    Json(discord::ephemeral_message(discord::members_panel(
+        id,
+        None,
+        ticket.kind,
+    )))
+    .into_response()
 }
 
 /// A pick in the Members panel: add or remove the chosen people, then report
@@ -1926,6 +2291,7 @@ fn member_pick(state: &AppState, ix: &Interaction, id: &str, add: bool) -> Respo
         .filter(|v| validate::is_snowflake(v) && *v != ticket.guild_id)
         .take(10)
         .collect();
+    let wake = ticket.kind == TicketKind::Thread && ix.in_archived_thread();
     let task = MembersTask {
         state: state.clone(),
         instance_id: id.to_string(),
@@ -1934,6 +2300,7 @@ fn member_pick(state: &AppState, ix: &Interaction, id: &str, add: bool) -> Respo
         actor_name: ix.actor_name(),
         picked,
         add,
+        wake,
         handle,
     };
     state.tasks.spawn(task.run());
@@ -1948,6 +2315,9 @@ struct MembersTask {
     actor_name: String,
     picked: Vec<String>,
     add: bool,
+    /// The pick came from an archived thread, which refuses member changes
+    /// until it's awake.
+    wake: bool,
     handle: ReplyHandle,
 }
 
@@ -1955,6 +2325,7 @@ impl MembersTask {
     async fn run(self) {
         let d = &self.state.discord;
         let channel = &self.ticket.channel_id;
+        let kind = self.ticket.kind;
         let busy = |state: &AppState, handle: &ReplyHandle, id: &str| {
             let state = state.clone();
             let handle = handle.clone();
@@ -1968,6 +2339,7 @@ impl MembersTask {
                         &discord::members_panel(
                             &id,
                             Some("Discord was busy — nothing changed. Try again in a moment."),
+                            kind,
                         ),
                     )
                     .await;
@@ -1980,38 +2352,32 @@ impl MembersTask {
             return;
         };
         let bot_id = bot.id;
-        let audit = format!(
-            "Ticket #{:04}: {} by {}",
-            self.ticket.number,
-            if self.add {
-                "member added"
-            } else {
-                "member removed"
-            },
-            self.actor_name
-        );
+        let audit = self.audit();
         let mut notes: Vec<String> = Vec::new();
-        // The channel's overwrites as they stand: a pick may only ever touch a
+        // A channel's overwrites as they stand: a pick may only ever touch a
         // *member* overwrite. Belt and braces behind the resolved-users check —
-        // a role's overwrite is never replaced or deleted from here.
-        let overwrites = match d.channel_overwrites(channel).await {
-            Ok(o) => o,
-            Err(e) => {
-                tracing::warn!(?e, "read ticket overwrites for members");
-                busy(&self.state, &self.handle, &self.instance_id).await;
-                return;
-            }
+        // a role's overwrite is never replaced or deleted from here. A thread
+        // has no overwrites, and its member calls take user ids only.
+        let role_ids: Vec<String> = match kind {
+            TicketKind::Channel => match d.channel_overwrites(channel).await {
+                Ok(o) => o
+                    .into_iter()
+                    .filter(|o| o.kind != OVERWRITE_MEMBER)
+                    .map(|o| o.id)
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!(?e, "read ticket overwrites for members");
+                    busy(&self.state, &self.handle, &self.instance_id).await;
+                    return;
+                }
+            },
+            TicketKind::Thread => Vec::new(),
         };
-        let role_ids: Vec<&str> = overwrites
-            .iter()
-            .filter(|o| o.kind != OVERWRITE_MEMBER)
-            .map(|o| o.id.as_str())
-            .collect();
         let targets: Vec<&String> = self
             .picked
             .iter()
             .filter(|u| {
-                if **u == bot_id || role_ids.contains(&u.as_str()) {
+                if **u == bot_id || role_ids.contains(u) {
                     return false;
                 }
                 if !self.add && **u == self.ticket.opener_id {
@@ -2041,24 +2407,27 @@ impl MembersTask {
                 .edit_original(
                     &self.handle.app_id,
                     &self.handle.token,
-                    &discord::members_panel(&self.instance_id, Some(&note)),
+                    &discord::members_panel(&self.instance_id, Some(&note), kind),
                 )
                 .await;
             return;
         }
-        let results = join_all(targets.iter().map(|u| async {
-            if self.add {
-                match set_access(&self.state, channel, u, Access::Participant, &audit).await {
-                    Ok(Applied::Changed) => Ok(()),
-                    // Not in the server: nobody to let in.
-                    Ok(Applied::Gone) => Err(RestError::Refused(Refusal::UnknownMember)),
-                    Err(e) => Err(e),
+        if self.wake {
+            self.wake_thread(&audit).await;
+        }
+        let mut results = join_all(targets.iter().map(|u| self.apply(u, &audit))).await;
+        // Discord archived the thread without the interaction saying so:
+        // wake it, and try what the archive refused once more.
+        let archived =
+            |r: &Result<(), RestError>| matches!(r, Err(RestError::Refused(Refusal::Archived)));
+        if kind == TicketKind::Thread && results.iter().any(archived) {
+            self.wake_thread(&audit).await;
+            for (u, r) in targets.iter().zip(results.iter_mut()) {
+                if archived(r) {
+                    *r = self.apply(u, &audit).await;
                 }
-            } else {
-                d.delete_overwrite(channel, u, &audit).await
             }
-        }))
-        .await;
+        }
         let mut done: Vec<String> = Vec::new();
         let mut failed: Option<RestError> = None;
         for (u, r) in targets.into_iter().zip(results) {
@@ -2092,11 +2461,14 @@ impl MembersTask {
         }
         if let Some(e) = failed {
             notes.push(
-                match e {
-                    RestError::Refused(Refusal::MissingPermissions) => {
+                match (e, kind) {
+                    (RestError::Refused(Refusal::MissingPermissions), TicketKind::Channel) => {
                         "Some changes didn't go through — the bot needs **Manage Roles** (Manage Permissions in this channel)."
                     }
-                    RestError::Refused(Refusal::UnknownMember) => {
+                    (RestError::Refused(Refusal::MissingPermissions), TicketKind::Thread) => {
+                        "Some changes didn't go through — the bot needs **Manage Threads** in this channel."
+                    }
+                    (RestError::Refused(Refusal::UnknownMember), _) => {
                         "Some of them aren't in this server, so they couldn't be added."
                     }
                     _ => "Some changes didn't go through — Discord was busy. Try again in a moment.",
@@ -2109,9 +2481,53 @@ impl MembersTask {
             .edit_original(
                 &self.handle.app_id,
                 &self.handle.token,
-                &discord::members_panel(&self.instance_id, note.as_deref()),
+                &discord::members_panel(&self.instance_id, note.as_deref(), kind),
             )
             .await;
+    }
+
+    fn audit(&self) -> String {
+        format!(
+            "Ticket #{:04}: {} by {}",
+            self.ticket.number,
+            if self.add {
+                "member added"
+            } else {
+                "member removed"
+            },
+            self.actor_name
+        )
+    }
+
+    /// Add or remove one person: a member overwrite on a channel, a thread
+    /// membership on a thread.
+    async fn apply(&self, user: &str, audit: &str) -> Result<(), RestError> {
+        let d = &self.state.discord;
+        let channel = &self.ticket.channel_id;
+        match (self.ticket.kind, self.add) {
+            (TicketKind::Channel, true) => {
+                match set_access(&self.state, channel, user, Access::Participant, audit).await {
+                    Ok(Applied::Changed) => Ok(()),
+                    // Not in the server: nobody to let in.
+                    Ok(Applied::Gone) => Err(RestError::Refused(Refusal::UnknownMember)),
+                    Err(e) => Err(e),
+                }
+            }
+            (TicketKind::Channel, false) => d.delete_overwrite(channel, user, audit).await,
+            (TicketKind::Thread, true) => d.add_thread_member(channel, user).await,
+            (TicketKind::Thread, false) => d.remove_thread_member(channel, user).await,
+        }
+    }
+
+    async fn wake_thread(&self, audit: &str) {
+        if let Err(e) = self
+            .state
+            .discord
+            .set_thread_state(&self.ticket.channel_id, ThreadState::AWAKE, audit)
+            .await
+        {
+            tracing::warn!(?e, "wake an archived ticket thread for a members change");
+        }
     }
 }
 
@@ -2154,7 +2570,7 @@ fn manage(state: &AppState, ix: &Interaction, id: &str) -> Response {
         say(
             &state,
             &handle,
-            &discord::manage_text(&tickets, MANAGE_LIST),
+            &discord::manage_text(&tickets, MANAGE_LIST, cfg.opens_threads()),
         )
         .await;
     });

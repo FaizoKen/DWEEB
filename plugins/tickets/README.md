@@ -2,12 +2,13 @@
 
 Attach this to an **interactive button** ("Open a ticket") or a **string select**
 (a topic menu) in DWEEB and members can open a **private support ticket** — no
-moderator in the loop to create the channel. When a Discord user clicks:
+moderator in the loop to create it. When a Discord user clicks:
 
 1. the plugin runs an **anti-spam check** (open-ticket limit, cooldown, and a
    guard that makes a double-click one ticket),
 2. optionally pops an **intake form** (a modal you design),
-3. creates a **private channel** only the opener + your staff can see,
+3. creates a **private channel** — or, in [thread mode](#private-threads-instead-of-channels),
+   a **private thread** in one channel — only the opener + your staff can see,
 4. posts a **welcome message** (templated) with **Close** / **Claim** /
    **Members** controls, then the intake answers,
 5. replies privately with a link to the new ticket.
@@ -24,15 +25,15 @@ It's a single small Rust service that *is* its own registry, config UI, config
 API, and Discord interactions endpoint — backed by one SQLite file. Like
 [Self Role](../self-role/) it needs a **bot token**, because creating a channel
 and setting who can see it are Discord REST calls that require **Manage Channels**
-and **Manage Roles**.
+and **Manage Roles** (thread mode needs **Manage Threads** instead).
 
 ```
 DWEEB  ──reads──▶  GET /registry.json
 DWEEB  ──embeds─▶  GET /config.html  ◀─connect/save─▶  /api/connect, /api/instances  ──▶  SQLite
 Discord ─clicks─▶  POST /interactions
-   open    ──▶ reserve a slot ──▶ (intake modal?) ──▶ create private channel ──▶ welcome + controls ──▶ link
+   open    ──▶ reserve a slot ──▶ (intake modal?) ──▶ create private channel / thread ──▶ welcome + controls ──▶ link
    claim   ──▶ record it, flip the button in place (Unclaim releases it)
-   members ──▶ private picker ──▶ add / remove member overwrites
+   members ──▶ private picker ──▶ add / remove member overwrites (thread: thread members)
    close   ──▶ (reason modal?) ──▶ delete (notice → transcript → delete)  OR  lock (read-only + Reopen/Delete)
 ```
 
@@ -40,9 +41,9 @@ Discord ─clicks─▶  POST /interactions
 
 | Need | How it's handled |
 |---|---|
-| **One private space per ticket** | A `#ticket-0001` (or `#ticket-<username>`) text channel under your category, with overwrites that hide it from `@everyone` and grant the opener, your staff roles, and the bot. |
+| **One private space per ticket** | A `#ticket-0001` (or `#ticket-<username>`) text channel under your category, with overwrites that hide it from `@everyone` and grant the opener, your staff roles, and the bot — or, in [thread mode](#private-threads-instead-of-channels), a private `ticket-0001` thread in one channel of your choice. |
 | **Triage up front** | An optional **intake form** (0–5 modal questions) shown *before* the channel is created. Answers are posted right after the welcome, split across messages as needed — never cut off. |
-| **Topic routing** | On a **string select** panel each option is a topic (Billing, Bug, …). DWEEB wires + locks the option values for you. Each topic can also send its tickets to **its own category** and add **its own staff roles** (a Billing team that sees billing tickets only). |
+| **Topic routing** | On a **string select** panel each option is a topic (Billing, Bug, …). DWEEB wires + locks the option values for you. Each topic can also send its tickets to **its own category** (thread mode: **its own channel**) and add **its own staff roles** (a Billing team that sees billing tickets only). |
 | **Staff handling** | Designated **staff roles** see every ticket. **Claim** assigns ownership so two people don't double up (**Unclaim** hands it back; a server manager can release anyone's). **Members** lets staff add or remove individual people. |
 | **Clean close** | **Close** asks for an optional reason (doubles as a confirmation). *Delete* mode tells everyone in the channel who closed it and why, counts down five seconds, files the records, and deletes. *Lock* mode keeps the channel read-only for everyone but staff, with **Reopen** / **Delete**. |
 | **Records** | A self-contained **HTML transcript** (up to the last 500 messages, with the ticket's details up top) in your **log channel**, optionally **DMed to the opener**, plus open / close / reopen / delete log lines. See [the Message Content caveat](#transcripts-and-the-message-content-intent). |
@@ -85,6 +86,42 @@ remembers whom it muted, so a reopen restores exactly them (someone a
 moderator muted by hand stays muted). Someone who has left the server is
 skipped: Discord won't change a non-member's access, and they can't post there
 anyway.
+
+## Private threads instead of channels
+
+Pick **Each ticket is… → A private thread** (or start from the **Thread help
+desk** preset) and every ticket becomes a private thread inside one text
+channel you choose — usually your support channel. Nothing piles up in the
+channel list, and Discord's 50-channels-per-category and 500-per-server limits
+don't apply (threads have their own: 1,000 *active* threads per server, and a
+closed ticket thread is archived, so it doesn't count).
+
+How it differs from a channel, because Discord's threads work differently:
+
+| | Private channel | Private thread |
+|---|---|---|
+| Who can see it | Its permission overwrites: the opener, staff roles, anyone added. | Its **members** — plus everyone with **Manage Threads** in the parent channel, who sees every ticket thread. Members also need to see the parent channel itself (not post in it). |
+| How the opener gets in | An overwrite. | Added as a thread member when it opens. If they can't be, the thread is taken away again rather than left empty. |
+| How staff get in | A role overwrite per staff role. | **Mentioned in**: with *Add staff to each ticket* on (Advanced options — switched on for you when you pick threads), the welcome mentions every staff role, which is how Discord adds a role's members to a private thread. Roles with Manage Threads in the channel need no mention. The config UI warns about a staff role that would be left out (not mentioned, not mentionable, no Manage Threads). |
+| Members | Member overwrites. | Thread members. The opener stays; Manage Threads holders can't be removed from view. |
+| Close → *lock* | Mutes members with overwrites. | Discord's own thread **lock** (read-only for everyone without Manage Threads), then **archived**; **Reopen** unlocks it. |
+| Close → *delete* | Deletes the channel. | Deletes the thread. |
+| Idle | — | Discord archives a thread after a week without messages. A message, a Close or a Members change wakes it; Claim does too. |
+
+The bot needs **View Channel**, **Read Message History**, **Create Private
+Threads**, **Send Messages in Threads** and **Manage Threads** in that channel —
+Manage Threads because locking or deleting a thread takes it, and because a
+ticket thread is created so that members can't pull others in, leaving adding
+people to moderators. The shared invite asks for all three thread permissions,
+so a server that added the bot before thread mode existed fixes it with one
+re-add (or by giving the bot's role those permissions). The pre-flight names
+anything missing, server-wide or in the chosen channel, and also says when
+`@everyone` can't see the channel or talk in its threads (fine if a member role
+grants that).
+
+A panel switched between modes changes only **new** tickets: each ticket
+remembers what it is, so the channel tickets already open keep working as
+channels.
 
 ## The ticket lifecycle
 
@@ -148,7 +185,7 @@ the only place the intent applies.
 |---|---|
 | Interaction authenticity | Ed25519 signature verified on the **raw** body before parsing ([`discord.rs`](src/discord.rs)). Bad/missing signature → `401`. Custom-app signatures verified with the dispatcher-attested key. |
 | Who can reconfigure a panel | The instance id in the `custom_id` is a public binding; edits need the separate 256-bit edit token (protocol v2), of which only a SHA-256 digest is stored. |
-| A panel can't post into someone else's server | Saving checks, through the bot, that the log channel and every category belong to the panel's own server — otherwise a panel could point its log at any channel the shared bot can reach and relay transcripts and close reasons there. |
+| A panel can't post into someone else's server | Saving checks, through the bot, that the log channel and every category (thread mode: every ticket channel, which must also be a plain text channel) belong to the panel's own server — otherwise a panel could point its log at any channel the shared bot can reach and relay transcripts and close reasons there. |
 | Who can close / claim / reopen / manage people | Re-derived from the interaction every time: staff = holding one of the panel's staff roles (or, inside a ticket, its topic's) **or** Administrator / Manage Server / Manage Channels. The opener may close only if the panel allows it. An in-ticket control naming a *different* panel than the ticket's own is refused. |
 | Members can't be turned into a leak | Overwrites are keyed by id alone, so a pick only ever touches **member** overwrites: values must be users Discord itself resolved, never the guild's `@everyone` id, and never an id that holds a role overwrite — a crafted pick can't unhide a ticket or lock staff out. |
 | Topic integrity | A submitted select value is matched against the configured topics; an unknown value is refused, not acted on. Topic ids are short (≤ 40, `[A-Za-z0-9_-]`) so they fit the intake modal's 100-char `custom_id`. |
@@ -156,7 +193,7 @@ the only place the intent applies.
 | SSRF | The token is only ever sent to `discord.com` (a fixed host); there is no user-supplied URL to abuse. (`DISCORD_API_BASE` exists for local testing and is ignored by release builds.) |
 | Mention injection | Every message sets `allowed_mentions` explicitly: the welcome pings only the opener / staff roles you opted into, a Members add pings exactly the people added, and everything else pings no one — an `@everyone` in a topic name, template or answer never pings. |
 | Reply within Discord's 3s window | Every multi-call flow **defers** and edits its reply when done. The only Discord call on the 3s path is a short existence probe, made just when a member is refused at the open limit, and cached for a minute. |
-| Permission mistakes | The most common ticket failure. The pre-flight reports server-wide gaps once (split into *tickets can't open* and *tickets open, but…*) and flags only a category's or log channel's **own** denials. At click time a ticket still opens where it can: with the essential grants if the bot can't hand out Attach Files etc., and at the top of the server if the category is full (Discord's 50), deleted, or closed to the bot — the log channel says so. |
+| Permission mistakes | The most common ticket failure. The pre-flight reports server-wide gaps once (split into *tickets can't open* and *tickets open, but…*) and flags only a category's or log channel's **own** denials. At click time a ticket still opens where it can: with the essential grants if the bot can't hand out Attach Files etc., and at the top of the server if the category is full (Discord's 50), deleted, or closed to the bot — the log channel says so. In thread mode a topic whose own channel is gone or closed to the bot opens in the panel's channel instead, and says so too. |
 | Transient Discord trouble | A short rate limit is waited out and retried; 5xx and timeouts are retried only on idempotent calls (a POST that may have created the channel is never sent twice). |
 | Resource bounds | ≤ 20 staff roles (+ ≤ 10 per topic), ≤ 25 topics, ≤ 5 intake questions (answers ≤ 512 / 1024 chars, enforced in the modal), welcome ≤ 1500 chars, custom reply ≤ 500, open limit ≤ 50, cooldown ≤ 1 day, transcript ≤ 500 messages. |
 
@@ -178,10 +215,10 @@ buttons). Run `cargo test`.
 
 ## The bot
 
-Tickets **always uses the shared DWEEB bot** to manage ticket channels — there is
-no bring-your-own-bot option in the config UI. The operator configures it once
-with `BOT_TOKEN` (a bot with **Manage Channels** + **Manage Roles**); end users
-only ever *invite* it.
+Tickets **always uses the shared DWEEB bot** to manage ticket channels and
+threads — there is no bring-your-own-bot option in the config UI. The operator
+configures it once with `BOT_TOKEN` (a bot with **Manage Channels** + **Manage
+Roles**, and **Manage Threads** for thread mode); end users only ever *invite* it.
 
 The config UI then needs zero setup in the common case:
 
@@ -199,19 +236,22 @@ The config UI then needs zero setup in the common case:
 Because the bot is **shared** across plugins and Discord's invite is destructive
 on re-authorization (it *replaces* a bot's permissions, never merges), every
 DWEEB invite URL requests the **same union** — currently **Create Instant Invite
-+ Manage Channels + Manage Roles + Manage Webhooks** (`805306385`). Tickets normalizes any
++ Manage Channels + Manage Roles + Manage Webhooks + Manage Threads + Create
+Private Threads + Send Messages in Threads** (`361582559249`). Tickets normalizes any
 operator-supplied `BOT_INVITE_URL` to that union at startup, and the value is
 mirrored in the DWEEB frontend (`src/core/guild/config.ts`) and every other
 plugin. Bump them all together when a plugin's needs change. (Manage Webhooks is
 required by the proxy's Send/Restore webhook picker, not by tickets itself, but
 the shared invite must carry it so re-inviting through this link doesn't strip
-it.)
+it. The three thread permissions are thread mode's.)
 
 The union deliberately doesn't include View Channels, Send Messages, Attach
 Files and friends — the bot gets those from `@everyone`, like any member. A
 server that has stripped them from `@everyone` needs to give them to the bot's
 role, because **a bot can only grant a permission it holds itself**; the
-pre-flight says which.
+pre-flight says which. Create Private Threads and Send Messages in Threads are
+the exception: servers that switch threads off commonly take them from
+`@everyone`, and thread mode can't open a ticket at all without them.
 
 > **Operators:** the `BOT_TOKEN` grants full bot access, not just channel
 > management. Treat the plugin's database as a secret store and only run plugins

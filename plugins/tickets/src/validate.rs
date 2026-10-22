@@ -46,10 +46,26 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     }
     check_roles(&cfg.staff_roles, &cfg.guild_id)?;
 
+    let threads = match cfg.mode.as_str() {
+        "channel" => false,
+        "thread" => true,
+        _ => return Err("Ticket type must be \"channel\" or \"thread\".".into()),
+    };
     if let Some(cat) = &cfg.category_id {
         if !is_snowflake(cat) {
             return Err("That ticket category doesn't look right.".into());
         }
+    }
+    match &cfg.thread_channel_id {
+        Some(ch) if !is_snowflake(ch) => {
+            return Err("That ticket channel doesn't look right.".into());
+        }
+        // A private thread has to be made *in* something; there is no
+        // server-level fallback the way a channel has the top level.
+        None if threads => {
+            return Err("Pick the channel ticket threads should open in.".into());
+        }
+        _ => {}
     }
     if let Some(log) = &cfg.log_channel_id {
         if !is_snowflake(log) {
@@ -160,6 +176,14 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
                     ));
                 }
             }
+            if let Some(ch) = &t.thread_channel_id {
+                if !is_snowflake(ch) {
+                    return Err(format!(
+                        "The ticket channel for “{}” doesn't look right.",
+                        t.label.trim()
+                    ));
+                }
+            }
         }
     } else if !cfg.topics.is_empty() {
         return Err("A button panel doesn't use topics.".into());
@@ -252,6 +276,9 @@ mod tests {
             }],
             category_id: None,
             category_name: String::new(),
+            mode: "channel".into(),
+            thread_channel_id: None,
+            thread_channel_name: String::new(),
             log_channel_id: None,
             log_channel_name: String::new(),
             naming: "number".into(),
@@ -281,6 +308,8 @@ mod tests {
             staff_roles: vec![],
             category_id: None,
             category_name: String::new(),
+            thread_channel_id: None,
+            thread_channel_name: String::new(),
         }
     }
 
@@ -421,6 +450,35 @@ mod tests {
         emoji.emoji = Some("x".repeat(MAX_EMOJI + 1));
         c.topics = vec![emoji];
         assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn thread_mode_needs_a_channel_to_open_threads_in() {
+        let mut c = button_cfg();
+        c.mode = "thread".into();
+        // No channel: a private thread has to be made in one.
+        assert!(validate_config(&c).is_err());
+        c.thread_channel_id = Some("323456789012345678".into());
+        assert!(validate_config(&c).is_ok());
+        c.thread_channel_id = Some("nope".into());
+        assert!(validate_config(&c).is_err());
+
+        // A topic may route its threads elsewhere — given a real id.
+        let mut s = button_cfg();
+        s.mode = "thread".into();
+        s.target = "string_select".into();
+        s.thread_channel_id = Some("323456789012345678".into());
+        let mut t = topic("t1");
+        t.thread_channel_id = Some("523456789012345678".into());
+        s.topics = vec![t.clone()];
+        assert!(validate_config(&s).is_ok());
+        t.thread_channel_id = Some("x".into());
+        s.topics = vec![t];
+        assert!(validate_config(&s).is_err());
+
+        let mut odd = button_cfg();
+        odd.mode = "forum".into();
+        assert!(validate_config(&odd).is_err());
     }
 
     #[test]

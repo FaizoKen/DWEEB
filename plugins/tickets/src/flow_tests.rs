@@ -34,6 +34,12 @@ const LOG: &str = "100000000000000003";
 const STAFF_ROLE: &str = "100000000000000004";
 const BILLING_ROLE: &str = "100000000000000005";
 const BILLING_CATEGORY: &str = "100000000000000006";
+/// A text channel a thread-mode panel opens its threads in.
+const SUPPORT: &str = "100000000000000007";
+/// Another, for a topic's own threads.
+const BILLING_DESK: &str = "100000000000000008";
+/// An announcement channel: no private threads here.
+const NEWS: &str = "100000000000000010";
 const BOT: &str = "100000000000000900";
 const OPENER: &str = "200000000000000001";
 const STAFF: &str = "200000000000000002";
@@ -85,17 +91,42 @@ struct World {
     /// A message POST whose content contains this answers 400 Invalid Form
     /// Body — Discord refusing the message itself.
     reject_posts_containing: Option<String>,
+    /// Creating a thread answers "Maximum number of active threads reached".
+    thread_limit: bool,
+    /// Interactions from a thread leave out its `thread_metadata`, so an
+    /// archived thread is only found out when Discord refuses a call.
+    hide_thread_metadata: bool,
 }
 
 #[derive(Default, Clone)]
 struct FakeChannel {
     name: String,
-    /// Discord's channel type: 0 text (the default), 4 category.
+    /// Discord's channel type: 0 text (the default), 4 category,
+    /// 5 announcement, 12 private thread.
     kind: u8,
     parent: Option<String>,
     overwrites: Vec<Value>,
     messages: Vec<FakeMessage>,
     deleted: bool,
+    /// A thread's members.
+    members: Vec<String>,
+    archived: bool,
+    locked: bool,
+    /// What a thread was created with.
+    invitable: Option<bool>,
+}
+
+impl FakeChannel {
+    fn is_thread(&self) -> bool {
+        self.kind == 12
+    }
+}
+
+fn archived_thread() -> Response {
+    discord_error(
+        400,
+        json!({ "message": "Thread is archived", "code": 50083 }),
+    )
 }
 
 #[derive(Default, Clone)]
@@ -225,10 +256,11 @@ async fn fake_discord(
             Json(json!({ "id": BOT, "username": "DWEEB" })).into_response()
         }
         ("GET", ["guilds", _, "channels"]) => {
+            // Discord leaves threads out of a guild's channel list.
             let list: Vec<Value> = w
                 .channels
                 .iter()
-                .filter(|(_, c)| !c.deleted && !c.name.starts_with("dm-"))
+                .filter(|(_, c)| !c.deleted && !c.name.starts_with("dm-") && !c.is_thread())
                 .map(|(id, c)| {
                     json!({ "id": id, "name": c.name, "type": c.kind, "position": 0,
                             "parent_id": c.parent, "permission_overwrites": c.overwrites })
@@ -275,22 +307,136 @@ async fn fake_discord(
         }
         ("GET", ["channels", id]) => match w.channels.get(*id) {
             Some(c) if !c.deleted => {
-                Json(json!({ "id": id, "name": c.name, "permission_overwrites": c.overwrites }))
-                    .into_response()
+                let mut v = json!({ "id": id, "name": c.name, "type": c.kind, "permission_overwrites": c.overwrites });
+                if c.is_thread() {
+                    v["thread_metadata"] = json!({ "archived": c.archived, "locked": c.locked });
+                }
+                Json(v).into_response()
             }
             _ => unknown_channel(),
         },
-        ("PATCH", ["channels", id]) => match w.channels.get_mut(*id) {
-            Some(c) if !c.deleted => {
-                if let Some(name) = json_body["name"].as_str() {
-                    c.name = name.to_string();
+        ("POST", ["channels", parent, "threads"]) => {
+            if w.thread_limit {
+                return discord_error(
+                    400,
+                    json!({ "message": "Maximum number of active threads reached", "code": 160006 }),
+                );
+            }
+            if w.missing_bits & perms::CREATE_PRIVATE_THREADS != 0 {
+                return missing_permissions();
+            }
+            match w.channels.get(*parent) {
+                Some(c) if !c.deleted && c.kind == 0 => {}
+                Some(c) if !c.deleted => {
+                    return discord_error(
+                        400,
+                        json!({ "message": "Cannot execute action on this channel type", "code": 50024 }),
+                    )
                 }
-                Json(json!({ "id": id })).into_response()
+                _ => return unknown_channel(),
+            }
+            assert_eq!(json_body["type"], 12, "ticket threads must be private");
+            let id = w.id();
+            w.channels.insert(
+                id.clone(),
+                FakeChannel {
+                    name: json_body["name"].as_str().unwrap_or_default().to_string(),
+                    kind: 12,
+                    parent: Some(parent.to_string()),
+                    // The creator is the thread's first member.
+                    members: vec![BOT.into()],
+                    invitable: json_body["invitable"].as_bool(),
+                    ..Default::default()
+                },
+            );
+            Json(json!({ "id": id, "type": 12 })).into_response()
+        }
+        ("PATCH", ["channels", id]) => {
+            let no_manage_threads = w.missing_bits & perms::MANAGE_THREADS != 0;
+            match w.channels.get_mut(*id) {
+                Some(c) if !c.deleted && c.is_thread() => {
+                    // Changing `locked` — or unarchiving a locked thread — is
+                    // a moderator's call.
+                    if no_manage_threads
+                        && (json_body.get("locked").is_some()
+                            || (c.locked && json_body["archived"] == false))
+                    {
+                        return missing_permissions();
+                    }
+                    let unarchives = json_body["archived"] == false;
+                    if c.archived && !unarchives {
+                        // Anything but waking it up is refused while archived.
+                        if json_body.get("name").is_some() || json_body.get("locked").is_some() {
+                            return archived_thread();
+                        }
+                    }
+                    if let Some(a) = json_body["archived"].as_bool() {
+                        c.archived = a;
+                    }
+                    if let Some(l) = json_body["locked"].as_bool() {
+                        c.locked = l;
+                    }
+                    if let Some(name) = json_body["name"].as_str() {
+                        c.name = name.to_string();
+                    }
+                    Json(json!({ "id": id })).into_response()
+                }
+                Some(c) if !c.deleted => {
+                    if let Some(name) = json_body["name"].as_str() {
+                        c.name = name.to_string();
+                    }
+                    Json(json!({ "id": id })).into_response()
+                }
+                _ => unknown_channel(),
+            }
+        }
+        ("PUT", ["channels", id, "thread-members", user]) => {
+            let no_manage_threads = w.missing_bits & perms::MANAGE_THREADS != 0;
+            let left = w.unknown_member.as_deref() == Some(*user);
+            match w.channels.get_mut(*id) {
+                Some(c) if !c.deleted && c.is_thread() => {
+                    if c.archived {
+                        return archived_thread();
+                    }
+                    // `invitable: false`: only a moderator adds anyone.
+                    if no_manage_threads && c.invitable == Some(false) {
+                        return missing_permissions();
+                    }
+                    if left {
+                        return discord_error(
+                            404,
+                            json!({ "message": "Unknown Member", "code": 10007 }),
+                        );
+                    }
+                    if !c.members.iter().any(|m| m == user) {
+                        c.members.push(user.to_string());
+                    }
+                    StatusCode::NO_CONTENT.into_response()
+                }
+                _ => unknown_channel(),
+            }
+        }
+        ("DELETE", ["channels", id, "thread-members", user]) => match w.channels.get_mut(*id) {
+            Some(c) if !c.deleted && c.is_thread() => {
+                if c.archived {
+                    return archived_thread();
+                }
+                let before = c.members.len();
+                c.members.retain(|m| m != user);
+                if c.members.len() == before {
+                    discord_error(404, json!({ "message": "Unknown Member", "code": 10007 }))
+                } else {
+                    StatusCode::NO_CONTENT.into_response()
+                }
             }
             _ => unknown_channel(),
         },
         ("DELETE", ["channels", id]) => {
             if w.refuse_delete {
+                return missing_permissions();
+            }
+            let is_thread = w.channels.get(*id).is_some_and(|c| c.is_thread());
+            if is_thread && w.missing_bits & perms::MANAGE_THREADS != 0 {
                 return missing_permissions();
             }
             match w.channels.get_mut(*id) {
@@ -351,8 +497,24 @@ async fn fake_discord(
                 .get("content-type")
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|v| v.starts_with("multipart/"));
+            let no_manage_threads = w.missing_bits & perms::MANAGE_THREADS != 0;
             match w.channels.get_mut(*id) {
                 Some(c) if !c.deleted => {
+                    if c.is_thread() {
+                        // A locked thread takes posts from moderators only;
+                        // an archived one wakes when a message is sent —
+                        // unless it's locked, which this flow never relies on.
+                        if c.locked && no_manage_threads {
+                            return discord_error(
+                                403,
+                                json!({ "message": "Thread is locked", "code": 160005 }),
+                            );
+                        }
+                        if c.archived && c.locked {
+                            return archived_thread();
+                        }
+                        c.archived = false;
+                    }
                     c.messages.push(FakeMessage {
                         id: mid.clone(),
                         author: BOT.into(),
@@ -386,6 +548,8 @@ async fn fake_discord(
             _ => unknown_channel(),
         },
         ("PATCH", ["channels", id, "messages", mid]) => match w.channels.get_mut(*id) {
+            // An archived thread refuses every edit.
+            Some(c) if !c.deleted && c.is_thread() && c.archived => archived_thread(),
             Some(c) if !c.deleted => match c.messages.iter_mut().find(|m| m.id == *mid) {
                 Some(m) => {
                     m.edits.push(json_body);
@@ -542,6 +706,11 @@ impl Harness {
 
     /// Save a panel through the real config API; returns its id.
     async fn panel(&self, overrides: Value) -> String {
+        self.panel_with_token(overrides).await.0
+    }
+
+    /// The panel config the tests start from, with `overrides` applied.
+    fn panel_config(overrides: &Value) -> Value {
         let mut cfg = json!({
             "target": "button",
             "guild_id": GUILD,
@@ -558,6 +727,30 @@ impl Harness {
         for (k, v) in overrides.as_object().unwrap() {
             cfg[k] = v.clone();
         }
+        cfg
+    }
+
+    /// Re-save a panel in place with its edit token.
+    async fn update_panel(&self, id: &str, token: &str, overrides: Value) {
+        let resp = self
+            .http
+            .put(format!("{}/api/instances/{id}", self.plugin))
+            .header("x-dweeb-plugin-edit-token", token)
+            .json(&Self::panel_config(&overrides))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            200,
+            "update rejected: {}",
+            resp.text().await.unwrap()
+        );
+    }
+
+    /// Save a panel; returns its id and edit token.
+    async fn panel_with_token(&self, overrides: Value) -> (String, String) {
+        let cfg = Self::panel_config(&overrides);
         // The server's own channels: saving checks the panel names only
         // these, and the log channel receives posts.
         {
@@ -566,6 +759,9 @@ impl Harness {
                 (LOG, "logs", 0),
                 (CATEGORY, "Tickets", 4),
                 (BILLING_CATEGORY, "Billing", 4),
+                (SUPPORT, "support", 0),
+                (BILLING_DESK, "billing-desk", 0),
+                (NEWS, "news", 5),
             ] {
                 w.channels.entry(id.into()).or_insert_with(|| FakeChannel {
                     name: name.into(),
@@ -584,7 +780,10 @@ impl Harness {
         let status = resp.status();
         let body: Value = resp.json().await.unwrap();
         assert_eq!(status, 201, "panel rejected: {body}");
-        body["id"].as_str().unwrap().to_string()
+        (
+            body["id"].as_str().unwrap().to_string(),
+            body["managementToken"].as_str().unwrap().to_string(),
+        )
     }
 
     fn interaction(
@@ -612,6 +811,18 @@ impl Harness {
         });
         if let Some(m) = message {
             ix["message"] = m;
+        }
+        // Discord describes the channel an interaction came from; for a
+        // thread that includes whether it's archived.
+        {
+            let w = self.world();
+            if let Some(c) = w.channels.get(channel).filter(|c| c.is_thread()) {
+                ix["channel"] = json!({ "id": channel, "type": 12 });
+                if !w.hide_thread_metadata {
+                    ix["channel"]["thread_metadata"] =
+                        json!({ "archived": c.archived, "locked": c.locked });
+                }
+            }
         }
         (token, ix)
     }
@@ -1756,6 +1967,7 @@ impl Harness {
             closed_at: None,
             closed_by: None,
             lock_muted: None,
+            kind: crate::store::TicketKind::Channel,
         };
         self.state.store.activate(&key, &ticket).unwrap();
         channel
@@ -2291,4 +2503,516 @@ async fn a_failed_delete_of_a_locked_ticket_says_it_stays_closed() {
     let reply = h.reply_containing(&delete, "stays closed").await;
     assert!(!reply.contains("stays open"), "{reply}");
     h.status_becomes(&channel, Status::Locked).await;
+}
+
+// ── thread mode ──────────────────────────────────────────────────────────────
+
+/// A thread-mode panel: tickets open as private threads in SUPPORT, staff
+/// mentioned in.
+fn thread_panel(extra: Value) -> Value {
+    let mut cfg = json!({ "mode": "thread", "thread_channel_id": SUPPORT, "ping_staff": true });
+    for (k, v) in extra.as_object().unwrap() {
+        cfg[k] = v.clone();
+    }
+    cfg
+}
+
+#[tokio::test]
+async fn a_thread_panel_opens_a_private_thread_and_puts_the_opener_in_it() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    let thread = h.open(&panel, &opener()).await;
+
+    {
+        let w = h.world();
+        let t = w.channel(&thread);
+        assert!(t.is_thread(), "a channel was made instead");
+        assert_eq!(t.parent.as_deref(), Some(SUPPORT));
+        assert_eq!(t.name, "ticket-0001");
+        // Members may not add others: only moderators can.
+        assert_eq!(t.invitable, Some(false));
+        assert!(
+            t.members.contains(&OPENER.to_string()),
+            "the opener isn't in it"
+        );
+        // No channel was made, and nothing was posted in the parent.
+        assert!(w
+            .live()
+            .iter()
+            .all(|(_, c)| c.is_thread() || !c.name.starts_with("ticket-")));
+        assert!(w.channel(SUPPORT).messages.is_empty());
+        // The welcome mentions the staff role in — that's how they get in.
+        let welcome = &t.messages[0].body;
+        assert!(welcome["content"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("<@&{STAFF_ROLE}>")));
+        assert_eq!(welcome["allowed_mentions"]["roles"], json!([STAFF_ROLE]));
+        assert_eq!(
+            welcome["components"][0]["components"][0]["custom_id"],
+            format!("tickets:close:{panel}")
+        );
+        let log = w.channel(LOG).messages[0].body["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(log.contains(&format!("<#{thread}>")), "{log}");
+    }
+    let ticket = h.state.store.get_ticket(&thread).unwrap().unwrap();
+    assert_eq!(ticket.kind, crate::store::TicketKind::Thread);
+    assert_eq!(ticket.status, Status::Open);
+    // At the limit, the member is pointed at their thread.
+    let again = h
+        .click(&format!("tickets:open:{panel}"), "999", &opener())
+        .await;
+    assert!(Harness::text(&again).contains(&format!("<#{thread}>")));
+}
+
+#[tokio::test]
+async fn closing_a_thread_ticket_files_the_transcript_and_deletes_the_thread() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    let thread = h.open(&panel, &opener()).await;
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &thread, &opener())
+        .await;
+    assert_eq!(close.body["type"], 5);
+    h.status_becomes(&thread, Status::Closed).await;
+    let w = h.world();
+    let t = w.channel(&thread);
+    assert!(t.deleted);
+    assert!(t.messages.iter().any(|m| m.body["content"]
+        .as_str()
+        .unwrap_or("")
+        .contains("This thread will be deleted")));
+    let upload = w
+        .channel(LOG)
+        .messages
+        .iter()
+        .find_map(|m| m.upload.clone())
+        .expect("no transcript uploaded");
+    assert!(upload.contains("ticket-0001-transcript.html"));
+}
+
+#[tokio::test]
+async fn a_thread_ticket_locks_reopens_and_deletes() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(thread_panel(
+            json!({ "close_mode": "lock", "transcripts": false }),
+        ))
+        .await;
+    let thread = h.open(&panel, &opener()).await;
+    let (welcome_id, welcome) = h.control_message(&thread);
+
+    // Close → locked: the thread's own lock, then archived; the old controls
+    // retired (before the archive — an archived thread refuses edits) and the
+    // thread renamed; the opener still a member, so they can read it.
+    let close = h
+        .click_on(
+            &format!("tickets:close:{panel}"),
+            &thread,
+            &staff(),
+            message_ref(&welcome_id, &welcome),
+        )
+        .await;
+    h.reply_containing(&close, "Ticket closed").await;
+    h.status_becomes(&thread, Status::Locked).await;
+    let banner_id = {
+        let w = h.world();
+        let t = w.channel(&thread);
+        assert!(
+            t.locked && t.archived,
+            "locked {} archived {}",
+            t.locked,
+            t.archived
+        );
+        assert_eq!(t.name, "closed-0001");
+        assert!(t.members.contains(&OPENER.to_string()));
+        assert!(
+            t.overwrites.is_empty(),
+            "a thread has no overwrites to touch"
+        );
+        let old = t.messages.iter().find(|m| m.id == welcome_id).unwrap();
+        assert_eq!(old.edits.last().unwrap()["components"], json!([]));
+        t.messages.last().unwrap().id.clone()
+    };
+    // A stale Close does nothing.
+    let stale = h
+        .click(&format!("tickets:close:{panel}"), &thread, &opener())
+        .await;
+    assert!(Harness::text(&stale).contains("closed"), "{}", stale.body);
+
+    // Reopen from the archived thread → unlocked and awake, fresh controls,
+    // the banner's retired, the name back.
+    let banner = h
+        .world()
+        .channel(&thread)
+        .messages
+        .last()
+        .unwrap()
+        .body
+        .clone();
+    let reopen = h
+        .click_on(
+            &format!("tickets:reopen:{panel}"),
+            &thread,
+            &staff(),
+            message_ref(&banner_id, &banner),
+        )
+        .await;
+    h.reply_containing(&reopen, "Ticket reopened").await;
+    h.status_becomes(&thread, Status::Open).await;
+    {
+        let w = h.world();
+        let t = w.channel(&thread);
+        assert!(!t.locked && !t.archived);
+        assert_eq!(t.name, "ticket-0001");
+        let old = t.messages.iter().find(|m| m.id == banner_id).unwrap();
+        assert_eq!(old.edits.last().unwrap()["components"], json!([]));
+        let fresh = t.messages.last().unwrap();
+        assert!(fresh.body["content"]
+            .as_str()
+            .unwrap()
+            .contains("Reopened by"));
+    }
+
+    // Close again, then delete for good.
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &thread, &staff())
+        .await;
+    h.reply_containing(&close, "Ticket closed").await;
+    h.status_becomes(&thread, Status::Locked).await;
+    h.click(&format!("tickets:delete:{panel}"), &thread, &staff())
+        .await;
+    h.status_becomes(&thread, Status::Closed).await;
+    assert!(h.world().channel(&thread).deleted);
+}
+
+/// Without Manage Threads the bot can't lock a thread: the ticket stays open,
+/// nothing is posted, and the reply names the permission.
+#[tokio::test]
+async fn a_thread_lock_without_manage_threads_leaves_the_ticket_open() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(thread_panel(
+            json!({ "close_mode": "lock", "transcripts": false }),
+        ))
+        .await;
+    let thread = h.open(&panel, &opener()).await;
+    let before = h.world().channel(&thread).messages.len();
+    h.world().missing_bits = perms::MANAGE_THREADS;
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &thread, &staff())
+        .await;
+    let reply = h.reply_containing(&close, "Manage Threads").await;
+    assert!(reply.contains("stays open"), "{reply}");
+    h.status_becomes(&thread, Status::Open).await;
+    let w = h.world();
+    let t = w.channel(&thread);
+    assert!(!t.locked);
+    assert_eq!(
+        t.messages.len(),
+        before,
+        "a banner went up for a lock that failed"
+    );
+}
+
+/// A lock whose closed banner can't be posted unlocks the thread again.
+#[tokio::test]
+async fn a_thread_lock_whose_banner_cannot_post_is_undone() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(thread_panel(
+            json!({ "close_mode": "lock", "transcripts": false }),
+        ))
+        .await;
+    let thread = h.open(&panel, &opener()).await;
+    h.world().fail_posts_containing = Some("Ticket closed by".into());
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &thread, &staff())
+        .await;
+    h.reply_containing(&close, "didn't close").await;
+    h.status_becomes(&thread, Status::Open).await;
+    assert!(!h.world().channel(&thread).locked);
+}
+
+#[tokio::test]
+async fn staff_add_and_remove_people_in_a_thread() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    let thread = h.open(&panel, &opener()).await;
+    let add = h
+        .pick(
+            &format!("tickets:addmember:{panel}"),
+            &thread,
+            &staff(),
+            &[GUEST, BOT],
+        )
+        .await;
+    let reply = h.outcome(&add).await;
+    assert!(reply.contains(&format!("Added <@{GUEST}>")), "{reply}");
+    assert!(!reply.contains(&format!("<@{BOT}>")), "{reply}");
+    {
+        let w = h.world();
+        assert!(w.channel(&thread).members.contains(&GUEST.to_string()));
+        let note = &w.channel(&thread).messages.last().unwrap().body;
+        assert_eq!(note["allowed_mentions"]["users"], json!([GUEST]));
+    }
+    let remove = h
+        .pick(
+            &format!("tickets:rmmember:{panel}"),
+            &thread,
+            &staff(),
+            &[GUEST, OPENER],
+        )
+        .await;
+    let reply = h.outcome(&remove).await;
+    assert!(reply.contains(&format!("Removed <@{GUEST}>")), "{reply}");
+    assert!(reply.contains("close it instead"), "{reply}");
+    let w = h.world();
+    let members = &w.channel(&thread).members;
+    assert!(!members.contains(&GUEST.to_string()));
+    assert!(members.contains(&OPENER.to_string()));
+    assert!(members.contains(&BOT.to_string()));
+}
+
+/// Discord archives a ticket thread left idle a week, and an archived thread
+/// refuses edits and member changes. A claim and a Members pick wake it first
+/// — whether or not the interaction said it was archived.
+#[tokio::test]
+async fn claims_and_members_wake_an_archived_thread() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    let thread = h.open(&panel, &opener()).await;
+    let (mid, body) = h.control_message(&thread);
+    h.world().channels.get_mut(&thread).unwrap().archived = true;
+
+    let claim = h
+        .click_on(
+            &format!("tickets:claim:{panel}"),
+            &thread,
+            &staff(),
+            message_ref(&mid, &body),
+        )
+        .await;
+    assert_eq!(claim.body["type"], 6, "{}", claim.body);
+    let shown = h.outcome(&claim).await;
+    assert!(shown.contains(&format!("Claimed by <@{STAFF}>")), "{shown}");
+    assert!(!h.world().channel(&thread).archived);
+    assert_eq!(
+        h.state
+            .store
+            .get_ticket(&thread)
+            .unwrap()
+            .unwrap()
+            .claimed_by
+            .as_deref(),
+        Some(STAFF)
+    );
+
+    // Archived again, and this time Discord doesn't say so up front.
+    {
+        let mut w = h.world();
+        w.channels.get_mut(&thread).unwrap().archived = true;
+        w.hide_thread_metadata = true;
+    }
+    let add = h
+        .pick(
+            &format!("tickets:addmember:{panel}"),
+            &thread,
+            &staff(),
+            &[GUEST],
+        )
+        .await;
+    let reply = h.outcome(&add).await;
+    assert!(reply.contains(&format!("Added <@{GUEST}>")), "{reply}");
+    assert!(h
+        .world()
+        .channel(&thread)
+        .members
+        .contains(&GUEST.to_string()));
+}
+
+#[tokio::test]
+async fn a_thread_panel_must_open_threads_in_a_text_channel_of_its_own_server() {
+    let h = Harness::start().await;
+    h.panel(json!({})).await; // seeds this server's channels
+    let hr = &h;
+    let save = move |cfg: Value| async move {
+        let resp = hr
+            .http
+            .post(format!("{}/api/instances", hr.plugin))
+            .json(&Harness::panel_config(&cfg))
+            .send()
+            .await
+            .unwrap();
+        (resp.status().as_u16(), resp.json::<Value>().await.unwrap())
+    };
+    // No channel to open threads in.
+    let (status, _) = save(json!({ "mode": "thread" })).await;
+    assert_eq!(status, 400);
+    // An announcement channel can't hold private threads.
+    let (status, body) = save(json!({ "mode": "thread", "thread_channel_id": NEWS })).await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("plain text channel"));
+    // A channel in another server.
+    let (status, _) =
+        save(json!({ "mode": "thread", "thread_channel_id": "999999999999999999" })).await;
+    assert_eq!(status, 400);
+    // A topic routed to another server's channel, too.
+    let (status, _) = save(json!({
+        "mode": "thread", "thread_channel_id": SUPPORT, "target": "string_select",
+        "topics": [{ "id": "t1", "label": "Billing", "thread_channel_id": "888888888888888888" }],
+    }))
+    .await;
+    assert_eq!(status, 400);
+    // A thread panel doesn't need its old category to still exist.
+    let (status, body) = save(json!({
+        "mode": "thread", "thread_channel_id": SUPPORT, "category_id": "777777777777777777",
+    }))
+    .await;
+    assert_eq!(status, 201, "{body}");
+}
+
+/// Switching a panel to threads changes what *new* tickets are: the channel
+/// tickets already open keep closing the channel way.
+#[tokio::test]
+async fn a_panel_switched_to_threads_keeps_its_channel_tickets_working() {
+    let h = Harness::start().await;
+    let (panel, token) = h
+        .panel_with_token(json!({ "close_mode": "lock", "transcripts": false }))
+        .await;
+    let channel = h.open(&panel, &opener()).await;
+    h.update_panel(
+        &panel,
+        &token,
+        thread_panel(json!({ "close_mode": "lock", "transcripts": false })),
+    )
+    .await;
+
+    // The old channel ticket locks through its overwrites, as it always did.
+    let close = h
+        .click(&format!("tickets:close:{panel}"), &channel, &staff())
+        .await;
+    h.reply_containing(&close, "Ticket closed").await;
+    h.status_becomes(&channel, Status::Locked).await;
+    let (_, deny) = h.world().overwrite(&channel, OPENER).unwrap();
+    assert_ne!(deny & perms::SEND_MESSAGES, 0);
+
+    // A new one is a thread.
+    let thread = h.open(&panel, &opener()).await;
+    assert!(h.world().channel(&thread).is_thread());
+}
+
+#[tokio::test]
+async fn a_server_out_of_active_threads_is_told_so_and_keeps_no_slot() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    h.world().thread_limit = true;
+    let sent = h
+        .click(&format!("tickets:open:{panel}"), "999", &opener())
+        .await;
+    let reply = h.outcome(&sent).await;
+    assert!(reply.contains("limit on active threads"), "{reply}");
+    h.world().thread_limit = false;
+    h.open(&panel, &opener()).await;
+}
+
+/// A ticket thread the opener isn't in is no ticket: if they can't be added,
+/// the thread is taken away again and the slot released.
+#[tokio::test]
+async fn an_opener_who_cannot_be_added_leaves_no_thread_behind() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    h.world().missing_bits = perms::MANAGE_THREADS;
+    let sent = h
+        .click(&format!("tickets:open:{panel}"), "999", &opener())
+        .await;
+    let reply = h.outcome(&sent).await;
+    assert!(reply.contains("missing a permission"), "{reply}");
+    assert!(reply.contains("ticket thread"), "{reply}");
+    {
+        // Deleting it needs Manage Threads too; it was archived instead.
+        let w = h.world();
+        let threads: Vec<_> = w
+            .live()
+            .into_iter()
+            .filter(|(_, c)| c.is_thread())
+            .collect();
+        assert!(
+            threads.iter().all(|(_, c)| c.archived),
+            "a half-made thread was left active"
+        );
+    }
+    h.world().missing_bits = 0;
+    let thread = h.open(&panel, &opener()).await;
+    assert!(h
+        .world()
+        .channel(&thread)
+        .members
+        .contains(&OPENER.to_string()));
+}
+
+#[tokio::test]
+async fn a_topic_routes_its_threads_and_falls_back_to_the_panels_channel() {
+    let h = Harness::start().await;
+    let panel = h
+        .panel(thread_panel(json!({
+            "target": "string_select",
+            "max_open_per_user": 0,
+            "topics": [
+                { "id": "billing", "label": "Billing", "thread_channel_id": BILLING_DESK,
+                  "staff_roles": [{ "id": BILLING_ROLE, "name": "Billing team" }] },
+            ],
+        })))
+        .await;
+    let open_billing = |who: Who| {
+        let h = &h;
+        let panel = panel.clone();
+        async move {
+            let sent = h
+                .pick(&format!("tickets:open:{panel}"), "999", &who, &["billing"])
+                .await;
+            let reply = h.outcome(&sent).await;
+            reply[reply.find("<#").unwrap() + 2..reply.find('>').unwrap()].to_string()
+        }
+    };
+    let thread = open_billing(opener()).await;
+    {
+        let w = h.world();
+        let t = w.channel(&thread);
+        assert_eq!(t.parent.as_deref(), Some(BILLING_DESK));
+        // Both the panel's and the topic's staff are mentioned in.
+        let roles = &t.messages[0].body["allowed_mentions"]["roles"];
+        assert_eq!(*roles, json!([STAFF_ROLE, BILLING_ROLE]));
+    }
+    // The topic's channel is deleted: the next ticket opens in the panel's,
+    // and the log says why.
+    h.world().channels.get_mut(BILLING_DESK).unwrap().deleted = true;
+    let thread = open_billing(member()).await;
+    let w = h.world();
+    assert_eq!(w.channel(&thread).parent.as_deref(), Some(SUPPORT));
+    let log = w.channel(LOG).messages.last().unwrap().body["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(log.contains("panel's ticket channel"), "{log}");
+}
+
+#[tokio::test]
+async fn a_thread_deleted_by_hand_releases_its_opener() {
+    let h = Harness::start().await;
+    let panel = h.panel(thread_panel(json!({}))).await;
+    let thread = h.open(&panel, &opener()).await;
+    h.world().channels.get_mut(&thread).unwrap().deleted = true;
+    let second = h.open(&panel, &opener()).await;
+    assert_ne!(second, thread);
+    assert_eq!(
+        h.state.store.get_ticket(&thread).unwrap().unwrap().status,
+        Status::Closed
+    );
 }

@@ -180,6 +180,21 @@ const SHARED_BOT_PERMISSION_BITS = {
    * route their clicks back to DWEEB).
    */
   MANAGE_WEBHOOKS: 1n << 29n,
+  /**
+   * tickets (thread mode) — locks and deletes a ticket's private thread, and
+   * adds people to one whose members may not invite others. Locking a thread
+   * and deleting one both hard-require it.
+   */
+  MANAGE_THREADS: 1n << 34n,
+  /**
+   * tickets (thread mode) — each ticket is a private thread
+   * (`POST /channels/{id}/threads`). Members usually hold it through
+   * `@everyone`, but servers that switch threads off strip it there, so the
+   * bot's own role carries it.
+   */
+  CREATE_PRIVATE_THREADS: 1n << 36n,
+  /** tickets (thread mode) — posting the welcome and controls in a ticket thread. */
+  SEND_MESSAGES_IN_THREADS: 1n << 38n,
 } as const;
 
 /**

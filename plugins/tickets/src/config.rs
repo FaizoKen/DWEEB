@@ -38,10 +38,26 @@ const MANAGE_WEBHOOKS: u64 = 1 << 29;
 /// it so re-inviting through this plugin's link can't strip it.
 const CREATE_INSTANT_INVITE: u64 = 1 << 0;
 
+/// Manage Threads — thread mode: lock and delete a ticket's private thread,
+/// and add people to one whose members may not invite others.
+const MANAGE_THREADS: u64 = 1 << 34;
+/// Create Private Threads — thread mode makes each ticket a private thread.
+/// Requested so a server that took thread creation away from `@everyone`
+/// still lets the bot open tickets.
+const CREATE_PRIVATE_THREADS: u64 = 1 << 36;
+/// Send Messages in Threads — what posting the welcome and controls in a
+/// ticket thread takes (Send Messages has no effect in threads).
+const SEND_MESSAGES_IN_THREADS: u64 = 1 << 38;
+
 /// The union every shared-bot invite must request: Create Instant Invite +
-/// Manage Channels + Manage Roles + Manage Webhooks.
-const SHARED_BOT_PERMISSIONS: u64 =
-    CREATE_INSTANT_INVITE | MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
+/// Manage Channels + Manage Roles + Manage Webhooks + the three thread bits.
+const SHARED_BOT_PERMISSIONS: u64 = CREATE_INSTANT_INVITE
+    | MANAGE_CHANNELS
+    | MANAGE_ROLES
+    | MANAGE_WEBHOOKS
+    | MANAGE_THREADS
+    | CREATE_PRIVATE_THREADS
+    | SEND_MESSAGES_IN_THREADS;
 
 /// Force an operator-supplied invite URL's `permissions` to [`SHARED_BOT_PERMISSIONS`].
 ///
@@ -181,10 +197,10 @@ mod tests {
     /// The union string every DWEEB shared-bot invite must carry. Mirrors
     /// `SHARED_BOT_PERMISSIONS` in the frontend and self-role; this test is the
     /// tripwire that fails if the three drift apart.
-    const UNION: &str = "805306385"; // (1<<0) | (1<<4) | (1<<28) | (1<<29)
+    const UNION: &str = "361582559249"; // (1<<0) | (1<<4) | (1<<28) | (1<<29) | (1<<34) | (1<<36) | (1<<38)
 
     #[test]
-    fn union_is_manage_channels_plus_manage_roles() {
+    fn union_is_the_shared_bot_set() {
         assert_eq!(SHARED_BOT_PERMISSIONS.to_string(), UNION);
     }
 

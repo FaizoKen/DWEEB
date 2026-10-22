@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::perms::{self, Grants, OVERWRITE_MEMBER, OVERWRITE_ROLE};
-use crate::store::{InstanceConfig, IntakeField, OpenStats, Ticket, Topic};
+use crate::store::{InstanceConfig, IntakeField, OpenStats, Ticket, TicketKind, Topic};
 
 // Interaction request types.
 pub const TYPE_PING: u8 = 1;
@@ -158,6 +158,22 @@ pub struct Interaction {
     /// and its `id` to retire its buttons once they are stale.
     #[serde(default)]
     pub message: Option<MessageRef>,
+    /// The channel the interaction came from, as Discord describes it — for
+    /// a thread, whether it is archived (an archived thread refuses edits).
+    #[serde(default)]
+    pub channel: Option<ChannelRef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChannelRef {
+    #[serde(default)]
+    pub thread_metadata: Option<ThreadMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ThreadMetadata {
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,6 +329,15 @@ impl Interaction {
     /// The id of the message the clicked component sits on.
     pub fn message_id(&self) -> Option<&str> {
         self.message.as_ref().and_then(|m| m.id.as_deref())
+    }
+
+    /// Whether this came from a thread Discord says is archived — a ticket
+    /// thread left idle past its auto-archive time.
+    pub fn in_archived_thread(&self) -> bool {
+        self.channel
+            .as_ref()
+            .and_then(|c| c.thread_metadata.as_ref())
+            .is_some_and(|t| t.archived)
     }
 }
 
@@ -743,13 +768,39 @@ pub fn retire_controls() -> Value {
 /// The welcome message posted in a new ticket: the rendered template, the
 /// control row, and an `allowed_mentions` that pings only what the config opted
 /// into (never `@everyone`, even if a template or topic name contains it).
+///
+/// In a **thread**, mentioning a role is also how its members get in: a
+/// private thread shows only to the people added to it (and Manage Threads
+/// holders), there is no role overwrite to grant, and listing a role's
+/// members needs a privileged intent DWEEB doesn't hold. So with "ping
+/// staff" on, every staff role is mentioned — any the template doesn't
+/// already mention are added on a small line at the end, kept whole however
+/// long the welcome is.
 pub fn welcome_message(
     cfg: &InstanceConfig,
     id: &str,
     ctx: &TemplateCtx,
     staff_ids: &[String],
+    kind: TicketKind,
 ) -> Value {
-    let content = clamp(&render_template(&cfg.welcome, ctx), MAX_CONTENT);
+    let body = render_template(&cfg.welcome, ctx);
+    let invite = if kind == TicketKind::Thread && cfg.ping_staff {
+        let missing: Vec<String> = staff_ids
+            .iter()
+            .map(|r| format!("<@&{r}>"))
+            .filter(|m| !body.contains(m.as_str()))
+            .collect();
+        (!missing.is_empty()).then(|| format!("\n-# {}", missing.join(" ")))
+    } else {
+        None
+    };
+    let content = match invite {
+        Some(line) => {
+            let room = MAX_CONTENT.saturating_sub(utf16_len(&line));
+            format!("{}{line}", clamp(&body, room))
+        }
+        None => clamp(&body, MAX_CONTENT),
+    };
     let users = if cfg.ping_opener {
         vec![ctx.opener_id.to_string()]
     } else {
@@ -792,17 +843,24 @@ pub fn without_claim_line(content: &str) -> String {
 /// content with the claim line set or cleared, and its row flipped. Reusing the
 /// message's own content (not re-rendering the template) means nothing re-pings.
 pub fn claim_update(id: &str, existing_content: &str, claimer: Option<&str>) -> Value {
+    json!({
+        "type": RESPONSE_UPDATE_MESSAGE,
+        "data": claim_message(id, existing_content, claimer),
+    })
+}
+
+/// The control message's new body after a claim or unclaim — what
+/// [`claim_update`] answers in place, or what a deferred claim edits in once
+/// an archived thread is awake again.
+pub fn claim_message(id: &str, existing_content: &str, claimer: Option<&str>) -> Value {
     let content = match claimer {
         Some(c) => with_claim_line(existing_content, c),
         None => without_claim_line(existing_content),
     };
     json!({
-        "type": RESPONSE_UPDATE_MESSAGE,
-        "data": {
-            "content": content,
-            "components": [control_row(id, true, claimer.is_some())],
-            "allowed_mentions": { "parse": [] },
-        }
+        "content": content,
+        "components": [control_row(id, true, claimer.is_some())],
+        "allowed_mentions": { "parse": [] },
     })
 }
 
@@ -863,20 +921,27 @@ fn closed_by_line(closer_id: &str, reason: &str) -> String {
 /// Posted in a delete-mode ticket just before it goes, so everyone in it —
 /// the opener included — sees who closed it and why. `delete_at` is unix
 /// seconds; the `<t:…:R>` counts down in each reader's client.
-pub fn closing_notice(closer_id: &str, reason: &str, delete_at: i64) -> Value {
+pub fn closing_notice(closer_id: &str, reason: &str, delete_at: i64, kind: TicketKind) -> Value {
     json!({
         "content": clamp(
-            &format!("{}\nThis channel will be deleted <t:{delete_at}:R>.", closed_by_line(closer_id, reason)),
+            &format!(
+                "{}\nThis {} will be deleted <t:{delete_at}:R>.",
+                closed_by_line(closer_id, reason),
+                kind.noun()
+            ),
             MAX_CONTENT,
         ),
         "allowed_mentions": { "parse": [] },
     })
 }
 
-/// Posted when a delete-mode close couldn't delete the channel after all.
-pub fn close_failed_notice() -> Value {
+/// Posted when a delete-mode close couldn't delete the ticket after all.
+pub fn close_failed_notice(kind: TicketKind) -> Value {
     json!({
-        "content": "\u{26A0}\u{FE0F} I couldn't delete this channel, so the ticket stays open.",
+        "content": format!(
+            "\u{26A0}\u{FE0F} I couldn't delete this {}, so the ticket stays open.",
+            kind.noun()
+        ),
         "allowed_mentions": { "parse": [] },
     })
 }
@@ -912,10 +977,17 @@ pub fn reopened_message(
 
 /// The ephemeral people picker a staff member gets from **Members**: one user
 /// select to add, one to remove.
-pub fn members_panel(id: &str, note: Option<&str>) -> Value {
-    let mut content = String::from(
-        "\u{1F465} **Who can see this ticket**\nAdd people to bring them in, or remove someone who was added. The opener and staff roles keep their access.",
-    );
+pub fn members_panel(id: &str, note: Option<&str>, kind: TicketKind) -> Value {
+    let mut content = String::from(match kind {
+        TicketKind::Channel => {
+            "\u{1F465} **Who can see this ticket**\nAdd people to bring them in, or remove someone who was added. The opener and staff roles keep their access."
+        }
+        // A thread's visibility is its member list — plus everyone holding
+        // Manage Threads in its channel, whom no removal can take out.
+        TicketKind::Thread => {
+            "\u{1F465} **Who can see this ticket**\nAdd people to bring them into this thread, or remove someone. The opener stays — close the ticket instead — and anyone with Manage Threads in this channel can always see it."
+        }
+    });
     if let Some(note) = note {
         content.push_str("\n\n");
         content.push_str(note);
@@ -970,8 +1042,9 @@ fn mention_list(ids: &[String]) -> String {
 }
 
 /// The staff overview of a panel: every ticket still around, oldest first,
-/// inside one reply's 2000 characters.
-pub fn manage_text(tickets: &[Ticket], total_shown_cap: usize) -> String {
+/// inside one reply's 2000 characters. `threads` says where the rest live
+/// when they don't all fit.
+pub fn manage_text(tickets: &[Ticket], total_shown_cap: usize, threads: bool) -> String {
     let open = tickets
         .iter()
         .filter(|t| t.status != crate::store::Status::Locked)
@@ -1001,7 +1074,11 @@ pub fn manage_text(tickets: &[Ticket], total_shown_cap: usize) -> String {
             (None, _) => line.push_str(" · unclaimed"),
         }
         if utf16_len(&out) + utf16_len(&line) > MAX_CONTENT - 80 {
-            out.push_str("\n-# …and more. Open the ticket category to see them all.");
+            out.push_str(if threads {
+                "\n-# …and more. Open the ticket channel's thread list to see them all."
+            } else {
+                "\n-# …and more. Open the ticket category to see them all."
+            });
             return out;
         }
         out.push_str(&line);
@@ -1142,6 +1219,11 @@ pub fn open_success_text(cfg: &InstanceConfig, channel_id: &str, ctx: &TemplateC
 pub enum OpenFailure {
     MissingPermissions,
     ChannelLimit,
+    /// The server is at Discord's cap on active threads.
+    ThreadLimit,
+    /// The channel a thread-mode panel opens its threads in is gone, or not
+    /// one a private thread can be made in.
+    ThreadChannelUnavailable,
     Busy,
     Rejected,
     /// The channel was made but Discord refused its welcome — a problem with
@@ -1151,21 +1233,30 @@ pub enum OpenFailure {
     Internal,
 }
 
-pub fn open_failure_text(f: OpenFailure) -> &'static str {
+pub fn open_failure_text(f: OpenFailure, kind: TicketKind) -> String {
+    let noun = kind.noun();
     match f {
-        OpenFailure::Internal => "Something went wrong on my end — try again in a moment.",
-        OpenFailure::MissingPermissions => {
-            "I couldn't create your ticket channel because the bot is missing a permission. Ask an admin to reopen this panel's settings in DWEEB — it shows exactly what to fix."
-        }
+        OpenFailure::Internal => "Something went wrong on my end — try again in a moment.".into(),
+        OpenFailure::MissingPermissions => format!(
+            "I couldn't create your ticket {noun} because the bot is missing a permission. Ask an admin to reopen this panel's settings in DWEEB — it shows exactly what to fix."
+        ),
         OpenFailure::ChannelLimit => {
-            "This server has reached Discord's limit on channels, so I can't open a ticket channel. Ask an admin to clear out some old channels."
+            "This server has reached Discord's limit on channels, so I can't open a ticket channel. Ask an admin to clear out some old channels.".into()
         }
-        OpenFailure::Busy => "Discord was busy and I couldn't open your ticket — try again in a moment.",
-        OpenFailure::Rejected => {
-            "Discord wouldn't create the ticket channel. Ask an admin to check this panel's settings in DWEEB."
+        OpenFailure::ThreadLimit => {
+            "This server has reached Discord's limit on active threads, so I can't open a ticket thread. Ask an admin to archive or close some old threads.".into()
         }
+        OpenFailure::ThreadChannelUnavailable => {
+            "The channel this panel opens ticket threads in is gone, or the bot can't make threads there. Ask an admin to pick another in this panel's settings in DWEEB.".into()
+        }
+        OpenFailure::Busy => {
+            "Discord was busy and I couldn't open your ticket — try again in a moment.".into()
+        }
+        OpenFailure::Rejected => format!(
+            "Discord wouldn't create the ticket {noun}. Ask an admin to check this panel's settings in DWEEB."
+        ),
         OpenFailure::WelcomeRejected => {
-            "Discord wouldn't accept this panel's welcome message, so I couldn't open your ticket. Ask an admin to check the welcome text in this panel's settings in DWEEB."
+            "Discord wouldn't accept this panel's welcome message, so I couldn't open your ticket. Ask an admin to check the welcome text in this panel's settings in DWEEB.".into()
         }
     }
 }
@@ -1227,6 +1318,9 @@ pub enum Fallback {
     CategoryUnavailable,
     /// The bot can't create channels in the category.
     CategoryDenied,
+    /// Thread mode: the topic's own ticket channel is gone or closed to the
+    /// bot, so the thread opened in the panel's.
+    TopicThreadChannel,
 }
 
 pub fn fallback_log(ticket: &Ticket, why: Fallback) -> String {
@@ -1235,6 +1329,12 @@ pub fn fallback_log(ticket: &Ticket, why: Fallback) -> String {
             "the ticket category is full (Discord allows 50 channels per category) or no longer exists"
         }
         Fallback::CategoryDenied => "the bot isn't allowed to create channels in the ticket category",
+        Fallback::TopicThreadChannel => {
+            return format!(
+                "\u{26A0}\u{FE0F} **#{:04}** (<#{}>) opened in the panel's ticket channel because its topic's channel is gone or the bot can't make threads there. Pick another for the topic, or fix the bot's access, in this panel's settings.",
+                ticket.number, ticket.channel_id
+            );
+        }
     };
     format!(
         "\u{26A0}\u{FE0F} **#{:04}** (<#{}>) opened at the top of the server because {reason}. Pick another category, or fix the bot's access, in this panel's settings.",
@@ -1305,6 +1405,7 @@ mod tests {
             closed_at: None,
             closed_by: None,
             lock_muted: None,
+            kind: crate::store::TicketKind::Channel,
         }
     }
 
@@ -1383,6 +1484,8 @@ mod tests {
             staff_roles: roles(&["300", "100"]),
             category_id: None,
             category_name: String::new(),
+            thread_channel_id: None,
+            thread_channel_name: String::new(),
         }];
         assert_eq!(staff_ids(&cfg, "t1"), ids(&["100", "300"]));
         // An unknown or empty topic contributes nothing.
@@ -1554,6 +1657,9 @@ mod tests {
             staff_roles: roles(&["100"]),
             category_id: None,
             category_name: String::new(),
+            mode: "channel".into(),
+            thread_channel_id: None,
+            thread_channel_name: String::new(),
             log_channel_id: None,
             log_channel_name: String::new(),
             naming: "number".into(),
@@ -1587,7 +1693,13 @@ mod tests {
     #[test]
     fn welcome_pings_only_what_is_opted_in() {
         let cfg = base_cfg();
-        let msg = welcome_message(&cfg, "abc", &ctx(), &ids(&["100", "300"]));
+        let msg = welcome_message(
+            &cfg,
+            "abc",
+            &ctx(),
+            &ids(&["100", "300"]),
+            TicketKind::Channel,
+        );
         assert!(msg["content"].as_str().unwrap().contains("<@42>"));
         // Opener pinged, staff not (ping_staff = false), @everyone never.
         assert_eq!(msg["allowed_mentions"]["users"][0], "42");
@@ -1610,8 +1722,85 @@ mod tests {
     fn welcome_pings_panel_and_topic_staff_when_enabled() {
         let mut cfg = base_cfg();
         cfg.ping_staff = true;
-        let msg = welcome_message(&cfg, "abc", &ctx(), &ids(&["100", "300"]));
+        let msg = welcome_message(
+            &cfg,
+            "abc",
+            &ctx(),
+            &ids(&["100", "300"]),
+            TicketKind::Channel,
+        );
         assert_eq!(msg["allowed_mentions"]["roles"], json!(["100", "300"]));
+    }
+
+    /// In a thread, a staff role gets in by being mentioned: with "ping
+    /// staff" on, every staff role is in the welcome — the template's own
+    /// mentions count, the rest are added on a line kept whole at the end.
+    #[test]
+    fn a_thread_welcome_mentions_every_staff_role_in() {
+        let mut cfg = base_cfg();
+        cfg.ping_staff = true;
+        cfg.welcome = "Hi {user}, <@&100> is on it.".into();
+        let staff = ids(&["100", "300"]);
+        let msg = welcome_message(&cfg, "abc", &ctx(), &staff, TicketKind::Thread);
+        let content = msg["content"].as_str().unwrap();
+        assert!(content.ends_with("\n-# <@&300>"), "{content}");
+        assert_eq!(content.matches("<@&100>").count(), 1);
+        assert_eq!(msg["allowed_mentions"]["roles"], json!(["100", "300"]));
+
+        // A welcome at the cap still ends with the whole line.
+        cfg.welcome = "x".repeat(MAX_CONTENT);
+        let long = welcome_message(&cfg, "abc", &ctx(), &staff, TicketKind::Thread);
+        let content = long["content"].as_str().unwrap();
+        assert!(utf16_len(content) <= MAX_CONTENT);
+        assert!(content.ends_with("<@&100> <@&300>"), "{content}");
+
+        // Ping off: nobody is mentioned in, and a channel never gets the line.
+        cfg.ping_staff = false;
+        let quiet = welcome_message(&cfg, "abc", &ctx(), &staff, TicketKind::Thread);
+        assert!(!quiet["content"].as_str().unwrap().contains("<@&"));
+        cfg.ping_staff = true;
+        cfg.welcome = "Hi".into();
+        let channel = welcome_message(&cfg, "abc", &ctx(), &staff, TicketKind::Channel);
+        assert_eq!(channel["content"], "Hi");
+    }
+
+    #[test]
+    fn thread_texts_say_thread() {
+        let notice = closing_notice("9", "", 1, TicketKind::Thread);
+        assert!(notice["content"]
+            .as_str()
+            .unwrap()
+            .contains("This thread will be deleted"));
+        assert!(close_failed_notice(TicketKind::Thread)["content"]
+            .as_str()
+            .unwrap()
+            .contains("this thread"));
+        let panel = members_panel("abc", None, TicketKind::Thread);
+        assert!(panel["content"]
+            .as_str()
+            .unwrap()
+            .contains("Manage Threads"));
+        assert!(
+            open_failure_text(OpenFailure::Rejected, TicketKind::Thread).contains("ticket thread")
+        );
+        let many: Vec<Ticket> = (0..200).map(|i| ticket(&i.to_string())).collect();
+        assert!(manage_text(&many, 200, true).ends_with("thread list to see them all."));
+    }
+
+    #[test]
+    fn an_archived_thread_is_read_off_the_interaction() {
+        let ix: Interaction = serde_json::from_value(json!({
+            "type": 3,
+            "channel": { "id": "1", "type": 12, "thread_metadata": { "archived": true, "locked": false } },
+        }))
+        .unwrap();
+        assert!(ix.in_archived_thread());
+        let plain: Interaction =
+            serde_json::from_value(json!({ "type": 3, "channel": { "id": "1", "type": 0 } }))
+                .unwrap();
+        assert!(!plain.in_archived_thread());
+        let bare: Interaction = serde_json::from_value(json!({ "type": 3 })).unwrap();
+        assert!(!bare.in_archived_thread());
     }
 
     #[test]
@@ -1688,7 +1877,7 @@ mod tests {
     // ── members ────────────────────────────────────────────────────────────
     #[test]
     fn members_panel_offers_add_and_remove_pickers() {
-        let v = members_panel("abc", None);
+        let v = members_panel("abc", None, TicketKind::Channel);
         assert_eq!(
             v["components"][0]["components"][0]["custom_id"],
             "tickets:addmember:abc"
@@ -1701,7 +1890,7 @@ mod tests {
             v["components"][1]["components"][0]["custom_id"],
             "tickets:rmmember:abc"
         );
-        let with_note = members_panel("abc", Some("Added <@1>."));
+        let with_note = members_panel("abc", Some("Added <@1>."), TicketKind::Channel);
         assert!(with_note["content"]
             .as_str()
             .unwrap()
@@ -1839,6 +2028,8 @@ mod tests {
             staff_roles: vec![],
             category_id: None,
             category_name: String::new(),
+            thread_channel_id: None,
+            thread_channel_name: String::new(),
         }];
         assert_eq!(resolve_topic(&cfg, Some("t1")).unwrap().label, "Billing");
         assert!(resolve_topic(&cfg, Some("evil")).is_none()); // unknown value → refused
@@ -1850,12 +2041,16 @@ mod tests {
         for f in [
             OpenFailure::MissingPermissions,
             OpenFailure::ChannelLimit,
+            OpenFailure::ThreadLimit,
+            OpenFailure::ThreadChannelUnavailable,
             OpenFailure::Busy,
             OpenFailure::Rejected,
             OpenFailure::WelcomeRejected,
             OpenFailure::Internal,
         ] {
-            assert!(!open_failure_text(f).is_empty());
+            for kind in [TicketKind::Channel, TicketKind::Thread] {
+                assert!(!open_failure_text(f, kind).is_empty());
+            }
         }
     }
 
@@ -1865,7 +2060,7 @@ mod tests {
     fn an_emoji_heavy_welcome_still_fits_discords_cap() {
         let mut cfg = base_cfg();
         cfg.welcome = format!("{}{{staff}}", "\u{1F389}".repeat(1400));
-        let msg = welcome_message(&cfg, "abc", &ctx(), &[]);
+        let msg = welcome_message(&cfg, "abc", &ctx(), &[], TicketKind::Channel);
         let content = msg["content"].as_str().unwrap();
         assert!(utf16_len(content) <= MAX_CONTENT, "{}", utf16_len(content));
         // A claim line added to a full message keeps the whole under the cap.
@@ -1894,21 +2089,21 @@ mod tests {
         claimed.claimed_by = Some("9".into());
         let mut locked = ticket("2");
         locked.status = Status::Locked;
-        let text = manage_text(&[claimed, locked, ticket("3")], 25);
+        let text = manage_text(&[claimed, locked, ticket("3")], 25, false);
         assert!(text.contains("2 open") && text.contains("1 closed and kept"));
         assert!(text.contains("<#1>") && text.contains("\u{1F64B} <@9>"));
         assert!(text.contains("unclaimed"));
-        assert!(manage_text(&[], 25).contains("No tickets are open"));
+        assert!(manage_text(&[], 25, false).contains("No tickets are open"));
         // A long list stays inside one reply's budget.
         let many: Vec<Ticket> = (0..200).map(|i| ticket(&i.to_string())).collect();
-        let text = manage_text(&many, 200);
+        let text = manage_text(&many, 200, false);
         assert!(text.chars().count() <= MAX_CONTENT, "{}", text.len());
         assert!(text.ends_with("to see them all."));
     }
 
     #[test]
     fn closing_notice_counts_down_and_never_pings() {
-        let v = closing_notice("9", "done", 1_700_000_000);
+        let v = closing_notice("9", "done", 1_700_000_000, TicketKind::Channel);
         let c = v["content"].as_str().unwrap();
         assert!(c.contains("<@9>") && c.contains("done") && c.contains("<t:1700000000:R>"));
         assert_eq!(v["allowed_mentions"]["parse"], json!([]));

@@ -35,10 +35,23 @@ const MANAGE_WEBHOOKS: u64 = 1 << 29;
 /// it so re-inviting through this plugin's link can't strip it.
 const CREATE_INSTANT_INVITE: u64 = 1 << 0;
 
+/// Manage Threads + Create Private Threads + Send Messages in Threads — the
+/// tickets plugin's thread mode opens, locks and deletes a private thread per
+/// ticket. This plugin doesn't use them, but the shared invite must still
+/// request them so re-inviting through this plugin's link can't strip them.
+const MANAGE_THREADS: u64 = 1 << 34;
+const CREATE_PRIVATE_THREADS: u64 = 1 << 36;
+const SEND_MESSAGES_IN_THREADS: u64 = 1 << 38;
+
 /// The union every shared-bot invite must request: Create Instant Invite +
-/// Manage Channels + Manage Roles + Manage Webhooks.
-const SHARED_BOT_PERMISSIONS: u64 =
-    CREATE_INSTANT_INVITE | MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
+/// Manage Channels + Manage Roles + Manage Webhooks + the three thread bits.
+const SHARED_BOT_PERMISSIONS: u64 = CREATE_INSTANT_INVITE
+    | MANAGE_CHANNELS
+    | MANAGE_ROLES
+    | MANAGE_WEBHOOKS
+    | MANAGE_THREADS
+    | CREATE_PRIVATE_THREADS
+    | SEND_MESSAGES_IN_THREADS;
 
 /// Force an operator-supplied invite URL's `permissions` to [`SHARED_BOT_PERMISSIONS`].
 ///
@@ -192,7 +205,7 @@ mod tests {
         let out = normalize_invite_permissions(
             "https://discord.com/oauth2/authorize?client_id=123&scope=bot&permissions=0",
         );
-        assert_eq!(perms_of(&out).as_deref(), Some("805306385"));
+        assert_eq!(perms_of(&out).as_deref(), Some("361582559249"));
     }
 
     #[test]
@@ -215,7 +228,7 @@ mod tests {
             Some("bot".to_string())
         );
         // …and the union is appended.
-        assert_eq!(perms_of(&out).as_deref(), Some("805306385"));
+        assert_eq!(perms_of(&out).as_deref(), Some("361582559249"));
         // Exactly one `permissions` param, never duplicated.
         assert_eq!(
             url.query_pairs()
