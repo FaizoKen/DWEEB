@@ -84,12 +84,19 @@ const DETAIL_BATCH_LIMIT: usize = 64;
 /// their own APIs, so they never appear here.
 const LABELS: [&str; 2] = ["posted", "draft"];
 
+/// How long a posted entry whose message was deleted on Discord is kept.
+/// Deleting a Discord message can't be undone, so this copy is the only way
+/// back from a mistaken delete: the directory shows it as "Deleted on
+/// Discord" and can post it again. Long enough to notice, short enough that
+/// the shelf doesn't fill with dead messages.
+pub const DELETED_RETENTION_SECS: i64 = 30 * 86_400;
+
 // ── Row model ────────────────────────────────────────────────────────────────
 
 /// All columns, in the order [`row_from`] reads them.
 const COLS: &str = "id, guild_id, label, title, payload_sealed, webhook_sealed, webhook_id, \
      application_id, channel_id, message_id, thread_id, dest_label, created_by, \
-     created_at, updated_at";
+     created_at, updated_at, deleted_at";
 
 /// A full stored entry. `Clone` so a handler can read-modify-write it.
 #[derive(Clone)]
@@ -120,6 +127,10 @@ pub struct Row {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// When an existence check found the message deleted on Discord (posted
+    /// rows only). Such a row is kept for [`DELETED_RETENTION_SECS`] so its
+    /// content can be posted again, outside the history window, then purged.
+    pub deleted_at: Option<i64>,
 }
 
 /// Minimal row needed to re-arm "Update existing" for an auto-saved draft.
@@ -162,6 +173,10 @@ pub struct SummaryRow {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// When an existence check found the message deleted on Discord (posted
+    /// rows only). Such a row is kept for [`DELETED_RETENTION_SECS`] so its
+    /// content can be posted again, outside the history window, then purged.
+    pub deleted_at: Option<i64>,
 }
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
@@ -181,6 +196,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         created_by: r.get(12)?,
         created_at: r.get(13)?,
         updated_at: r.get(14)?,
+        deleted_at: r.get(15)?,
     })
 }
 
@@ -199,6 +215,7 @@ fn summary_row_from(r: &rusqlite::Row) -> rusqlite::Result<SummaryRow> {
         created_by: r.get(10)?,
         created_at: r.get(11)?,
         updated_at: r.get(12)?,
+        deleted_at: r.get(13)?,
     })
 }
 
@@ -327,6 +344,20 @@ impl LibraryStore {
                 conn.execute_batch("ALTER TABLE library_messages ADD COLUMN checked_at INTEGER;")
                     .map_err(|e| format!("migrate checked_at: {e}"))?;
             }
+            // When the existence check found a posted row's message deleted on
+            // Discord — see `Row::deleted_at`.
+            let has_deleted: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_messages') \
+                     WHERE name = 'deleted_at'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has_deleted == 0 {
+                conn.execute_batch("ALTER TABLE library_messages ADD COLUMN deleted_at INTEGER;")
+                    .map_err(|e| format!("migrate deleted_at: {e}"))?;
+            }
             // One posted row per message in a server. `upsert` checks and
             // inserts under one write lock, so new duplicates can't arise; this
             // index makes it the schema's guarantee too. A database that already
@@ -446,7 +477,8 @@ impl LibraryStore {
                          application_id=COALESCE(?5, application_id), \
                          channel_id=COALESCE(?6, channel_id), thread_id=?7, \
                          dest_label=COALESCE(?8, dest_label), \
-                         title=COALESCE(?9, title), updated_at=?10, checked_at=?10 \
+                         title=COALESCE(?9, title), updated_at=?10, checked_at=?10, \
+                         deleted_at=NULL \
                          WHERE id=?1",
                         params![
                             id,
@@ -517,12 +549,14 @@ impl LibraryStore {
                 // including this one". Walked in Rust rather than one DELETE so
                 // `protected` rows (never-expire messages) can be skipped —
                 // they neither evict nor count; the per-guild set is small
-                // (window + permanent slots), so this stays cheap.
+                // (window + permanent slots), so this stays cheap. A message
+                // deleted on Discord is outside the window too: kept for its
+                // retention period, then purged by age.
                 let rows: Vec<(String, Option<String>)> = {
                     let mut stmt = conn
                         .prepare_cached(
                             "SELECT id, message_id FROM library_messages \
-                             WHERE guild_id=?1 AND label='posted' \
+                             WHERE guild_id=?1 AND label='posted' AND deleted_at IS NULL \
                              ORDER BY updated_at DESC, rowid DESC",
                         )
                         .map_err(|e| CreateError::Storage(e.to_string()))?;
@@ -556,12 +590,15 @@ impl LibraryStore {
         Ok(n_id.to_string())
     }
 
-    /// A server's entries, most recently touched first.
+    /// A server's entries, most recently touched first. The legacy full-list
+    /// path, whose clients predate deleted-on-Discord entries: those are left
+    /// out, exactly as those clients last saw them.
     pub fn list_for_guild(&self, guild: &str, limit: usize) -> Result<Vec<Row>, String> {
         let conn = self.lock();
         let mut stmt = conn
             .prepare_cached(&format!(
-                "SELECT {COLS} FROM library_messages WHERE guild_id=?1 \
+                "SELECT {COLS} FROM library_messages \
+                 WHERE guild_id=?1 AND deleted_at IS NULL \
                  ORDER BY updated_at DESC LIMIT ?2"
             ))
             .map_err(e2s)?;
@@ -573,23 +610,30 @@ impl LibraryStore {
 
     /// A server's entry metadata without either encrypted payload column. This
     /// is the normal gallery-open path; full rows are loaded only for visible
-    /// pages through [`Self::list_details_for_guild`].
+    /// pages through [`Self::list_details_for_guild`]. Entries whose message was
+    /// deleted on Discord are included only with `include_deleted` — asked for
+    /// by a client that shows them as such; older clients never see them.
     pub fn list_summaries_for_guild(
         &self,
         guild: &str,
         limit: usize,
+        include_deleted: bool,
     ) -> Result<Vec<SummaryRow>, String> {
         let conn = self.lock();
         let mut stmt = conn
             .prepare_cached(
                 "SELECT id, guild_id, label, title, webhook_id, application_id, channel_id, \
-                        message_id, thread_id, dest_label, created_by, created_at, updated_at \
-                 FROM library_messages WHERE guild_id=?1 \
+                        message_id, thread_id, dest_label, created_by, created_at, updated_at, \
+                        deleted_at \
+                 FROM library_messages WHERE guild_id=?1 AND (?3 OR deleted_at IS NULL) \
                  ORDER BY updated_at DESC LIMIT ?2",
             )
             .map_err(e2s)?;
         let rows = stmt
-            .query_map((guild, limit as i64), summary_row_from)
+            .query_map(
+                params![guild, limit as i64, include_deleted],
+                summary_row_from,
+            )
             .map_err(e2s)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
     }
@@ -644,7 +688,8 @@ impl LibraryStore {
                 "SELECT guild_id, webhook_sealed, message_id, thread_id, channel_id, \
                         application_id \
                  FROM library_messages \
-                 WHERE guild_id=?1 AND message_id=?2 AND label='posted' LIMIT 1",
+                 WHERE guild_id=?1 AND message_id=?2 AND label='posted' \
+                   AND deleted_at IS NULL LIMIT 1",
             )
             .map_err(e2s)?;
         stmt.query_row(params![guild, message_id], |r| {
@@ -730,7 +775,7 @@ impl LibraryStore {
             "SELECT id, message_id, channel_id, thread_id, webhook_sealed, application_id \
              FROM library_messages \
              WHERE guild_id=?1 AND label='posted' AND message_id IS NOT NULL \
-               AND id IN ({placeholders})"
+               AND deleted_at IS NULL AND id IN ({placeholders})"
         );
         let mut stmt = conn.prepare_cached(&sql).map_err(e2s)?;
         let values = std::iter::once(guild).chain(ids.iter().map(String::as_str));
@@ -765,7 +810,7 @@ impl LibraryStore {
         let n = conn
             .execute(
                 "UPDATE library_messages SET checked_at=?3 \
-                 WHERE guild_id=?1 AND id=?2 AND label='posted' \
+                 WHERE guild_id=?1 AND id=?2 AND label='posted' AND deleted_at IS NULL \
                    AND (checked_at IS NULL OR checked_at <= ?4)",
                 params![guild, id, now, cutoff],
             )
@@ -773,27 +818,44 @@ impl LibraryStore {
         Ok(n > 0)
     }
 
-    /// Remove a posted row whose message Discord confirmed deleted. Keyed on
-    /// the message id as well as the row id, so it can only ever remove the
-    /// record of the message that was checked. True when a row was removed.
-    pub fn remove_deleted_message(
+    /// Mark a posted row whose message Discord confirmed deleted, keeping its
+    /// content for [`DELETED_RETENTION_SECS`] (see [`Row::deleted_at`]). Keyed
+    /// on the message id as well as the row id, so it can only ever mark the
+    /// record of the message that was checked. True when a row was marked.
+    pub fn mark_deleted_on_discord(
         &self,
         guild: &str,
         id: &str,
         message_id: &str,
+        now: i64,
     ) -> Result<bool, String> {
         let conn = self.lock();
         let n = conn
             .execute(
+                "UPDATE library_messages SET deleted_at=?4 \
+                 WHERE guild_id=?1 AND id=?2 AND label='posted' AND message_id=?3 \
+                   AND deleted_at IS NULL",
+                params![guild, id, message_id, now],
+            )
+            .map_err(e2s)?;
+        Ok(n > 0)
+    }
+
+    /// Remove every entry deleted on Discord at or before `before`, across all
+    /// servers — the end of its retention. Returns how many went.
+    pub fn purge_deleted(&self, before: i64) -> Result<usize, String> {
+        let conn = self.lock();
+        let n = conn
+            .execute(
                 "DELETE FROM library_messages \
-                 WHERE guild_id=?1 AND id=?2 AND label='posted' AND message_id=?3",
-                params![guild, id, message_id],
+                 WHERE deleted_at IS NOT NULL AND deleted_at <= ?1",
+                [before],
             )
             .map_err(e2s)?;
         if n > 0 {
             self.count.fetch_sub(n as i64, Ordering::Relaxed);
         }
-        Ok(n > 0)
+        Ok(n)
     }
 
     /// Whether a server holds *more drafts* than its cap — the over-quota
@@ -811,11 +873,13 @@ impl LibraryStore {
     }
 
     /// How many entries a server holds, as `(posted, drafts)` — the list's
-    /// per-bucket `used` figures.
+    /// per-bucket `used` figures. Posts deleted on Discord sit outside the
+    /// history window, so they don't count.
     pub fn counts_for_guild(&self, guild: &str) -> Result<(i64, i64), String> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT COALESCE(SUM(label='posted'),0), COALESCE(SUM(label='draft'),0) \
+            "SELECT COALESCE(SUM(label='posted' AND deleted_at IS NULL),0), \
+                    COALESCE(SUM(label='draft'),0) \
              FROM library_messages WHERE guild_id=?1",
             [guild],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -1053,6 +1117,10 @@ pub struct ListQuery {
     /// the bounded detail endpoint for cards they actually reveal.
     #[serde(default)]
     pub metadata_only: bool,
+    /// Include posts deleted on Discord (each carrying `deleted_at`). Off for
+    /// clients that predate them, which would show one as a live message.
+    #[serde(default)]
+    pub include_deleted: bool,
 }
 
 #[derive(Deserialize)]
@@ -1087,7 +1155,7 @@ pub async fn library_list(
     let g = guild.clone();
     let (items, listed) = if query.metadata_only {
         tokio::task::spawn_blocking(move || {
-            let rows = store.list_summaries_for_guild(&g, LIST_LIMIT)?;
+            let rows = store.list_summaries_for_guild(&g, LIST_LIMIT, query.include_deleted)?;
             let listed = rows.len();
             Ok::<_, String>((rows.iter().map(summary_view).collect::<Vec<_>>(), listed))
         })
@@ -1123,6 +1191,7 @@ pub async fn library_list(
             },
             "posted": { "used": posted_used, "quota": cap_json(posted_cap) },
             "drafts": { "used": draft_used, "quota": cap_json(draft_cap) },
+            "deleted_retention_secs": DELETED_RETENTION_SECS,
         })),
     )
         .into_response())
@@ -1477,6 +1546,7 @@ fn view(key: &Key, r: &Row) -> Value {
         "created_by": r.created_by,
         "created_at": r.created_at,
         "updated_at": r.updated_at,
+        "deleted_at": r.deleted_at,
     })
 }
 
@@ -1498,6 +1568,7 @@ fn summary_view(r: &SummaryRow) -> Value {
         "created_by": r.created_by,
         "created_at": r.created_at,
         "updated_at": r.updated_at,
+        "deleted_at": r.deleted_at,
     })
 }
 
@@ -1772,7 +1843,7 @@ mod tests {
         )
         .unwrap();
 
-        let summaries = store.list_summaries_for_guild("g1", 100).unwrap();
+        let summaries = store.list_summaries_for_guild("g1", 100, false).unwrap();
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].id, "detail0001");
         let wire = summary_view(&summaries[0]);
@@ -2245,8 +2316,103 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_deleted_message_touches_only_that_messages_record() {
-        let (store, path) = temp_store("verify-remove", 1000, 10, 50);
+    fn a_post_deleted_on_discord_is_kept_outside_the_history() {
+        let (store, path) = temp_store("verify-mark", 1000, 10, 2);
+        let post = |m: &str, id: &str, now: i64| {
+            upsert(&store, &entry("g1", "posted", Some(m)), id, now, None).unwrap();
+        };
+        post("m1", "id-post-001", 1);
+        upsert(&store, &entry("g1", "draft", None), "id-draf-001", 1, None).unwrap();
+
+        // A different message id, another server, or a draft: nothing marked.
+        assert!(!store
+            .mark_deleted_on_discord("g1", "id-post-001", "m2", 5)
+            .unwrap());
+        assert!(!store
+            .mark_deleted_on_discord("g2", "id-post-001", "m1", 5)
+            .unwrap());
+        assert!(!store
+            .mark_deleted_on_discord("g1", "id-draf-001", "m1", 5)
+            .unwrap());
+        assert!(store
+            .mark_deleted_on_discord("g1", "id-post-001", "m1", 5)
+            .unwrap());
+        // Marking twice is a no-op: the first deletion time stands.
+        assert!(!store
+            .mark_deleted_on_discord("g1", "id-post-001", "m1", 9)
+            .unwrap());
+
+        // Nothing is lost, but the row left the history window's count…
+        assert_eq!(store.count.load(Ordering::Relaxed), 2);
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (0, 1));
+        // …is listed only to clients that ask for deleted entries…
+        assert_eq!(
+            store
+                .list_summaries_for_guild("g1", 100, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        let all = store.list_summaries_for_guild("g1", 100, true).unwrap();
+        let marked = all.iter().find(|r| r.id == "id-post-001").unwrap();
+        assert_eq!(marked.deleted_at, Some(5));
+        assert!(store
+            .list_for_guild("g1", 100)
+            .unwrap()
+            .iter()
+            .all(|r| r.id != "id-post-001"));
+        assert_eq!(
+            store.get("g1", "id-post-001").unwrap().unwrap().deleted_at,
+            Some(5)
+        );
+        // …can't re-arm an update, and is never checked again.
+        assert!(store.origin_for_message("g1", "m1").unwrap().is_none());
+        assert!(store
+            .check_rows("g1", &["id-post-001".to_string()])
+            .unwrap()
+            .is_empty());
+        assert!(!store.claim_check("g1", "id-post-001", 1000, 900).unwrap());
+
+        // A full window of new posts never evicts it: it neither counts nor goes.
+        post("m2", "id-post-002", 10);
+        post("m3", "id-post-003", 11);
+        post("m4", "id-post-004", 12);
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
+        assert!(store.get("g1", "id-post-001").unwrap().is_some());
+        assert!(store.get("g1", "id-post-002").unwrap().is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_post_deleted_on_discord_is_purged_after_its_retention() {
+        let (store, path) = temp_store("verify-purge", 1000, 10, 50);
+        for (m, id) in [
+            ("m1", "id-post-001"),
+            ("m2", "id-post-002"),
+            ("m3", "id-post-003"),
+        ] {
+            upsert(&store, &entry("g1", "posted", Some(m)), id, 1, None).unwrap();
+        }
+        store
+            .mark_deleted_on_discord("g1", "id-post-001", "m1", 100)
+            .unwrap();
+        store
+            .mark_deleted_on_discord("g1", "id-post-002", "m2", 200)
+            .unwrap();
+        assert_eq!(store.purge_deleted(99).unwrap(), 0);
+        assert_eq!(store.purge_deleted(150).unwrap(), 1);
+        assert!(store.get("g1", "id-post-001").unwrap().is_none());
+        assert!(store.get("g1", "id-post-002").unwrap().is_some());
+        // Live posts are never purged, however old.
+        assert_eq!(store.purge_deleted(i64::MAX).unwrap(), 1);
+        assert!(store.get("g1", "id-post-003").unwrap().is_some());
+        assert_eq!(store.count.load(Ordering::Relaxed), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn recording_the_message_again_clears_the_deleted_mark() {
+        let (store, path) = temp_store("verify-unmark", 1000, 10, 50);
         upsert(
             &store,
             &entry("g1", "posted", Some("m1")),
@@ -2255,22 +2421,23 @@ mod tests {
             None,
         )
         .unwrap();
-        upsert(&store, &entry("g1", "draft", None), "id-draf-001", 1, None).unwrap();
-        // A different message id, another server, or a draft: nothing goes.
-        assert!(!store
-            .remove_deleted_message("g1", "id-post-001", "m2")
-            .unwrap());
-        assert!(!store
-            .remove_deleted_message("g2", "id-post-001", "m1")
-            .unwrap());
-        assert!(!store
-            .remove_deleted_message("g1", "id-draf-001", "m1")
-            .unwrap());
-        assert!(store
-            .remove_deleted_message("g1", "id-post-001", "m1")
-            .unwrap());
-        assert_eq!(store.counts_for_guild("g1").unwrap(), (0, 1));
-        assert_eq!(store.count.load(Ordering::Relaxed), 1);
+        store
+            .mark_deleted_on_discord("g1", "id-post-001", "m1", 5)
+            .unwrap();
+        // A successful send naming the message proves it exists after all.
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-post-002",
+            9,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            store.get("g1", "id-post-001").unwrap().unwrap().deleted_at,
+            None
+        );
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (1, 0));
         let _ = std::fs::remove_file(path);
     }
 }

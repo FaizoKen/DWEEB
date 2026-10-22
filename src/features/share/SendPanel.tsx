@@ -82,7 +82,11 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
-import { libraryEntryMessage, useLibraryStore } from "@/core/library/libraryStore";
+import {
+  isDeletedOnDiscord,
+  libraryEntryMessage,
+  useLibraryStore,
+} from "@/core/library/libraryStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
@@ -2152,7 +2156,7 @@ export function SendPanel({
   const updateTarget = useMemo(() => {
     if (mode !== "update" || !parsedMessageId) return null;
     const row = libraryEntries.find(
-      (e) => e.label === "posted" && e.message_id === parsedMessageId,
+      (e) => e.label === "posted" && !isDeletedOnDiscord(e) && e.message_id === parsedMessageId,
     );
     return describeUpdateTarget({
       messageId: parsedMessageId,

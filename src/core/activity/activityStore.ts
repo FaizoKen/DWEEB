@@ -56,7 +56,11 @@ import {
   type ActivityPostResult,
 } from "./api";
 import { browserTimezone } from "@/core/schedule/recurrence";
-import { libraryEntryMessage } from "@/core/library/libraryStore";
+import {
+  DELETED_POST_LOADED,
+  isDeletedOnDiscord,
+  libraryEntryMessage,
+} from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
 import {
   startCollab,
@@ -859,9 +863,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // A posted entry that lives in the target server re-wires the toolbar to
     // update the live message in place. The Update button lights up once the
     // room's destination channel matches the message's channel (same rule as
-    // after a fresh post); a draft just loads content.
+    // after a fresh post); a draft — or a post deleted on Discord, which has
+    // no message left to update — just loads content.
     if (
       entry.label === "posted" &&
+      !isDeletedOnDiscord(entry) &&
       entry.message_id &&
       entry.channel_id &&
       entry.guild_id === get().targetGuildId
@@ -892,6 +898,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           : "Loaded from the library — switch to its channel to update it in place.",
         "success",
       );
+    } else if (isDeletedOnDiscord(entry)) {
+      pushToast(DELETED_POST_LOADED, "success");
     } else {
       pushToast("Loaded from the server library.", "success");
     }

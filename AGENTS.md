@@ -1885,14 +1885,25 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   blocking pool, and reset/invalidate all decrypted rows on sign-out or a 401/403. Async draft
   origin recovery must also retain the editor's whole-document generation; a template/import/clear
   while the lookup is pending must never arm the replacement message with the old webhook secret.
-- **Posted history drops a message deleted on Discord — checked at read time, removed only on
-  proof** (`server/src/library_verify.rs`, 2026-10-22). Nothing tells DWEEB when someone deletes
-  a posted message in Discord (no gateway, and the bot may not be in the server), so the
-  directory kept showing it, with Load/Update aimed at nothing. While a Posted shelf is on
-  screen, both directories (`usePostedVerify`) send the visible card ids to
-  `POST /api/guilds/:g/library/verify` (dual-credential, ≤64 ids); the proxy asks Discord,
-  deletes the rows whose message is gone, answers `{gone: [ids]}`, and the store drops them with
-  a toast. Load-bearing: (1) **a false removal is the bug to fear**, so only proof removes —
+- **Posted history marks a message deleted on Discord and keeps it 30 days — checked at read
+  time, marked only on proof** (`server/src/library_verify.rs`, 2026-10-22). Nothing tells DWEEB
+  when someone deletes a posted message in Discord (no gateway, and the bot may not be in the
+  server), so the directory kept showing it, with Load/Update aimed at nothing. While a Posted
+  shelf is on screen, both directories (`usePostedVerify`) send the visible card ids to
+  `POST /api/guilds/:g/library/verify` (dual-credential, ≤64 ids); the proxy asks Discord, sets
+  `deleted_at` on the rows whose message is gone, answers `{gone, deleted_at,
+  deleted_retention_secs}`, and the cards turn into "Deleted on Discord · kept N more days".
+  **Kept, not removed (maintainer, 2026-10-22, the same day the first cut removed them)**: a
+  Discord delete can't be undone, so after a mistaken one this copy is the only way back. A
+  marked row loads as a *new* post (`libraryEntryOrigin` is null, the Activity doesn't re-wire
+  Update — Discord can't restore the old id, so the copy says "post it again", never
+  "restore"), sits outside the history window (not counted, never evicted; a re-record of the
+  same message clears the mark), is never checked again, can't re-arm a draft's Update
+  (`origin_for_message`), and is purged `DELETED_RETENTION_SECS` (30 d) after marking by an
+  hourly sweep in `main`. Its delete confirm says it is the last copy. Deploy skew: older
+  clients list without `include_deleted=true` and never see marked rows (the legacy full list
+  excludes them too), and a client of the first cut drops `gone` cards as before. Load-bearing:
+  (1) **a false mark is the bug to fear**, so only proof marks —
   `verdict` is a pure function over a `Prober` trait, pinned by scripted tests. The posting
   webhook is asked first (no bot needed), but Discord reads webhook messages in the webhook's
   *current* channel, so an Unknown Message (10008) counts only after the webhook is confirmed
@@ -1909,11 +1920,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   paced per webhook/channel on `X-RateLimit-Remaining`/`Reset-After` (429s count toward
   Cloudflare's invalid-request ban on our shared IP), with an 8 s pass budget and at most four
   passes process-wide (shed, not queued — unclaimed rows are asked next time). (3) **A deleted
-  message's never-expire slot is released with its row** (it can protect nothing; message ids
-  are never reused), so it doesn't linger as an orphan. No deploy ordering: an old proxy 404s
-  the route and the FE ignores it. Guarded by `library_verify::tests`, the `claim`/`remove`
-  store tests in library.rs, `classify_message_probe` tests in discord.rs, and
-  `libraryStore.verifyPosted` in `libraryStore.test.ts`.
+  message's never-expire slot is released when it is marked** (it can protect nothing; message
+  ids are never reused), so it doesn't linger as an orphan; a repost can claim a fresh one. No
+  deploy ordering: an old proxy 404s the route and the FE ignores it. Guarded by
+  `library_verify::tests`, the claim/mark/purge store tests in library.rs,
+  `classify_message_probe` tests in discord.rs, and `libraryStore.verifyPosted` +
+  "deleted-on-Discord helpers" in `libraryStore.test.ts`.
 - Keep the default `webhook.incoming` OAuth path. Custom bots must not collect bot tokens;
   their OAuth create flow uses the popup/localStorage handshake because Discord can sever
   `window.opener`.

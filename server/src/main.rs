@@ -389,6 +389,33 @@ async fn run() {
         None
     };
 
+    if let Some(store) = &library {
+        // Posts deleted on Discord are kept for a retention period so they can
+        // be posted again (`library_verify.rs`); this sweep ends it. First tick
+        // fires immediately, reclaiming what expired while the proxy was down.
+        let store = Arc::clone(store);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let s = Arc::clone(&store);
+                let before = crate::schedule::unix_now() - library::DELETED_RETENTION_SECS;
+                match tokio::task::spawn_blocking(move || s.purge_deleted(before)).await {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(n)) => tracing::info!(
+                        target: "library",
+                        purged = n,
+                        "purged posts deleted on Discord past their retention"
+                    ),
+                    Ok(Err(e)) => {
+                        tracing::warn!(target: "library", "deleted-post purge failed: {e}")
+                    }
+                    Err(e) => tracing::warn!(target: "library", "deleted-post purge panicked: {e}"),
+                }
+            }
+        });
+    }
+
     // Remote MCP endpoint: registered OAuth clients + live grants. Off by
     // default — see `Config::mcp_enabled`. A store that cannot be opened is
     // fatal for the same reason the others are: booting with the feature

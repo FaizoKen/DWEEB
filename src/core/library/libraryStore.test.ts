@@ -27,7 +27,15 @@ vi.mock("./api", () => ({
   verifyLibraryPosted: verifyLibraryPostedMock,
 }));
 
-import { libraryEntryHasDetails, pendingLibraryDetailIds, useLibraryStore } from "./libraryStore";
+import {
+  deletedDaysLeft,
+  isDeletedOnDiscord,
+  libraryEntryHasDetails,
+  libraryEntryOrigin,
+  pendingLibraryDetailIds,
+  useLibraryStore,
+} from "./libraryStore";
+import { deletedPostsMessage } from "./usePostedVerify";
 import type { LibraryEntryResult, LibraryEntryView } from "./api";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "@/core/serialization/normalize";
@@ -319,15 +327,19 @@ describe("libraryStore.saveDraft", () => {
 });
 
 describe("libraryStore.verifyPosted", () => {
-  function postedEntry(id: string, messageId: string): LibraryEntryView {
+  const RETENTION = 30 * 86_400;
+
+  function postedEntry(id: string, messageId: string, deletedAt?: number): LibraryEntryView {
     return {
       id,
       guild_id: GUILD_A,
       label: "posted",
       message_id: messageId,
+      webhook_url: "https://discord.com/api/webhooks/1/tok",
       created_by: "333333333333333333",
       created_at: 1_700_000_000,
       updated_at: 1_700_000_000,
+      ...(deletedAt == null ? {} : { deleted_at: deletedAt }),
     };
   }
 
@@ -335,6 +347,8 @@ describe("libraryStore.verifyPosted", () => {
     useLibraryStore.getState().reset();
     resetStore();
     verifyLibraryPostedMock.mockReset();
+    createLibraryEntryMock.mockReset();
+    deleteLibraryEntryMock.mockReset();
     useLibraryStore.setState({
       entries: [
         postedEntry("posted-01", "901"),
@@ -342,24 +356,50 @@ describe("libraryStore.verifyPosted", () => {
         draftEntry(GUILD_A, simpleTextMessage("Draft")),
       ],
       posted: { used: 2, quota: 10 },
+      deletedRetentionSecs: RETENTION,
     });
   });
 
-  it("drops the posts Discord no longer has and returns them", async () => {
-    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: ["posted-02"] });
-    const removed = await useLibraryStore
+  it("keeps a post deleted on Discord, marked, outside the history count", async () => {
+    verifyLibraryPostedMock.mockResolvedValue({
+      ok: true,
+      gone: ["posted-02"],
+      deletedAt: 1_800_000_000,
+    });
+    const found = await useLibraryStore
       .getState()
       .verifyPosted(GUILD_A, ["posted-01", "posted-02", "draft-1"]);
-    // Only posted entries are asked about.
+    // Only live posted entries are asked about.
     expect(verifyLibraryPostedMock).toHaveBeenCalledWith(GUILD_A, ["posted-01", "posted-02"]);
-    expect(removed.map((entry) => entry.message_id)).toEqual(["902"]);
+    expect(found.map((entry) => entry.message_id)).toEqual(["902"]);
+    const state = useLibraryStore.getState();
+    expect(state.entries.map((entry) => entry.id)).toEqual(["posted-01", "posted-02", "draft-1"]);
+    const marked = state.entries.find((entry) => entry.id === "posted-02")!;
+    expect(marked.deleted_at).toBe(1_800_000_000);
+    expect(isDeletedOnDiscord(marked)).toBe(true);
+    // Loadable to post again, but never an update target.
+    expect(libraryEntryOrigin(marked)).toBeNull();
+    expect(libraryEntryOrigin(state.entries[0])).not.toBeNull();
+    expect(state.posted).toEqual({ used: 1, quota: 10 });
+  });
+
+  it("drops the post when the proxy removed it (the first version did)", async () => {
+    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: ["posted-02"], deletedAt: null });
+    await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-02"]);
     const state = useLibraryStore.getState();
     expect(state.entries.map((entry) => entry.id)).toEqual(["posted-01", "draft-1"]);
     expect(state.posted).toEqual({ used: 1, quota: 10 });
   });
 
+  it("never asks about an entry already marked deleted", async () => {
+    useLibraryStore.setState({ entries: [postedEntry("posted-03", "903", 1_800_000_000)] });
+    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: [], deletedAt: 1 });
+    expect(await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-03"])).toEqual([]);
+    expect(verifyLibraryPostedMock).not.toHaveBeenCalled();
+  });
+
   it("asks about each entry at most once per interval", async () => {
-    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: [] });
+    verifyLibraryPostedMock.mockResolvedValue({ ok: true, gone: [], deletedAt: 1 });
     await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
     await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01", "posted-02"]);
     expect(verifyLibraryPostedMock).toHaveBeenNthCalledWith(2, GUILD_A, ["posted-02"]);
@@ -369,18 +409,83 @@ describe("libraryStore.verifyPosted", () => {
 
   it("keeps everything when the check can't run", async () => {
     verifyLibraryPostedMock.mockResolvedValue({ ok: false, error: "Not found", status: 404 });
-    const removed = await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
-    expect(removed).toEqual([]);
+    const found = await useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
+    expect(found).toEqual([]);
     expect(useLibraryStore.getState().entries).toHaveLength(3);
   });
 
   it("ignores an answer for a server the user has since left", async () => {
-    const answer = deferred<{ ok: true; gone: string[] }>();
+    const answer = deferred<{ ok: true; gone: string[]; deletedAt: number }>();
     verifyLibraryPostedMock.mockReturnValue(answer.promise);
     const pending = useLibraryStore.getState().verifyPosted(GUILD_A, ["posted-01"]);
     useLibraryStore.setState({ guildId: GUILD_B, entries: [postedEntry("posted-01", "901")] });
-    answer.resolve({ ok: true, gone: ["posted-01"] });
+    answer.resolve({ ok: true, gone: ["posted-01"], deletedAt: 5 });
     expect(await pending).toEqual([]);
-    expect(useLibraryStore.getState().entries).toHaveLength(1);
+    expect(useLibraryStore.getState().entries[0].deleted_at).toBeUndefined();
+  });
+
+  it("removing a deleted post leaves the history count alone", async () => {
+    useLibraryStore.setState({
+      entries: [postedEntry("posted-01", "901"), postedEntry("posted-03", "903", 5)],
+      posted: { used: 1, quota: 10 },
+    });
+    deleteLibraryEntryMock.mockResolvedValue({ ok: true });
+    await useLibraryStore.getState().remove(GUILD_A, "posted-03");
+    expect(useLibraryStore.getState().posted).toEqual({ used: 1, quota: 10 });
+  });
+
+  it("re-recording a deleted post brings it back into the window", async () => {
+    useLibraryStore.setState({
+      entries: [postedEntry("posted-03", "903", 5)],
+      posted: { used: 0, quota: 10 },
+    });
+    createLibraryEntryMock.mockResolvedValue({ ok: true, entry: postedEntry("posted-03", "903") });
+    await useLibraryStore.getState().recordPosted(GUILD_A, {
+      messageId: "903",
+      webhookUrl: "https://discord.com/api/webhooks/1/tok",
+      message: simpleTextMessage("Again"),
+    });
+    const state = useLibraryStore.getState();
+    expect(isDeletedOnDiscord(state.entries[0])).toBe(false);
+    expect(state.posted).toEqual({ used: 1, quota: 10 });
+  });
+
+  it("the window never evicts a deleted post locally", async () => {
+    useLibraryStore.setState({
+      entries: [postedEntry("posted-01", "901"), postedEntry("posted-03", "903", 5)],
+      posted: { used: 1, quota: 1 },
+    });
+    createLibraryEntryMock.mockResolvedValue({ ok: true, entry: postedEntry("posted-04", "904") });
+    await useLibraryStore.getState().recordPosted(GUILD_A, {
+      messageId: "904",
+      webhookUrl: "https://discord.com/api/webhooks/1/tok",
+      message: simpleTextMessage("New"),
+    });
+    expect(useLibraryStore.getState().entries.map((entry) => entry.id)).toEqual([
+      "posted-04",
+      "posted-03",
+    ]);
+  });
+});
+
+describe("deleted-on-Discord helpers", () => {
+  it("counts whole days left, never below one while listed", () => {
+    const entry = { label: "posted", deleted_at: 1_000 } as LibraryEntryView;
+    const day = 86_400;
+    expect(deletedDaysLeft(entry, 30 * day, 1_000 * 1000)).toBe(30);
+    expect(deletedDaysLeft(entry, 30 * day, (1_000 + 29.5 * day) * 1000)).toBe(1);
+    expect(deletedDaysLeft(entry, 30 * day, (1_000 + 31 * day) * 1000)).toBe(1);
+    expect(deletedDaysLeft(entry, null)).toBeNull();
+    expect(deletedDaysLeft({ ...entry, deleted_at: null }, 30 * day)).toBeNull();
+  });
+
+  it("says how long a deleted post is kept", () => {
+    expect(deletedPostsMessage(1, 30 * 86_400)).toBe(
+      "A post was deleted on Discord. It stays in Posted for 30 days so you can post it again.",
+    );
+    expect(deletedPostsMessage(2, 30 * 86_400)).toBe(
+      "2 posts were deleted on Discord. They stay in Posted for 30 days so you can post them again.",
+    );
+    expect(deletedPostsMessage(1, null)).toBe("A post was deleted on Discord.");
   });
 });

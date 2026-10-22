@@ -80,9 +80,12 @@ interface LibraryState {
   /** Ensure one row has details (used when a user clicks before its preview
    * batch settles), returning null if it can no longer be read. */
   hydrateOne(guildId: string, id: string): Promise<LibraryEntryView | null>;
-  /** Check the given posted entries against Discord (server-side) and drop
-   * the ones whose message was deleted there. Resolves with the dropped
-   * entries. Each entry is asked about at most once a minute per tab (the
+  /** How long the server keeps a post deleted on Discord, in seconds (null =
+   *  not loaded, or a proxy that predates keeping them). */
+  deletedRetentionSecs: number | null;
+  /** Check the given posted entries against Discord (server-side) and mark
+   * the ones whose message was deleted there (`deleted_at`). Resolves with the
+   * newly marked entries. Each entry is asked about at most once a minute per tab (the
    * proxy enforces the same interval across tabs and teammates); failures are
    * silent — an entry nobody could check just stays. */
   verifyPosted(guildId: string, ids: string[]): Promise<LibraryEntryView[]>;
@@ -106,19 +109,25 @@ function mergeEntry(
   entry: LibraryEntryView,
 ): Partial<LibraryState> | null {
   if (state.guildId !== entry.guild_id) return null;
-  const existed = state.entries.some((e) => e.id === entry.id);
+  const previous = state.entries.find((e) => e.id === entry.id);
+  const existed = previous !== undefined;
   let entries = [entry, ...state.entries.filter((e) => e.id !== entry.id)];
   let posted = state.posted;
   let drafts = state.drafts;
   if (entry.label === "posted") {
-    if (!existed) posted = { ...posted, used: posted.used + 1 };
+    // A row marked deleted on Discord sits outside the window; recording its
+    // message again (the server clears the mark) brings it back in.
+    if (!previous || isDeletedOnDiscord(previous)) {
+      posted = { ...posted, used: posted.used + 1 };
+    }
     if (posted.quota != null && posted.used > posted.quota) {
-      // Evict oldest-first, exactly like the server (entries are newest-first).
+      // Evict oldest-first, exactly like the server (entries are newest-first),
+      // which never evicts a deleted-on-Discord row: it's purged by age.
       let surplus = posted.used - posted.quota;
       entries = [...entries]
         .reverse()
         .filter((e) => {
-          if (e.label !== "posted" || surplus === 0) return true;
+          if (e.label !== "posted" || isDeletedOnDiscord(e) || surplus === 0) return true;
           surplus -= 1;
           return false;
         })
@@ -132,6 +141,31 @@ function mergeEntry(
 }
 
 const EMPTY_BUCKET: LibraryBucketUsage = { used: 0, quota: null };
+
+/** A posted entry whose Discord message was found deleted. It is kept (for
+ * `deletedRetentionSecs`) so the content can be posted again, but there's no
+ * message left to update, and it doesn't count against the history window. */
+export function isDeletedOnDiscord(entry: LibraryEntryView): boolean {
+  return entry.label === "posted" && entry.deleted_at != null;
+}
+
+/** Toast for loading a post deleted on Discord. Discord can't restore a
+ * deleted message, so "restoring" one is posting it again — say so. */
+export const DELETED_POST_LOADED =
+  "Loaded a post that was deleted on Discord — Send posts it again as a new message.";
+
+/** Whole days left before an entry deleted on Discord is purged — at least 1
+ * while it's still listed. Null when the entry isn't deleted or the proxy
+ * didn't say how long it keeps them. */
+export function deletedDaysLeft(
+  entry: LibraryEntryView,
+  retentionSecs: number | null,
+  nowMs: number = Date.now(),
+): number | null {
+  if (!isDeletedOnDiscord(entry) || retentionSecs == null) return null;
+  const leftSecs = (entry.deleted_at ?? 0) + retentionSecs - nowMs / 1000;
+  return Math.max(1, Math.ceil(leftSecs / 86_400));
+}
 
 /** A summary has no own `payload` property. Full rows always do, including an
  * explicit `null` when a rotated key made the seal unreadable. */
@@ -169,6 +203,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   error: null,
   loaded: false,
   detailError: null,
+  deletedRetentionSecs: null,
 
   reset() {
     accountGeneration += 1;
@@ -212,6 +247,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         entries: res.items,
         posted: res.posted,
         drafts: res.drafts,
+        deletedRetentionSecs: res.deletedRetentionSecs,
         loading: false,
         loaded: true,
         error: null,
@@ -343,7 +379,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const now = Date.now();
     const postedIds = new Set(
       get()
-        .entries.filter((entry) => entry.label === "posted")
+        .entries.filter((entry) => entry.label === "posted" && !isDeletedOnDiscord(entry))
         .map((entry) => entry.id),
     );
     const due = [...new Set(ids)].filter((id) => {
@@ -354,7 +390,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (due.length === 0) return [];
     for (const id of due) verifyAskedAt.set(detailTaskKey(guildId, id), now);
 
-    const removed: LibraryEntryView[] = [];
+    const marked: LibraryEntryView[] = [];
     for (let offset = 0; offset < due.length; offset += LIBRARY_DETAIL_BATCH_SIZE) {
       const res = await verifyLibraryPosted(
         guildId,
@@ -362,19 +398,28 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       );
       // An old proxy (404), a signed-out tab, a network blip: nothing to do.
       if (!res.ok) break;
-      if (accountGeneration !== generation || get().guildId !== guildId) return removed;
+      if (accountGeneration !== generation || get().guildId !== guildId) return marked;
       if (res.gone.length === 0) continue;
       const gone = new Set(res.gone);
-      const dropped = get().entries.filter((entry) => gone.has(entry.id));
-      if (dropped.length === 0) continue;
-      removed.push(...dropped);
-      const droppedPosted = dropped.filter((entry) => entry.label === "posted").length;
+      const deletedAt = res.deletedAt;
+      const hit = get().entries.filter((entry) => gone.has(entry.id) && !isDeletedOnDiscord(entry));
+      if (hit.length === 0) continue;
+      // A proxy that keeps deleted posts states when it marked them; the first
+      // one (no `deleted_at`) removed them outright, so they leave the list.
+      const updated = hit.map((entry) =>
+        deletedAt == null ? entry : { ...entry, deleted_at: deletedAt },
+      );
+      marked.push(...updated);
+      const byId = new Map(updated.map((entry) => [entry.id, entry]));
       set((state) => ({
-        entries: state.entries.filter((entry) => !gone.has(entry.id)),
-        posted: { ...state.posted, used: Math.max(0, state.posted.used - droppedPosted) },
+        entries:
+          deletedAt == null
+            ? state.entries.filter((entry) => !byId.has(entry.id))
+            : state.entries.map((entry) => byId.get(entry.id) ?? entry),
+        posted: { ...state.posted, used: Math.max(0, state.posted.used - hit.length) },
       }));
     }
-    return removed;
+    return marked;
   },
 
   async recordPosted(guildId, input) {
@@ -441,7 +486,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         entries: get().entries.filter((e) => e.id !== id),
       };
       if (removed?.label === "posted") {
-        patch.posted = { ...get().posted, used: Math.max(0, get().posted.used - 1) };
+        // A deleted-on-Discord entry was already outside the history count.
+        if (!isDeletedOnDiscord(removed)) {
+          patch.posted = { ...get().posted, used: Math.max(0, get().posted.used - 1) };
+        }
       } else if (removed) {
         patch.drafts = { ...get().drafts, used: Math.max(0, get().drafts.used - 1) };
       }
@@ -500,6 +548,8 @@ export function libraryEntrySearchText(entry: LibraryEntryView): string {
  *  seal couldn't be opened for. */
 export function libraryEntryOrigin(entry: LibraryEntryView): RestoredOrigin | null {
   if (entry.label !== "posted" || !entry.webhook_url || !entry.message_id) return null;
+  // Deleted on Discord: there's no message left to update in place.
+  if (isDeletedOnDiscord(entry)) return null;
   return {
     webhookUrl: entry.webhook_url,
     messageId: entry.message_id,

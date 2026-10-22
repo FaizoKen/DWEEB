@@ -7,14 +7,21 @@
 //! with Load and Update aimed at a message that no longer exists.
 //!
 //! The fix is a read-time check, driven by what people actually look at:
-//! `POST /api/guilds/:guild    let store = crate::library::store(&st)?;id/library/verify` takes the ids of the posted
-//! cards a directory is showing, asks Discord about each message, removes the
-//! rows whose message is confirmed gone, and answers with their ids so the
-//! open directory drops them at once. Three properties hold it together:
+//! `POST /api/guilds/:guild_id/library/verify` takes the ids of the posted
+//! cards a directory is showing, asks Discord about each message, marks the
+//! rows whose message is confirmed gone (`deleted_at`), and answers with their
+//! ids so the open directory relabels them at once. Four properties hold it
+//! together:
 //!
-//!  - **A row leaves only on an answer that can't mean anything else.**
-//!    Removing the record of a live message is far worse than showing a dead
-//!    one a while longer, so every "couldn't tell" (rate limit, 5xx, refused
+//!  - **A deleted message's content is kept, not dropped.** Deleting a Discord
+//!    message can't be undone, so after a mistaken delete this copy is the
+//!    only way back. A marked row leaves the history window, can't be checked
+//!    or updated again, shows as "Deleted on Discord" and loads as a new post,
+//!    and is purged [`DELETED_RETENTION_SECS`] later
+//!    (`LibraryStore::purge_deleted`, hourly from `main`).
+//!  - **A row is marked only on an answer that can't mean anything else.**
+//!    Marking a live message deleted is far worse than showing a dead one a
+//!    while longer, so every "couldn't tell" (rate limit, 5xx, refused
 //!    permission, a webhook that moved channels, a bare 404 without Discord's
 //!    error code) keeps the row, and [`verdict`] spells out which answers are
 //!    proof. The webhook that posted the message is asked first (it needs no
@@ -29,8 +36,8 @@
 //!    pass has a time budget — a row not reached is simply asked next time.
 //!  - **A never-expire slot follows its message out.** A deleted message's
 //!    slot can protect nothing (message ids are never reused), so the slot is
-//!    released with the row instead of being left as an orphan the manager
-//!    has to find and free by hand.
+//!    released when the row is marked instead of being left as an orphan the
+//!    manager has to find and free by hand.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -47,7 +54,7 @@ use tokio::time::Instant;
 
 use crate::discord::{MessageProbe, Probe};
 use crate::error::AppError;
-use crate::library::{CheckRow, LibraryStore};
+use crate::library::{CheckRow, LibraryStore, DELETED_RETENTION_SECS};
 use crate::routes::{authorize_activity_webhooks, dispatcher_url_with_cap, AppState};
 use crate::schedule::unix_now;
 use crate::schedule_validate::{webhook_id, webhook_token};
@@ -346,8 +353,10 @@ pub struct VerifyBody {
 }
 
 /// `POST /api/guilds/:guild_id/library/verify` — check the listed posted
-/// entries against Discord and remove those whose message was deleted.
-/// Answers `{ "gone": [ids] }`. Same Manage-Webhooks gate (cookie or Activity
+/// entries against Discord and mark those whose message was deleted.
+/// Answers `{ "gone": [ids], "deleted_at": <unix secs>,
+/// "deleted_retention_secs": <secs> }`; `gone` keeps its name for the first
+/// clients, which drop those cards. Same Manage-Webhooks gate (cookie or Activity
 /// bearer) as the list; ids are guild-scoped in SQL, drafts and unknown ids
 /// are ignored, and a row checked within [`CHECK_INTERVAL_SECS`] is skipped.
 /// Never fails on Discord's account: anything it couldn't settle stays put.
@@ -378,28 +387,36 @@ pub async fn library_verify(
         .collect();
 
     let gone = Arc::new(Mutex::new(Vec::new()));
+    // One timestamp for the whole pass, so the answer can state it once.
+    let now = unix_now();
     if let Ok(_permit) = Arc::clone(passes()).try_acquire_owned() {
         // Out of time, the unfinished queues are dropped (aborted); rows they
-        // claimed are asked about again after the interval, and every removal
+        // claimed are asked about again after the interval, and every mark
         // that already happened is still reported below.
-        let _ = tokio::time::timeout(BUDGET, run_pass(&st, &store, &guild, ids, &gone)).await;
+        let pass = run_pass(&st, &store, &guild, ids, now, &gone);
+        let _ = tokio::time::timeout(BUDGET, pass).await;
     }
     let gone = std::mem::take(&mut *gone.lock().unwrap_or_else(|p| p.into_inner()));
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({ "gone": gone })),
+        Json(json!({
+            "gone": gone,
+            "deleted_at": now,
+            "deleted_retention_secs": DELETED_RETENTION_SECS,
+        })),
     )
         .into_response())
 }
 
-/// Check the rows behind `ids` and remove the deleted ones, pushing each
-/// removed id onto `gone` as it happens.
+/// Check the rows behind `ids` and mark the deleted ones, pushing each marked
+/// id onto `gone` as it happens.
 async fn run_pass(
     st: &AppState,
     store: &Arc<LibraryStore>,
     guild: &str,
     ids: Vec<String>,
+    now: i64,
     gone: &Arc<Mutex<Vec<String>>>,
 ) {
     let rows = {
@@ -456,7 +473,7 @@ async fn run_pass(
                     continue;
                 }
                 if verdict(prober.as_ref(), &target, bot_in_guild).await == Verdict::Deleted
-                    && remove(&st, &store, &guild, &id, &target.message_id).await
+                    && mark_deleted(&st, &store, &guild, &id, &target.message_id, now).await
                 {
                     gone.lock().unwrap_or_else(|p| p.into_inner()).push(id);
                 }
@@ -478,34 +495,38 @@ async fn claim(store: &Arc<LibraryStore>, guild: &str, id: &str) -> bool {
     )
 }
 
-/// Remove the row and release any never-expire slot its message held.
-async fn remove(
+/// Mark the row deleted on Discord and release any never-expire slot its
+/// message held.
+async fn mark_deleted(
     st: &AppState,
     store: &Arc<LibraryStore>,
     guild: &str,
     id: &str,
     message_id: &str,
+    now: i64,
 ) -> bool {
-    let removed = {
+    let marked = {
         let store = Arc::clone(store);
         let (g, i, m) = (guild.to_string(), id.to_string(), message_id.to_string());
-        match tokio::task::spawn_blocking(move || store.remove_deleted_message(&g, &i, &m)).await {
-            Ok(Ok(removed)) => removed,
+        match tokio::task::spawn_blocking(move || store.mark_deleted_on_discord(&g, &i, &m, now))
+            .await
+        {
+            Ok(Ok(marked)) => marked,
             Ok(Err(e)) => {
-                tracing::warn!(target: "library", error = %e, "existence check: couldn't remove a row");
+                tracing::warn!(target: "library", error = %e, "existence check: couldn't mark a row");
                 false
             }
             Err(_) => false,
         }
     };
-    if !removed {
+    if !marked {
         return false;
     }
     tracing::info!(
         target: "library",
         guild,
         message_id,
-        "posted message was deleted on Discord; removed from history"
+        "posted message was deleted on Discord; kept as deleted in history"
     );
     release_slot(st, guild, message_id).await;
     true

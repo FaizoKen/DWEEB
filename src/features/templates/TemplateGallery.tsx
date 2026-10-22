@@ -57,6 +57,9 @@ import { usePlanStore } from "@/core/plan/planStore";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
+  DELETED_POST_LOADED,
+  deletedDaysLeft,
+  isDeletedOnDiscord,
   libraryEntryHasDetails,
   libraryEntryMessage,
   libraryEntryOrigin,
@@ -64,7 +67,7 @@ import {
   pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
-import { removedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
+import { deletedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
 import { interactiveComponents } from "@/core/plugins/targets";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { attachEditorFields } from "@/core/serialization/normalize";
@@ -215,6 +218,9 @@ export function TemplateGallery() {
      *  roll off. Never-expire posted cards drop delete entirely, so a pinned
      *  message never reaches this dialog. */
     posted?: boolean;
+    /** Library only — a posted entry whose message was deleted on Discord: the
+     *  entry is the last copy of its content, which the confirm says. */
+    deletedOnDiscord?: boolean;
     /** Scheduled only — the schedule the confirm cancels. */
     schedule?: ScheduleView;
   } | null>(null);
@@ -247,6 +253,7 @@ export function TemplateGallery() {
   const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
   const libDetailError = useLibraryStore((s) => s.detailError);
+  const libRetentionSecs = useLibraryStore((s) => s.deletedRetentionSecs);
   const hydrateLibrary = useLibraryStore((s) => s.hydrate);
   const removeLibrary = useLibraryStore((s) => s.remove);
   useEffect(() => {
@@ -491,6 +498,9 @@ export function TemplateGallery() {
       // as a lightweight placeholder card until its visible page is hydrated.
       if (hasDetails && !message) continue;
       const isPosted = entry.label === "posted";
+      // Deleted on Discord: kept for a while as the only copy of its content,
+      // loadable to post again, never an update target.
+      const deleted = isDeletedOnDiscord(entry);
       const interactive = message ? interactiveComponents(message).length > 0 : false;
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
       // "Buttons may be expired" — an interactive message posted longer than
@@ -500,7 +510,16 @@ export function TemplateGallery() {
       // expire state lives entirely in the pin chip below — no duplicate
       // meta-row pill.)
       const tags: CardData["tags"] = [];
-      if (
+      if (deleted) {
+        const daysLeft = deletedDaysLeft(entry, libRetentionSecs);
+        tags.push({
+          text:
+            daysLeft == null
+              ? "Deleted on Discord"
+              : `Deleted on Discord · kept ${daysLeft} more day${daysLeft === 1 ? "" : "s"}`,
+          tone: "warn",
+        });
+      } else if (
         isPosted &&
         entry.message_id &&
         !holdsSlot &&
@@ -538,7 +557,7 @@ export function TemplateGallery() {
               : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its last use.",
             run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
           };
-        } else if (interactive && entry.channel_id) {
+        } else if (interactive && entry.channel_id && !deleted) {
           const channelId = entry.channel_id;
           pin = {
             state: "off",
@@ -554,9 +573,11 @@ export function TemplateGallery() {
       // work, so the card doesn't repeat that sentence ten times over.
       const postedTo = entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted";
       const description = isPosted
-        ? holdsSlot
-          ? `${postedTo} · never-expire slot held${headline?.snippet ? ` · ${headline.snippet}` : ""}`
-          : `${postedTo}${headline?.snippet ? ` · ${headline.snippet}` : " · in the rolling history — save it to keep it"}`
+        ? deleted
+          ? `${postedTo} · deleted on Discord — open it to post it again${headline?.snippet ? ` · ${headline.snippet}` : ""}`
+          : holdsSlot
+            ? `${postedTo} · never-expire slot held${headline?.snippet ? ` · ${headline.snippet}` : ""}`
+            : `${postedTo}${headline?.snippet ? ` · ${headline.snippet}` : " · in the rolling history — save it to keep it"}`
         : headline?.snippet
           ? `Server draft · ${headline.snippet}`
           : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`;
@@ -594,6 +615,7 @@ export function TemplateGallery() {
                 guildId: entry.guild_id,
                 name: displayName,
                 posted: isPosted,
+                deletedOnDiscord: deleted,
               }),
         onPick: () => {
           // A repeat click on a card still loading waits for the first one.
@@ -642,9 +664,11 @@ export function TemplateGallery() {
             } else {
               replaceMessage(loaded);
               pushToast(
-                isPosted
-                  ? "Loaded from the server library (content only — sending posts a new copy)."
-                  : "Loaded from the server library.",
+                deleted
+                  ? DELETED_POST_LOADED
+                  : isPosted
+                    ? "Loaded from the server library (content only — sending posts a new copy)."
+                    : "Loaded from the server library.",
                 "success",
               );
             }
@@ -657,6 +681,7 @@ export function TemplateGallery() {
     return { libraryPostedCards: posted, libraryDraftCards: drafts };
   }, [
     serverEntries,
+    libRetentionSecs,
     grantIds,
     permanentIds,
     permanent,
@@ -891,15 +916,15 @@ export function TemplateGallery() {
     hydrateLibrary,
     libDetailError,
   ]);
-  // Drop posted cards whose Discord message was deleted. Their never-expire
+  // Mark posted cards whose Discord message was deleted. Their never-expire
   // slot is released server-side with them, so the slot strip reloads.
   usePostedVerify(
     connectedGuildId,
     activeLibraryLabel === "posted",
     activeLibraryEntries,
     effectiveVisibleCount,
-    (removed) => {
-      pushToast(removedPostsMessage(removed.length));
+    (found) => {
+      pushToast(deletedPostsMessage(found.length, useLibraryStore.getState().deletedRetentionSecs));
       if (!connectedGuildId) return;
       fetchPermanentSlots(connectedGuildId)
         .then(setPermanent)
@@ -1543,7 +1568,13 @@ export function TemplateGallery() {
                 undone — you'd have to schedule it again.
               </>
             ) : pendingDelete?.kind === "library" ? (
-              pendingDelete.posted ? (
+              pendingDelete.deletedOnDiscord ? (
+                <>
+                  Remove <strong>{pendingDelete?.name}</strong> now? Its message was deleted on
+                  Discord, so this entry is the last copy of its content — every manager loses it.
+                  This can't be undone.
+                </>
+              ) : pendingDelete.posted ? (
                 <>
                   Remove <strong>{pendingDelete?.name}</strong> from this server's posted history
                   now? It won't wait to roll off on its own — every manager loses the entry (the

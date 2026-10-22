@@ -35,13 +35,15 @@ import { requestRoomReplace } from "@/core/activity/roomReplaceConfirm";
 import { useMessageStore } from "@/core/state/messageStore";
 import { toastWithUndo } from "@/features/builder/undoToast";
 import {
+  deletedDaysLeft,
+  isDeletedOnDiscord,
   libraryEntryHasDetails,
   libraryEntryMessage,
   libraryEntrySearchText,
   pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
-import { removedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
+import { deletedPostsMessage, usePostedVerify } from "@/core/library/usePostedVerify";
 import type { PermanentSlots } from "@/core/guild/api";
 import {
   addActivityPermanentMessage,
@@ -102,6 +104,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
   const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
   const libDetailError = useLibraryStore((s) => s.detailError);
+  const libRetentionSecs = useLibraryStore((s) => s.deletedRetentionSecs);
   const hydrateLibrary = useLibraryStore((s) => s.hydrate);
   const removeLibrary = useLibraryStore((s) => s.remove);
 
@@ -197,6 +200,9 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     /** A `posted` history entry (vs a server draft) — the confirm frames it as
      *  pruning the shared history now rather than waiting for it to roll off. */
     posted: boolean;
+    /** A posted entry whose message was deleted on Discord — the last copy of
+     *  its content, which the confirm says. */
+    deletedOnDiscord?: boolean;
     /** Set for a scheduled post — the confirm cancels it instead of removing a
      *  library entry. */
     schedule?: ScheduleView;
@@ -264,6 +270,9 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       const message = hasDetails ? libraryEntryMessage(entry) : null;
       if (hasDetails && !message) continue;
       const isPosted = entry.label === "posted";
+      // Deleted on Discord: kept for a while as the only copy of its content,
+      // loadable to post again, never an update target.
+      const deleted = isDeletedOnDiscord(entry);
       const interactive = message ? interactiveComponents(message).length > 0 : false;
       const displayName =
         entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
@@ -286,7 +295,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
               : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its last use.",
             run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
           };
-        } else if (interactive && entry.channel_id) {
+        } else if (interactive && entry.channel_id && !deleted) {
           const channelId = entry.channel_id;
           pin = {
             state: "off",
@@ -297,12 +306,15 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
           };
         }
       }
+      const daysLeft = deletedDaysLeft(entry, libRetentionSecs);
       const description = isPosted
-        ? holdsSlot
-          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
-          : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
-              serverName ?? "server"
-            } history — load it and edits update the live message in place.`
+        ? deleted
+          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · deleted on Discord — load it to post it again.`
+          : holdsSlot
+            ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
+            : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
+                serverName ?? "server"
+              } history — load it and edits update the live message in place.`
         : `A saved message in the ${serverName ?? "server"} library, shared with this server's managers.`;
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
@@ -316,6 +328,17 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
         storedInServerLibrary: true,
+        tags: deleted
+          ? [
+              {
+                text:
+                  daysLeft == null
+                    ? "Deleted on Discord"
+                    : `Deleted on Discord · kept ${daysLeft} more day${daysLeft === 1 ? "" : "s"}`,
+                tone: "warn",
+              },
+            ]
+          : undefined,
         pin,
         search: searchHaystack(
           displayName,
@@ -354,6 +377,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
                 guildId: entry.guild_id,
                 name: displayName,
                 posted: isPosted,
+                deletedOnDiscord: deleted,
               }),
       };
       (isPosted ? posted : drafts).push(card);
@@ -361,6 +385,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     return { postedCards: posted, draftCards: drafts };
   }, [
     serverEntries,
+    libRetentionSecs,
     serverName,
     loadEntry,
     onClose,
@@ -529,15 +554,15 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     hydrateLibrary,
     libDetailError,
   ]);
-  // Drop posted cards whose Discord message was deleted. Their never-expire
+  // Mark posted cards whose Discord message was deleted. Their never-expire
   // slot is released server-side with them, so the pin chips reload.
   usePostedVerify(
     targetGuildId,
     activeLibraryLabel === "posted",
     activeLibraryEntries,
     effectiveVisibleCount,
-    (removed) => {
-      pushToast(removedPostsMessage(removed.length));
+    (found) => {
+      pushToast(deletedPostsMessage(found.length, useLibraryStore.getState().deletedRetentionSecs));
       if (!targetGuildId) return;
       fetchActivityPermanentSlots(targetGuildId)
         .then(setPermanent)
@@ -960,6 +985,12 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
               <>
                 Stop <strong>{pendingDelete?.name}</strong> from posting? This can't be undone —
                 you'd have to schedule it again.
+              </>
+            ) : pendingDelete?.deletedOnDiscord ? (
+              <>
+                Remove <strong>{pendingDelete?.name}</strong> now? Its message was deleted on
+                Discord, so this entry is the last copy of its content — every manager loses it.
+                This can't be undone.
               </>
             ) : pendingDelete?.posted ? (
               <>

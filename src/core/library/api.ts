@@ -56,6 +56,10 @@ export interface LibraryEntryView {
   created_by: string;
   created_at: number;
   updated_at: number;
+  /** Posted entries only: when DWEEB found the message deleted on Discord
+   *  (unix seconds). The entry is kept for a retention period so its content
+   *  can be posted again; there's no message left to update. */
+  deleted_at?: number | null;
 }
 
 export interface LibraryCreateInput {
@@ -90,6 +94,9 @@ export type LibraryListResult =
       items: LibraryEntryView[];
       posted: LibraryBucketUsage;
       drafts: LibraryBucketUsage;
+      /** How long an entry deleted on Discord is kept, in seconds (null = a
+       *  proxy that predates keeping them). */
+      deletedRetentionSecs: number | null;
     }
   | { ok: false; error: string; status: number };
 
@@ -143,7 +150,8 @@ export async function listLibrary(
   }
   let res: Response;
   try {
-    const query = options.metadataOnly ? "?metadata_only=true" : "";
+    // The metadata list also carries posts deleted on Discord (`deleted_at`).
+    const query = options.metadataOnly ? "?metadata_only=true&include_deleted=true" : "";
     res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/library${query}`);
   } catch {
     return { ok: false, error: "Couldn't reach the library service.", status: 0 };
@@ -153,6 +161,7 @@ export async function listLibrary(
     items?: LibraryEntryView[];
     posted?: Partial<LibraryBucketUsage> | null;
     drafts?: Partial<LibraryBucketUsage> | null;
+    deleted_retention_secs?: unknown;
   } | null;
   const items = data?.items ?? [];
   // A proxy that predates the split sends no buckets — derive the counts from
@@ -161,14 +170,16 @@ export async function listLibrary(
     sent: Partial<LibraryBucketUsage> | null | undefined,
     label: LibraryLabel,
   ): LibraryBucketUsage => ({
-    used: sent?.used ?? items.filter((e) => e.label === label).length,
+    used: sent?.used ?? items.filter((e) => e.label === label && !e.deleted_at).length,
     quota: sent?.quota ?? null,
   });
+  const retention = data?.deleted_retention_secs;
   return {
     ok: true,
     items,
     posted: bucket(data?.posted, "posted"),
     drafts: bucket(data?.drafts, "draft"),
+    deletedRetentionSecs: typeof retention === "number" ? retention : null,
   };
 }
 
@@ -205,12 +216,13 @@ export async function fetchLibraryEntries(
 }
 
 export type LibraryVerifyResult =
-  | { ok: true; gone: string[] }
+  | { ok: true; gone: string[]; deletedAt: number | null }
   | { ok: false; error: string; status: number };
 
 /** Ask the proxy whether the listed posted entries' Discord messages still
- * exist. Entries whose message was deleted are removed server-side and named
- * in `gone`; anything Discord couldn't settle stays. The proxy asks about each
+ * exist. Entries whose message was deleted are marked deleted server-side
+ * (kept for the retention period, at `deletedAt`) and named in `gone`;
+ * anything Discord couldn't settle stays as it was. The proxy asks about each
  * entry at most once a minute, so repeat calls are cheap. Bounded like detail
  * hydration. */
 export async function verifyLibraryPosted(
@@ -238,11 +250,15 @@ export async function verifyLibraryPosted(
     return { ok: false, error: "Couldn't reach the library service.", status: 0 };
   }
   if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
-  const data = (await res.json().catch(() => null)) as { gone?: unknown } | null;
+  const data = (await res.json().catch(() => null)) as {
+    gone?: unknown;
+    deleted_at?: unknown;
+  } | null;
   const gone = Array.isArray(data?.gone)
     ? data.gone.filter((id): id is string => typeof id === "string")
     : [];
-  return { ok: true, gone };
+  const deletedAt = typeof data?.deleted_at === "number" ? data.deleted_at : null;
+  return { ok: true, gone, deletedAt };
 }
 
 /**
