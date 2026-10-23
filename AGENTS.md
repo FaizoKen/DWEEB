@@ -649,7 +649,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   threw a TypeError out of the **live** validator (it runs on every keystroke) instead of
   reporting an empty field. `repairStructure` now fills both with `""` — the validator already
   says "Text display can't be empty" and "Link button needs a valid https:// URL" — and both
-  derefs tolerate an absent value as the second layer.
+  derefs tolerate an absent value as the second layer. **`custom_id` too** (2026-10-23, two
+  `boundary` pages from one Safari user): every select and every button that isn't Link/Premium
+  gets a string `custom_id` (missing or non-string → `""`, never a stringified number; a stray
+  one on a Link button is dropped), and a Premium button a string `sku_id`. A pasted button with
+  no id crashed the Custom ID field's counter (`e.length`) and one with `"custom_id": 123`
+  crashed the Action panel's plugin match (`t.startsWith`), each the moment it was selected.
+  Second layer: `matchPlugin` takes `unknown` and `counterState` reads a non-string as empty.
 - **The validator checks where each component sits, not just its fields** (2026-09-24).
   The import boundary takes any tree, so a button or menu at the top level or directly in a
   Container, a thumbnail anywhere but a Section accessory, a nested Container, or a text
@@ -1042,6 +1048,20 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   import it: when they're down, failing fast is the honest answer. The Caddyfile is a
   hand-synced bind mount — copy it and `docker exec dweeb-caddy-1 caddy reload
   --config /etc/caddy/Caddyfile` after editing.
+- **The proxy re-dials the dispatcher through a restart, because Caddy never sees that hop**
+  (2026-10-23). The proxy calls the dispatcher directly over the compose network, so
+  `upstream_retry` doesn't cover it, and every deploy recreates the dispatcher: on 2026-10-22
+  the old container left at 21:04:29.2 and the new one listened at 21:04:31.2, and a
+  `GET /api/guilds/:g/permanent` in that gap answered a 12 ms paging 502. Every dispatcher
+  request now goes through `routes::dispatcher_send`, which re-dials a refused/unresolvable
+  address every 250 ms for up to 4 s (`DISPATCHER_DIAL_WINDOW`; each dial capped at 750 ms by
+  the client's `connect_timeout`) and logs a recovery at info. Only a **dial** is retried —
+  nothing reached the dispatcher, so a POST can't apply twice; a connection that dies after the
+  request was written fails at once. A dispatcher still down when the window closes keeps
+  paging (it's ours), now as `couldn't reach the dispatcher: <cause>` via
+  `dispatcher_unreachable` (reqwest's `for url (…)` suffix dropped). Add any new dispatcher call
+  through `dispatcher_send`, never a bare `.send()`. Guarded by the three `routes::tests`
+  re-dial tests (real sockets).
 - **The paging channel carries our faults, so `dweeb-alerts` drops Caddy connection aborts**
   (`broken pipe`, `connection reset by peer`, `context canceled`, `client disconnected` —
   `CONN_ABORT_RE`). Draining above removes the scanner case, but the honest residue stays: a
