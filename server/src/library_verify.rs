@@ -539,7 +539,7 @@ async fn release_slot(st: &AppState, guild: &str, message_id: &str) {
     let Some(api) = &st.dispatcher else { return };
     let cap = st.entitlements.permanent_cap(guild).await;
     let url = dispatcher_url_with_cap(format!("{}/permanent/{guild}/{message_id}", api.base), cap);
-    match api.http.delete(url).bearer_auth(&api.token).send().await {
+    match crate::routes::dispatcher_send(api.http.delete(url).bearer_auth(&api.token)).await {
         // 404 = it held no slot, the common case.
         Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 404 => {
             if resp.status().is_success() {

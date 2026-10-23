@@ -68,7 +68,7 @@ async fn reconcile_dispatcher(
     cap: u32,
 ) {
     let url = dispatcher_url_with_cap(format!("{}/{kind}/{guild}/reconcile", api.base), Some(cap));
-    match api.http.post(url).bearer_auth(&api.token).send().await {
+    match crate::routes::dispatcher_send(api.http.post(url).bearer_auth(&api.token)).await {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => tracing::warn!(
             guild,
@@ -76,7 +76,9 @@ async fn reconcile_dispatcher(
             status = resp.status().as_u16(),
             "reconcile rejected"
         ),
-        Err(e) => tracing::warn!(guild, kind, error = %e, "reconcile call failed"),
+        Err(e) => {
+            tracing::warn!(guild, kind, error = %crate::discord::describe(e), "reconcile call failed")
+        }
     }
 }
 

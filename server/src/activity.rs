@@ -48,8 +48,8 @@ use crate::discord::{ActivityInstance, CurrentAuthorization, DiscordUser, Upload
 use crate::error::{AppError, Fault};
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
-    dispatcher_url_with_cap, ensure_channel_in_guild, is_snowflake, relay_dispatcher, spawn_revive,
-    AppState,
+    dispatcher_send, dispatcher_unreachable, dispatcher_url_with_cap, ensure_channel_in_guild,
+    is_snowflake, relay_dispatcher, spawn_revive, AppState,
 };
 use crate::session::{now, Session};
 
@@ -801,7 +801,7 @@ async fn claim_permanent_slot(
             "channel_id": channel_id,
             "added_by": added_by,
         }));
-    match req.send().await {
+    match dispatcher_send(req).await {
         Ok(resp) => match resp.status().as_u16() {
             200 => PermanentClaim::Claimed,
             409 => PermanentClaim::Full,
@@ -1038,16 +1038,16 @@ async fn fetch_custom_hook(
     application_id: &str,
 ) -> Result<CustomHookState, AppError> {
     let api = dispatcher_api(st)?;
-    let resp = api
-        .http
-        .get(format!(
-            "{}/custom-apps/{guild}/{application_id}/hook",
-            api.base
-        ))
-        .bearer_auth(&api.token)
-        .send()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    let resp = dispatcher_send(
+        api.http
+            .get(format!(
+                "{}/custom-apps/{guild}/{application_id}/hook",
+                api.base
+            ))
+            .bearer_auth(&api.token),
+    )
+    .await
+    .map_err(dispatcher_unreachable)?;
     match resp.status().as_u16() {
         200 => {
             let v = resp
@@ -1109,21 +1109,21 @@ pub(crate) async fn store_activity_hook(
     token_enc: &str,
 ) -> Result<(), AppError> {
     let api = dispatcher_api(st)?;
-    let resp = api
-        .http
-        .put(format!(
-            "{}/custom-apps/{guild}/{application_id}/hook",
-            api.base
-        ))
-        .bearer_auth(&api.token)
-        .json(&json!({
-            "hook_id": hook_id,
-            "channel_id": channel_id,
-            "token_enc": token_enc,
-        }))
-        .send()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    let resp = dispatcher_send(
+        api.http
+            .put(format!(
+                "{}/custom-apps/{guild}/{application_id}/hook",
+                api.base
+            ))
+            .bearer_auth(&api.token)
+            .json(&json!({
+                "hook_id": hook_id,
+                "channel_id": channel_id,
+                "token_enc": token_enc,
+            })),
+    )
+    .await
+    .map_err(dispatcher_unreachable)?;
     if resp.status().is_success() {
         return Ok(());
     }
@@ -1144,15 +1144,15 @@ pub(crate) async fn store_activity_hook(
 /// the next attempt re-discovers the same dead end.
 async fn clear_activity_hook(st: &AppState, guild: &str, application_id: &str) {
     let Ok(api) = dispatcher_api(st) else { return };
-    let _ = api
-        .http
-        .delete(format!(
-            "{}/custom-apps/{guild}/{application_id}/hook",
-            api.base
-        ))
-        .bearer_auth(&api.token)
-        .send()
-        .await;
+    let _ = dispatcher_send(
+        api.http
+            .delete(format!(
+                "{}/custom-apps/{guild}/{application_id}/hook",
+                api.base
+            ))
+            .bearer_auth(&api.token),
+    )
+    .await;
 }
 
 /// The lock serializing every use of one custom bot's roaming Activity
@@ -1309,15 +1309,15 @@ async fn custom_apps_with_hooks(st: &AppState, guild: &str) -> Vec<String> {
         return Vec::new();
     };
     let cap = st.entitlements.custom_bots_cap(guild).await;
-    let resp = api
-        .http
-        .get(dispatcher_url_with_cap(
-            format!("{}/custom-apps/{guild}", api.base),
-            cap,
-        ))
-        .bearer_auth(&api.token)
-        .send()
-        .await;
+    let resp = dispatcher_send(
+        api.http
+            .get(dispatcher_url_with_cap(
+                format!("{}/custom-apps/{guild}", api.base),
+                cap,
+            ))
+            .bearer_auth(&api.token),
+    )
+    .await;
     let Ok(resp) = resp else { return Vec::new() };
     if !resp.status().is_success() {
         return Vec::new();
@@ -1369,15 +1369,15 @@ pub async fn activity_identities(
     let mut identities = vec![json!({ "kind": "dweeb" })];
     if let Ok(api) = dispatcher_api(&st) {
         let cap = st.entitlements.custom_bots_cap(&guild).await;
-        let resp = api
-            .http
-            .get(dispatcher_url_with_cap(
-                format!("{}/custom-apps/{guild}", api.base),
-                cap,
-            ))
-            .bearer_auth(&api.token)
-            .send()
-            .await;
+        let resp = dispatcher_send(
+            api.http
+                .get(dispatcher_url_with_cap(
+                    format!("{}/custom-apps/{guild}", api.base),
+                    cap,
+                ))
+                .bearer_auth(&api.token),
+        )
+        .await;
         // Registry problems degrade to "no custom bots" — the standard DWEEB
         // identity must never be blocked by the registry being down.
         let items = match resp {

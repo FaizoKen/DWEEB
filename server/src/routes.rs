@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{FromRef, Path, Query, State};
 use axum::http::{header, StatusCode};
@@ -37,6 +38,83 @@ pub struct DispatcherApi {
     pub base: String,
     pub token: String,
     pub http: reqwest::Client,
+}
+
+/// How long a dispatcher request keeps re-dialing an address that refuses it,
+/// and the pause between dials.
+///
+/// The proxy reaches the dispatcher directly over the compose network, so the
+/// Caddy `upstream_retry` that rides out a container restart for every public
+/// request never sees this hop — and every deploy recreates the dispatcher. On
+/// 2026-10-22 the old container left at 21:04:29.2 and the new one was
+/// listening at 21:04:31.2; a dashboard read landing in that gap answered a
+/// 502 in 12 ms and paged as an outage. The window covers a restart with room
+/// to spare; a dispatcher that is really down still fails (and pages) once it
+/// runs out. Only a failed *dial* is retried: nothing reached the dispatcher,
+/// so even a POST can't be applied twice (the dispatcher hop's own forward
+/// retry rests on the same rule).
+const DISPATCHER_DIAL_WINDOW: Duration = Duration::from_secs(4);
+const DISPATCHER_DIAL_DELAY: Duration = Duration::from_millis(250);
+/// One dial's own deadline. A refused dial is instant on the compose network,
+/// so this only bounds a black-holed one, leaving the window time to re-dial.
+pub(crate) const DISPATCHER_CONNECT_TIMEOUT: Duration = Duration::from_millis(750);
+
+const _: () = assert!(
+    DISPATCHER_CONNECT_TIMEOUT.as_millis() + DISPATCHER_DIAL_DELAY.as_millis()
+        < DISPATCHER_DIAL_WINDOW.as_millis(),
+    "a black-holed dial must leave the window room for another attempt"
+);
+
+/// Send a request built from [`DispatcherApi::http`], re-dialing while the
+/// dispatcher refuses connections (see [`DISPATCHER_DIAL_WINDOW`]). Every
+/// request to the dispatcher goes through here.
+pub(crate) async fn dispatcher_send(
+    req: reqwest::RequestBuilder,
+) -> reqwest::Result<reqwest::Response> {
+    send_redialing(req, DISPATCHER_DIAL_WINDOW, DISPATCHER_DIAL_DELAY).await
+}
+
+async fn send_redialing(
+    mut req: reqwest::RequestBuilder,
+    window: Duration,
+    delay: Duration,
+) -> reqwest::Result<reqwest::Response> {
+    let started = std::time::Instant::now();
+    let mut redials = 0u32;
+    loop {
+        // Only a streaming body can't be cloned, and no dispatcher call sends
+        // one; such a request just gets its single attempt.
+        let Some(next) = req.try_clone() else {
+            return req.send().await;
+        };
+        match req.send().await {
+            Err(e) if e.is_connect() && started.elapsed() + delay < window => {
+                redials += 1;
+                tokio::time::sleep(delay).await;
+                req = next;
+            }
+            result => {
+                if redials > 0 && result.is_ok() {
+                    tracing::info!(
+                        redials,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "dispatcher answered after refusing connections (restart)"
+                    );
+                }
+                return result;
+            }
+        }
+    }
+}
+
+/// A dispatcher request that failed outright, as the paging 502 it is: the
+/// dispatcher is our own service. The cause is flattened without reqwest's
+/// ` for url (…)` suffix, which repeated the address and hid the reason.
+pub(crate) fn dispatcher_unreachable(e: reqwest::Error) -> AppError {
+    AppError::BadGateway(format!(
+        "couldn't reach the dispatcher: {}",
+        crate::discord::describe(e)
+    ))
 }
 
 #[derive(Clone)]
@@ -898,15 +976,15 @@ pub async fn custom_apps_remove(
     // clear the app's commands after unregistering. Best-effort throughout:
     // no secret (or an unopenable one after a SESSION_SECRET rotation) just
     // means the owner's old context menus dangle until they clear them.
-    let secret = match api
-        .http
-        .get(format!(
-            "{}/custom-apps/{guild}/{application_id}/secret",
-            api.base
-        ))
-        .bearer_auth(&api.token)
-        .send()
-        .await
+    let secret = match dispatcher_send(
+        api.http
+            .get(format!(
+                "{}/custom-apps/{guild}/{application_id}/secret",
+                api.base
+            ))
+            .bearer_auth(&api.token),
+    )
+    .await
     {
         Ok(resp) if resp.status().is_success() => resp
             .json::<serde_json::Value>()
@@ -977,10 +1055,7 @@ pub(crate) fn dispatcher_url_with_cap(base: String, cap: Option<u32>) -> String 
 /// verbatim; anything else means *our* deployment is misconfigured or down,
 /// which is a gateway error, not the caller's.
 pub(crate) async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppError> {
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    let resp = dispatcher_send(req).await.map_err(dispatcher_unreachable)?;
     let status = resp.status();
     let bytes = resp.bytes().await.unwrap_or_default();
     match status.as_u16() {
@@ -2451,5 +2526,132 @@ mod tests {
             .expect("valid list")
             .expect("guild present");
         assert!(!found.can_manage_webhooks);
+    }
+
+    // ── dispatcher re-dial ────────────────────────────────────────────────────
+
+    /// Read one request (headers, then a `Content-Length` body) off a fake
+    /// server's socket and return it. A fake must consume the request before
+    /// answering: closing with unread bytes sends an RST, and the client then
+    /// drops the response it already had (Windows, notably).
+    fn read_request(sock: &mut std::net::TcpStream) -> String {
+        use std::io::Read as _;
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
+        while !buf.ends_with(b"\r\n\r\n") {
+            if sock.read(&mut byte).unwrap() == 0 {
+                return String::from_utf8_lossy(&buf).into_owned();
+            }
+            buf.push(byte[0]);
+        }
+        let head = String::from_utf8_lossy(&buf).to_lowercase();
+        let len = head
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length:"))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut body = vec![0u8; len];
+        sock.read_exact(&mut body).unwrap();
+        buf.extend_from_slice(&body);
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    /// An address nothing listens on: bound once for a free port, then let go.
+    fn refused_addr() -> std::net::SocketAddr {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap()
+    }
+
+    fn dispatcher_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(DISPATCHER_CONNECT_TIMEOUT)
+            .build()
+            .unwrap()
+    }
+
+    /// The 2026-10-22 page: a read landing while a deploy recreated the
+    /// dispatcher was refused and answered 502. The same request must now wait
+    /// out the restart — body intact, since a POST takes this path too.
+    #[tokio::test]
+    async fn a_dispatcher_restart_is_redialed_instead_of_failing() {
+        use std::io::Write as _;
+        let addr = refused_addr();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(600));
+            let l = std::net::TcpListener::bind(addr).unwrap();
+            let (mut sock, _) = l.accept().unwrap();
+            tx.send(read_request(&mut sock)).unwrap();
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let req = dispatcher_client()
+            .post(format!("http://{addr}/permanent/1"))
+            .json(&json!({ "message_id": "42" }));
+        let resp = send_redialing(req, Duration::from_secs(4), Duration::from_millis(100))
+            .await
+            .expect("the restarted dispatcher answers");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let seen = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(seen.starts_with("POST /permanent/1 "), "{seen}");
+        assert!(seen.ends_with(r#"{"message_id":"42"}"#), "{seen}");
+    }
+
+    /// A dispatcher that stays down still fails once the window closes — it is
+    /// our own service, so that failure must keep paging, and say what failed
+    /// without repeating the address.
+    #[tokio::test]
+    async fn a_dispatcher_that_stays_down_fails_when_the_window_closes() {
+        let addr = refused_addr();
+        let started = std::time::Instant::now();
+        let req = dispatcher_client().get(format!("http://{addr}/permanent/1"));
+        let e = send_redialing(req, Duration::from_millis(600), Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(e.is_connect(), "{e}");
+        // It kept dialing for (most of) the window, then gave up.
+        assert!(elapsed >= Duration::from_millis(500), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(3), "{elapsed:?}");
+        let err = dispatcher_unreachable(e);
+        assert_eq!(err.fault(), crate::error::Fault::Ours);
+        let msg = err.to_string();
+        assert!(msg.contains("couldn't reach the dispatcher"), "{msg}");
+        assert!(msg.to_lowercase().contains("connect"), "{msg}");
+        assert!(
+            !msg.contains("for url") && !msg.contains("127.0.0.1"),
+            "{msg}"
+        );
+    }
+
+    /// Only a dial is re-sent. A connection that died after the request was
+    /// written may already have been acted on, so it fails on the first try.
+    #[tokio::test]
+    async fn a_request_that_reached_the_dispatcher_is_never_resent() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&accepted);
+        std::thread::spawn(move || {
+            for sock in l.incoming() {
+                let mut sock = sock.unwrap();
+                seen.fetch_add(1, Ordering::SeqCst);
+                read_request(&mut sock);
+                // Hang up without answering.
+                sock.shutdown(std::net::Shutdown::Both).ok();
+            }
+        });
+        let req = dispatcher_client()
+            .post(format!("http://{addr}/permanent/1"))
+            .json(&json!({ "message_id": "42" }));
+        let e = send_redialing(req, Duration::from_secs(4), Duration::from_millis(50))
+            .await
+            .unwrap_err();
+        assert!(!e.is_connect(), "{e}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
     }
 }

@@ -234,6 +234,7 @@ async fn run() {
                 token: token.clone(),
                 http: reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(5))
+                    .connect_timeout(crate::routes::DISPATCHER_CONNECT_TIMEOUT)
                     .build()
                     .expect("reqwest client"),
             }))

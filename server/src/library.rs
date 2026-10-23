@@ -908,12 +908,12 @@ pub async fn permanent_message_ids(
     let Some(api) = dispatcher else {
         return HashSet::new();
     };
-    let resp = match api
-        .http
-        .get(format!("{}/permanent/{guild}", api.base))
-        .bearer_auth(&api.token)
-        .send()
-        .await
+    let resp = match crate::routes::dispatcher_send(
+        api.http
+            .get(format!("{}/permanent/{guild}", api.base))
+            .bearer_auth(&api.token),
+    )
+    .await
     {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
@@ -921,7 +921,7 @@ pub async fn permanent_message_ids(
             return HashSet::new();
         }
         Err(e) => {
-            tracing::warn!(target: "library", "permanent lookup unreachable: {e}");
+            tracing::warn!(target: "library", error = %crate::discord::describe(e), "permanent lookup unreachable");
             return HashSet::new();
         }
     };

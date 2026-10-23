@@ -168,16 +168,16 @@ pub(crate) async fn open_custom_app_secret(
     application_id: &str,
 ) -> Result<String, AppError> {
     let api = crate::routes::dispatcher_api(st)?;
-    let resp = api
-        .http
-        .get(format!(
-            "{}/custom-apps/{guild}/{application_id}/secret",
-            api.base
-        ))
-        .bearer_auth(&api.token)
-        .send()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    let resp = crate::routes::dispatcher_send(
+        api.http
+            .get(format!(
+                "{}/custom-apps/{guild}/{application_id}/secret",
+                api.base
+            ))
+            .bearer_auth(&api.token),
+    )
+    .await
+    .map_err(crate::routes::dispatcher_unreachable)?;
     if resp.status().as_u16() == 404 {
         return Err(AppError::Status {
             status: axum::http::StatusCode::NOT_FOUND,

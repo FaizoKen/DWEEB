@@ -499,7 +499,7 @@ async fn maybe_make_permanent(
             // The signed-in creator, recorded for the slot's audit row.
             "added_by": job.owner_user_id.as_deref().unwrap_or("scheduler"),
         }));
-    match req.send().await {
+    match crate::routes::dispatcher_send(req).await {
         Ok(resp) if resp.status().is_success() => {
             tracing::info!(%message_id, %guild, "scheduled post claimed a never-expire slot");
             None
@@ -513,7 +513,7 @@ async fn maybe_make_permanent(
             Some("Posted, but couldn't keep the buttons permanent (the never-expire service errored).".into())
         }
         Err(e) => {
-            tracing::warn!(error = %e, %message_id, "never-expire claim failed to send");
+            tracing::warn!(error = %crate::discord::describe(e), %message_id, "never-expire claim failed to send");
             Some("Posted, but couldn't keep the buttons permanent (couldn't reach the never-expire service).".into())
         }
     }
