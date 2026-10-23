@@ -159,4 +159,13 @@ describe("counterState", () => {
     expect(at(10, -5)).toBeNull();
     expect(at(10, Number.NaN)).toBeNull();
   });
+
+  it("reads a value that isn't a string as empty instead of throwing", () => {
+    // prod 2026-10-23: a component field a malformed payload left missing
+    // reached the Custom ID counter and took the editor to the error screen.
+    for (const value of [undefined, null, 123, {}]) {
+      expect(() => counterState({ value: value as unknown as string, max: 100 })).not.toThrow();
+      expect(counterState({ value: value as unknown as string, max: 100 })).toBeNull();
+    }
+  });
 });

@@ -3877,7 +3877,8 @@
             "components": [
               {
                 "type": 2,
-                "style": 6
+                "style": 6,
+                "sku_id": ""
               }
             ]
           }

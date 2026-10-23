@@ -130,12 +130,14 @@ export function presetsForTarget(manifest: PluginManifest, target: PluginTarget)
  * how a draft or share link re-binds to a plugin on reload without DWEEB
  * storing anything beyond the `custom_id` itself. The longest matching prefix
  * wins so a more specific plugin isn't shadowed by a broader one.
+ *
+ * Takes `unknown` because the Action panel hands it whatever the component
+ * holds, and a `custom_id` that isn't a string (a peer's collab op, or a
+ * payload predating the import boundary's repair) must mean "no plugin", not
+ * a `startsWith` TypeError that takes the editor down.
  */
-export function matchPlugin(
-  plugins: PluginManifest[],
-  customId: string | undefined,
-): PluginManifest | null {
-  if (!customId) return null;
+export function matchPlugin(plugins: PluginManifest[], customId: unknown): PluginManifest | null {
+  if (typeof customId !== "string" || !customId) return null;
   let best: PluginManifest | null = null;
   for (const p of plugins) {
     if (customId.startsWith(p.customIdPrefix)) {

@@ -313,6 +313,94 @@ describe("attachEditorFields — structurally incomplete payloads", () => {
     expect(gallery.items[0]!.media).toEqual({ url: "" });
     expect(gallery.items[0]!.description).toBeUndefined();
   });
+
+  // prod 2026-10-23: the Action panel prefix-matched a numeric `custom_id`
+  // (`t.startsWith is not a function`) and the Custom ID field counted a
+  // missing one (`undefined is not an object (evaluating 'e.length')`), each
+  // taking the editor down the moment the component was selected.
+  const rowChild = (attached: ReturnType<typeof attachEditorFields>) =>
+    (attached.components[0] as unknown as { components: Array<Record<string, unknown>> })
+      .components[0]!;
+
+  it.each([
+    ["missing", undefined],
+    ["a number", 123],
+    ["an object", { id: "x" }],
+    ["null", null],
+  ])("gives an interactive button whose custom_id is %s an empty one", (_name, customId) => {
+    const button: Record<string, unknown> = {
+      type: ComponentType.Button,
+      style: ButtonStyle.Primary,
+      label: "Go",
+    };
+    if (customId !== undefined) button.custom_id = customId;
+    const attached = attachEditorFields(inRow(button));
+    expect(rowChild(attached).custom_id).toBe("");
+    expect(() => validateMessage(attached)).not.toThrow();
+    expect(validateMessage(attached).issues.map((i) => i.code)).toContain(
+      "BUTTON_CUSTOM_ID_MISSING",
+    );
+  });
+
+  it("checks a button of an unknown style as an interactive one", () => {
+    const attached = attachEditorFields(inRow({ type: ComponentType.Button, label: "Go" }));
+    expect(rowChild(attached).custom_id).toBe("");
+  });
+
+  it.each([
+    ["string", ComponentType.StringSelect],
+    ["user", ComponentType.UserSelect],
+    ["role", ComponentType.RoleSelect],
+    ["mentionable", ComponentType.MentionableSelect],
+    ["channel", ComponentType.ChannelSelect],
+  ])("gives a %s select a string custom_id", (_name, type) => {
+    for (const customId of [undefined, 7, ["a"]]) {
+      const select: Record<string, unknown> = { type, options: [{ label: "a", value: "a" }] };
+      if (customId !== undefined) select.custom_id = customId;
+      const attached = attachEditorFields(inRow(select));
+      expect(rowChild(attached).custom_id).toBe("");
+      expect(() => validateMessage(attached)).not.toThrow();
+      expect(validateMessage(attached).issues.map((i) => i.code)).toContain(
+        "SELECT_CUSTOM_ID_MISSING",
+      );
+    }
+  });
+
+  it("keeps a string custom_id, and drops a stray non-string one from a link button", () => {
+    expect(
+      rowChild(
+        attachEditorFields(
+          inRow({
+            type: ComponentType.Button,
+            style: ButtonStyle.Danger,
+            label: "x",
+            custom_id: "keep",
+          }),
+        ),
+      ).custom_id,
+    ).toBe("keep");
+    const link = rowChild(
+      attachEditorFields(
+        inRow({
+          type: ComponentType.Button,
+          style: ButtonStyle.Link,
+          label: "x",
+          url: "https://x.test",
+          custom_id: 5,
+        }),
+      ),
+    );
+    expect("custom_id" in link).toBe(false);
+  });
+
+  it("fills a premium button's sku_id the validator reads as a string", () => {
+    const attached = attachEditorFields(
+      inRow({ type: ComponentType.Button, style: ButtonStyle.Premium, sku_id: 1234 }),
+    );
+    expect(rowChild(attached).sku_id).toBe("");
+    expect(() => validateMessage(attached)).not.toThrow();
+    expect(validateMessage(attached).issues.map((i) => i.code)).toContain("BUTTON_SKU_MISSING");
+  });
 });
 
 describe("mention policy round-trips", () => {

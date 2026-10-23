@@ -57,7 +57,10 @@ export function counterState({
   value,
   max,
 }: FieldCounter): { length: number; max: number; tone: CounterTone } | null {
-  const length = value.length;
+  // Callers pass a component's field straight through, and a field a malformed
+  // payload left missing must cost the count, not the editor (prod 2026-10-23,
+  // `undefined is not an object (evaluating 'e.length')`).
+  const length = typeof value === "string" ? value.length : 0;
   if (!(max > 0) || length < max * COUNTER_REVEAL) return null;
   const tone = length >= max ? "danger" : length >= max * COUNTER_WARN ? "warning" : "neutral";
   return { length, max, tone };

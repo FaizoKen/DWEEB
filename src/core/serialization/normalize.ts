@@ -248,6 +248,25 @@ function repairStructure(stamped: Record<string, unknown>, type: number): void {
   ) {
     stamped.url = "";
   }
+  if (
+    type === ComponentType.Button &&
+    stamped.style === ButtonStyle.Premium &&
+    typeof stamped.sku_id !== "string"
+  ) {
+    stamped.sku_id = "";
+  }
+  // `custom_id` is the same bug again (prod, 2026-10-23): the Action panel
+  // prefix-matches it against the plugin catalogue with `startsWith` and the
+  // Custom ID field counts its characters, both unguarded, so a pasted button
+  // with no `custom_id` — or with a number for one — took the editor to the
+  // error screen the moment it was selected. A number is not stringified, for
+  // the reason a default value's id isn't: `""` is never a guess, and the
+  // validator names it ("Button needs a custom ID").
+  if (carriesCustomId(type, stamped.style)) {
+    if (typeof stamped.custom_id !== "string") stamped.custom_id = "";
+  } else if ("custom_id" in stamped && typeof stamped.custom_id !== "string") {
+    delete stamped.custom_id;
+  }
   if (type === ComponentType.Section && !isPlainObject(stamped.accessory)) {
     throw new Error("Section is missing its `accessory` — it needs one thumbnail or button.");
   }
@@ -261,6 +280,16 @@ const SNOWFLAKE_SELECT_TYPES: ReadonlySet<number> = new Set([
   ComponentType.MentionableSelect,
   ComponentType.ChannelSelect,
 ]);
+
+/** Every select, and every button that isn't Link or Premium — the components
+ *  the editor's types give a non-optional `custom_id`. Mirrors the validator's
+ *  split: a button of any other style is checked as an interactive one. */
+function carriesCustomId(type: number, style: unknown): boolean {
+  if (type === ComponentType.StringSelect || SNOWFLAKE_SELECT_TYPES.has(type)) return true;
+  return (
+    type === ComponentType.Button && style !== ButtonStyle.Link && style !== ButtonStyle.Premium
+  );
+}
 
 /**
  * The *entries* of the arrays {@link repairStructure} guarantees are walked
