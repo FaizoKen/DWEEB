@@ -81,7 +81,6 @@ import {
   ChevronRightIcon,
   CloseIcon,
   CopyIcon,
-  GripIcon,
   PlusIcon,
   TrashIcon,
 } from "@/ui/Icon";
@@ -1104,21 +1103,6 @@ function MoveArrow({
   );
 }
 
-/**
- * The six-dot drag handle in a draggable row's left padding: for a mouse, the
- * visible sign that the whole row can be dragged (the grab cursor was the only
- * one). Decorative for assistive tech — the arrows are the keyboard path — and
- * shown by CSS on hover for fine pointers only. It is pointer-transparent, so
- * pressing there presses the row, which starts the row's own drag.
- */
-function DragGrip() {
-  return (
-    <span className={styles.grip} aria-hidden="true">
-      <GripIcon size={14} />
-    </span>
-  );
-}
-
 function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }: TreeNodeProps) {
   // Subscribe to just this row's selected state so changing the selection only
   // re-renders the two rows whose highlight flips, not every row in the tree.
@@ -1316,7 +1300,6 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         {...fileDropHandlers}
         onClick={onRowClick}
       >
-        {isReorderable ? <DragGrip /> : null}
         <button
           type="button"
           className={styles.rowSelect}
@@ -1551,7 +1534,6 @@ function GalleryItemNode({
         {...fileDropHandlers}
         onClick={onRowClick}
       >
-        <DragGrip />
         <button
           type="button"
           className={styles.rowSelect}

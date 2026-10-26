@@ -2352,9 +2352,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   re-mounts. Row actions are `visibility: hidden` until the row is hovered, selected or
   focus-within — `opacity: 0` alone left four invisible buttons per row in the tab order. On touch
   (`(hover: none), (pointer: coarse)`) only the *selected* row shows its actions, at 40 px:
-  showing all four on every row squeezed labels to "Text # 🧩 The Compon…" at 390 px. Fine
-  pointers get a decorative six-dot grip on hover (pointer-transparent; the row starts the drag),
-  and a mouse press that wandered ≤8 px without ever showing a drop target is still a click
+  showing all four on every row squeezed labels to "Text # 🧩 The Compon…" at 390 px. The
+  hover six-dot grip that once sat in the row's left padding was removed (maintainer,
+  2026-10-26 — it read as clutter; the grab cursor stays the mouse's drag cue). `IconButton`'s
+  hover tint is gated on `(hover: hover)` and touch gets an `:active` tint instead: a phone keeps
+  `:hover` on the last tapped element, so a move arrow pressed repeatedly looked stuck on.
+  A mouse press that wandered ≤8 px without ever showing a drop target is still a click
   (`swallowsClickAfterDrag`). Rows reveal with `scroll-margin-top: 36px` so the floating issue
   chip (top-right, ~6–30 px) doesn't sit on their Duplicate/Delete.
 - **Never `useId` — use `useUniqueId`** (`lib/useUniqueId.ts`). Preact derives `useId` from a

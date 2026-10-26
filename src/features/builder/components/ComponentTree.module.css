@@ -516,31 +516,6 @@
   }
 }
 
-/* The drag handle: a six-dot grip in the row's left padding (between the
- * type-colour stripe and the chevron), shown on hover for a mouse, where the
- * grab cursor alone was the only sign a row could be dragged. It never takes
- * the pointer — pressing on it presses the row, which is what starts the
- * drag — and it takes no space, so the row never shifts when it appears. */
-.grip {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  color: var(--app-text-muted);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-@media (hover: hover) and (pointer: fine) {
-  .row:hover > .grip {
-    opacity: 0.8;
-  }
-}
-
 /* ── Live per-node editing presence (Activity collab) ─────────────────────────
    A row someone else is currently editing is outlined in their colour, and
    their avatar(s) float at the row's right edge. `--presence-color` is set
