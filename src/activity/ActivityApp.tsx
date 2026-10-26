@@ -18,11 +18,12 @@
  * inset the whole surface for Discord's native top bar / home indicator.
  */
 
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { ComponentTree } from "@/features/builder/components/ComponentTree";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
+import { PreviewDestinationContext } from "@/features/preview/previewDestinationContext";
 import {
   usePreviewSwipeToClose,
   usePreviewSheetA11y,
@@ -56,6 +57,19 @@ const FeedbackDialog = lazy(() =>
 );
 
 export function ActivityApp() {
+  // The preview renders `{channel}` & co. from the room's destination — the
+  // channel everyone in the room is posting to.
+  const guildId = useActivityStore((s) => s.targetGuildId);
+  const channelId = useActivityStore((s) => s.targetChannelId);
+  const destination = useMemo(() => ({ guildId, channelId }), [guildId, channelId]);
+  return (
+    <PreviewDestinationContext.Provider value={destination}>
+      <ActivityShell />
+    </PreviewDestinationContext.Provider>
+  );
+}
+
+function ActivityShell() {
   const status = useActivityStore((s) => s.status);
   const step = useActivityStore((s) => s.step);
   const error = useActivityStore((s) => s.error);

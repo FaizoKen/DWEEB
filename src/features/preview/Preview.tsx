@@ -14,16 +14,24 @@
  * to native scrolling whenever the message isn't at its top.
  */
 
-import { useEffect, useMemo, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  type HTMLAttributes,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
+import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isPluginRegistryConfigured } from "@/core/plugins/registry";
-import { guildIconUrl } from "@/core/guild/api";
 import { proxiedMediaUrl } from "@/core/activity/runtime";
 import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import type { WebhookMessage } from "@/core/schema/types";
+import { destinationPlaceholderContext } from "@/features/share/destinationContext";
+import { PreviewDestinationContext } from "./previewDestinationContext";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { mediaKindFromName, mediaNameFromUrl } from "./renderers/mediaKind";
 import { PreviewCloseContext } from "./previewCloseContext";
@@ -64,27 +72,34 @@ export function Preview({
   // Show placeholders as their values/samples rather than raw `{token}` text —
   // the same first-paint substitution the send path applies, so the preview
   // matches what Discord will receive. Core server tokens resolve from the
-  // connected guild here (the destination channel isn't chosen until send, so
-  // channel tokens show their sample).
+  // connected guild, channel tokens from the picked destination channel (the
+  // web bar's chip, or the Activity room's target); with no pick yet they show
+  // their sample.
   const plugins = usePluginRegistry((s) => s.plugins);
   const loadPlugins = usePluginRegistry((s) => s.load);
   useEffect(() => {
     if (isPluginRegistryConfigured()) loadPlugins();
   }, [loadPlugins]);
   const connectedGuildId = useGuildStore((s) => s.guildId);
+  const guildData = useGuildStore((s) => s.data);
   const authGuilds = useAuthStore((s) => s.guilds);
+  const destinationOverride = useContext(PreviewDestinationContext);
+  const webTargetGuildId = useSendTargetStore((s) => s.guildId);
+  const webTargetChannelId = useSendTargetStore((s) => s.channelId);
+  const targetGuildId = destinationOverride ? destinationOverride.guildId : webTargetGuildId;
+  const targetChannelId = destinationOverride ? destinationOverride.channelId : webTargetChannelId;
+  // A pick only means something in the server it was made in; a server switch
+  // parks it, so the preview falls back to the sample rather than naming a
+  // channel of another server.
+  const channelId = connectedGuildId && targetGuildId === connectedGuildId ? targetChannelId : null;
   const rendered = useMemo(() => {
-    const guild = authGuilds.find((g) => g.id === connectedGuildId);
-    const serverIcon = guild ? guildIconUrl(guild.id, guild.icon) : null;
-    return substituteMessage(
-      message,
-      collectMessagePlaceholders(message, plugins, {
-        ...(connectedGuildId ? { serverId: connectedGuildId } : {}),
-        ...(guild?.name ? { serverName: guild.name } : {}),
-        ...(serverIcon ? { serverIcon } : {}),
-      }),
+    const context = destinationPlaceholderContext(
+      { guildId: connectedGuildId ?? undefined, channelId: channelId ?? undefined },
+      authGuilds,
+      guildData?.guildId === connectedGuildId ? guildData.channelById : undefined,
     );
-  }, [message, plugins, connectedGuildId, authGuilds]);
+    return substituteMessage(message, collectMessagePlaceholders(message, plugins, context));
+  }, [message, plugins, connectedGuildId, channelId, guildData, authGuilds]);
 
   // Read the webhook identity off the *substituted* copy so a `{server}` username
   // or `{server_icon}` avatar shows its resolved value in the preview header,
