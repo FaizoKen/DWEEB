@@ -1295,7 +1295,7 @@ pub(crate) async fn create_for_owner(
         Err(CreateError::PerGuildFull(limit)) => Err(AppError::Status {
             status: StatusCode::CONFLICT,
             message: format!(
-                "This server already has the maximum of {limit} scheduled posts — cancel one to add another."
+                "This server already has the maximum of {limit} scheduled posts — cancel one to add another, or upgrade the server's plan for more."
             ),
             retry_after: None,
         }),

@@ -3019,7 +3019,15 @@ struct RoomState {
     /// whole-draft replace by `cid`, so a peer reusing someone else's `cid`
     /// could hide frames from them or pin an edit on them.
     cids: HashMap<String, (String, u32)>,
+    /// When the room was last told someone was refused at `cap` — see
+    /// [`TURNED_AWAY_NOTICE_GAP`].
+    turned_away_at: Option<Instant>,
 }
+
+/// The least time between two `turned_away` notices to one room. A refused
+/// client stops retrying, but someone relaunching the Activity over and over
+/// would otherwise put a frame into the room on every attempt.
+const TURNED_AWAY_NOTICE_GAP: Duration = Duration::from_secs(60);
 
 /// How many room sockets one user may hold at once, across every room. Two or
 /// three cover a desktop + phone plus a reconnect overlapping the old socket's
@@ -3096,11 +3104,23 @@ impl ActivityRooms {
                 members: HashMap::new(),
                 cap: host_cap.max(1),
                 cids: HashMap::new(),
+                turned_away_at: None,
             });
         // A returning member (another tab / a reconnect) never counts against the
         // cap; only a genuinely new person does.
         let already_here = room.members.contains_key(&me.id);
         if !already_here && room.members.len() as u32 >= room.cap {
+            // The refused person hears why from their own `room_full`; the people
+            // already editing would otherwise never learn a teammate was turned
+            // away, and they are the ones who can raise the cap.
+            let now = Instant::now();
+            if room
+                .turned_away_at
+                .is_none_or(|at| now.duration_since(at) >= TURNED_AWAY_NOTICE_GAP)
+            {
+                room.turned_away_at = Some(now);
+                let _ = room.tx.send(turned_away_json(room.cap, me));
+            }
             return Joined::CoeditorsFull(room.cap);
         }
         // First member iff the room held nobody before we register ourselves.
@@ -3202,8 +3222,16 @@ impl ActivityRooms {
 /// Frame types only the server may author. Relayed from a peer, `room_full`
 /// would stop every client collaborating, `roster` forge the presence list,
 /// `resume` replay an arbitrary draft as if it came from disk, `bot_connected`
-/// fake a finished connect, and `resync` start a hello/full-draft storm.
-const SERVER_ONLY_FRAMES: [&str; 5] = ["roster", "room_full", "resync", "resume", "bot_connected"];
+/// fake a finished connect, `resync` start a hello/full-draft storm, and
+/// `turned_away` put words in a name of the sender's choosing.
+const SERVER_ONLY_FRAMES: [&str; 6] = [
+    "roster",
+    "room_full",
+    "resync",
+    "resume",
+    "bot_connected",
+    "turned_away",
+];
 
 /// The routing fields of a peer frame, decoded the way the browser will read
 /// them — escapes included, so `"room_full"` can't slip past the filter
@@ -3263,6 +3291,12 @@ fn roster_json(members: &HashMap<String, (Participant, u32)>) -> String {
         .map(|(p, _)| json!({ "id": p.id, "name": p.name, "avatar": p.avatar }))
         .collect();
     json!({ "type": "roster", "participants": participants }).to_string()
+}
+
+/// The `{ type: "turned_away", cap, name }` frame telling a room that `who` was
+/// refused at its co-editor cap. Old clients ignore an unknown type.
+fn turned_away_json(cap: u32, who: &Participant) -> String {
+    json!({ "type": "turned_away", "cap": cap, "name": who.name }).to_string()
 }
 
 #[derive(Deserialize)]
@@ -3873,6 +3907,43 @@ mod tests {
             rooms.join("inst", &p("host"), 2),
             Joined::Ok { .. }
         ));
+    }
+
+    #[test]
+    fn a_refused_join_tells_the_room_once_a_minute() {
+        let rooms = ActivityRooms::new();
+        let p = |id: &str| Participant {
+            id: id.into(),
+            name: format!("{id} name"),
+            avatar: None,
+        };
+        let Joined::Ok { mut rx, .. } = rooms.join("inst", &p("host"), 1) else {
+            panic!("the host must get in");
+        };
+        // The host's own join broadcast its roster; drain it.
+        assert!(rx.try_recv().unwrap().contains("\"roster\""));
+
+        assert!(matches!(
+            rooms.join("inst", &p("c"), 1),
+            Joined::CoeditorsFull(1)
+        ));
+        let v: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(v["type"], "turned_away");
+        assert_eq!(v["cap"], 1);
+        assert_eq!(v["name"], "c name");
+
+        // A second refusal inside the gap is still refused, but stays quiet.
+        assert!(matches!(
+            rooms.join("inst", &p("d"), 1),
+            Joined::CoeditorsFull(1)
+        ));
+        assert!(rx.try_recv().is_err());
+
+        // A peer can't forge the notice.
+        assert_eq!(
+            classify_peer_frame(r#"{"type":"turned_away","cap":1,"name":"x"}"#),
+            PeerFrame::Drop
+        );
     }
 
     #[test]
