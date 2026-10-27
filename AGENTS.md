@@ -1885,6 +1885,32 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   import side effect; it once rode the vendor chunk and hit every visitor on every page
   view). Cheap availability checks live in `src/core/plan/stripeConfig.ts`, never
   `stripeApi.ts`, and vite.config.ts's manualChunks keeps `@stripe` in its own lazy chunk.
+- **Upgrade prompts live at limit moments, never as banners or third-party ads** (maintainer,
+  2026-10-28 — no subscriptions since launch, so the plans are now surfaced where a limit
+  actually bites). Every `openPricing(guild, from)` names an `UpgradePrompt`
+  (`core/plan/upgradePrompt.ts`); the modal opens on that limit (`limitFocus` in
+  `pricingView.ts`: "Saved messages: 10 on Free · 100 on Plus · Unlimited on Pro" + the row
+  marked on every card), and the funnel `pricing_opened` → `checkout_started` →
+  `checkout_completed` carries it as `opened_from` (never `source` — see the analytics entry).
+  The prompts: never-expire slots (send confirm + Posted strip), Posted history once the
+  rolling window is full ("each new post drops the oldest · Keep more"), server drafts (tab
+  meter + the Save dialog, before the save and on its 409), scheduled posts (Scheduled strip +
+  the Send panel's create refusal, told apart from the per-webhook ceiling by
+  `isServerScheduleCap` — no plan raises that one), custom bots, AI, and the Activity room.
+  Strip/meter links appear from 80% of a finite cap (`nearCap`), and only where
+  `isCheckoutConfigured()`. The plan pill stays a quiet status; the running campaign is said
+  once, inside its popover, beside Upgrade, and a used-up limit is marked there. **A room that
+  refuses someone at the co-editor cap tells the people already in it** (`turned_away`, a
+  server-only frame naming the refused member — at most one a minute per room on the server,
+  one toast per ten minutes on the client, with "See plans"); the refused member's own toast
+  offers the plans too. The Activity's hand-off is `/?plans=<guild>&plans_from=room_full`,
+  and `usePlansDeepLink` reads only the Activity's prompts, not the whole list, because it
+  is on the boot path. No deploy ordering: an old proxy never sends the frame and old
+  clients ignore an unknown type. **The Save dialog is lazy** (`Builder.tsx`, inside a
+  `ChunkErrorBoundary`), which is what paid for all of this: the boot bundle went from
+  589,881 raw / 181,086 gzip to 588,538 / 180,872 with the prompts in. Never put an upgrade
+  prompt inside a posted message, a plugin reply, the editor canvas, or the static SEO pages
+  (their visitors have no server to upgrade yet).
 - **Feedback webhook credentials are server-only.** Both web and Activity forms submit the
   closed report schema to the proxy (`/api/feedback` anonymous + strict per-IP limit;
   `/api/activity/feedback` bearer-gated). Only `FEEDBACK_WEBHOOK_URL` may hold the destination;
