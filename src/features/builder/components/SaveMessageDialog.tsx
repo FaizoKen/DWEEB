@@ -16,6 +16,8 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isLibraryConfigured } from "@/core/library/api";
 import { useLibraryStore } from "@/core/library/libraryStore";
+import { usePlanStore } from "@/core/plan/planStore";
+import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Modal } from "@/ui/Modal";
@@ -47,7 +49,23 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
   const [destination, setDestination] = useState<SaveMode>("local");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The server refused the save because its saved messages are full (409).
+  const [limitHit, setLimitHit] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // The connected server's saved-message usage, when the library has already
+  // loaded it — so a full shelf is said before the save, not after it fails.
+  const drafts = useLibraryStore((s) =>
+    s.guildId === connectedGuildId && s.loaded ? s.drafts : null,
+  );
+  const draftsFull = drafts?.quota != null && drafts.used >= drafts.quota;
+  // Saving to a full server shelf can only fail; raising the cap is the way
+  // through, so it sits right beside Save — wherever checkout can run.
+  const offerUpgrade =
+    destination === "server" &&
+    (limitHit || draftsFull) &&
+    !!connectedGuildId &&
+    isCheckoutConfigured();
 
   // Reset the form whenever the dialog re-opens so old text doesn't leak in.
   useEffect(() => {
@@ -56,6 +74,7 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
       setDestination("local");
       setError(null);
       setBusy(false);
+      setLimitHit(false);
       // Modal grabs focus on its dialog by default; defer so we win.
       const t = setTimeout(() => inputRef.current?.focus(), 30);
       return () => clearTimeout(t);
@@ -72,6 +91,7 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
       if (!res.ok) {
         // Quota (409) and permission (403) messages are user-facing — keep the
         // dialog open with the reason so a retry/upgrade path is visible.
+        if (res.status === 409) setLimitHit(true);
         return res.error;
       }
       onClose();
@@ -149,11 +169,13 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
         <Field
           label="Name"
           hint={
-            destination === "server"
-              ? `Saved as a draft in the ${serverName ?? "server"} library — visible to everyone who manages that server, from the web app and the Discord Activity.`
-              : serverSaveAvailable
-                ? "A short label so you can find this message again."
-                : "A short label so you can find this message again. Stored locally in your browser."
+            destination === "server" && draftsFull && drafts
+              ? `${serverName ?? "This server"}'s saved messages are full (${drafts.used}/${drafts.quota}) — delete one in the Message directory, or upgrade the server's plan for more room.`
+              : destination === "server"
+                ? `Saved as a draft in the ${serverName ?? "server"} library — visible to everyone who manages that server, from the web app and the Discord Activity.`
+                : serverSaveAvailable
+                  ? "A short label so you can find this message again."
+                  : "A short label so you can find this message again. Stored locally in your browser."
           }
           error={error}
         >
@@ -173,6 +195,19 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
           )}
         </Field>
         <div className={styles.saveActions}>
+          {offerUpgrade ? (
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onClose();
+                usePlanStore.getState().openPricing(connectedGuildId, "saved_messages");
+              }}
+            >
+              Upgrade for more
+            </Button>
+          ) : null}
           <Button variant="ghost" onClick={onClose} type="button" disabled={busy}>
             Cancel
           </Button>

@@ -167,6 +167,7 @@ import {
   cancelSchedule,
   createSchedule,
   isScheduleConfigured,
+  isServerScheduleCap,
   updateSchedule,
 } from "@/core/schedule/api";
 import { trackAnalytics } from "@/core/telemetry/analytics";
@@ -980,9 +981,18 @@ export function SendPanel({
     setConfirmOpen(false);
     onCloseDialog?.();
     if (knownGuildId) {
-      usePlanStore.getState().openPricing(knownGuildId);
+      usePlanStore.getState().openPricing(knownGuildId, "send_slots");
     }
   };
+  // The same hop when a schedule is refused at the server's scheduled-post cap
+  // (the plan limit — never the per-webhook ceiling, which no plan raises).
+  const scheduleCapUpgrade =
+    isServerScheduleCap(scheduleError) && knownGuildId && isCheckoutConfigured()
+      ? () => {
+          onCloseDialog?.();
+          usePlanStore.getState().openPricing(knownGuildId, "scheduled");
+        }
+      : null;
 
   const permanentOption =
     confirmSlots != null && confirmSlots.ttl_days !== null
@@ -2376,6 +2386,14 @@ export function SendPanel({
           {when === "later" && scheduleError ? (
             <div className={styles.error} role="alert">
               {scheduleError}
+              {scheduleCapUpgrade ? (
+                <>
+                  {" "}
+                  <button type="button" className={styles.errorAction} onClick={scheduleCapUpgrade}>
+                    Upgrade for more
+                  </button>
+                </>
+              ) : null}
             </div>
           ) : null}
           {when === "later" && scheduleSuccess ? (

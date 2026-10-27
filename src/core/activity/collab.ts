@@ -135,6 +135,10 @@ interface StartOptions {
    *  server refused the socket. `cap` is that limit. Editing continues solo, and
    *  we stop retrying (a reconnect would just be refused again). */
   onRoomFull?: (cap: number) => void;
+  /** Someone else was just refused because this room is full on the server's
+   *  plan (server-authored, at most one a minute per room). `name` is their
+   *  display name, `cap` the limit. Collab carries on as before. */
+  onTurnedAway?: (cap: number, name: string) => void;
   /** A custom bot's one-time connect flow just completed (server-authored push
    *  from the connect callback), so it's now ready to post as. Carries the
    *  application id. Delivered over the live socket, so it lands even while the
@@ -524,6 +528,14 @@ function handleFrame(frame: Record<string, unknown>): void {
     stopped = true;
     opts?.onConnectedChange?.(false);
     opts?.onRoomFull?.(typeof frame.cap === "number" ? frame.cap : 0);
+    return;
+  }
+  if (type === "turned_away") {
+    // Server-authored: a would-be co-editor was refused at the plan's cap. The
+    // server stamps both fields; peers can't forge the frame (SERVER_ONLY_FRAMES).
+    const cap = typeof frame.cap === "number" ? frame.cap : 0;
+    const name = typeof frame.name === "string" ? frame.name.slice(0, 100) : "";
+    opts?.onTurnedAway?.(cap, name);
     return;
   }
   if (type === "bot_connected") {

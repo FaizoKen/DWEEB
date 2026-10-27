@@ -40,7 +40,15 @@ import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
-import { pricingView, splitQuota } from "./pricingView";
+import {
+  limitFocus,
+  pricingView,
+  QUOTA_ROWS,
+  splitQuota,
+  type LimitFocus,
+  type QuotaRow,
+} from "./pricingView";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import styles from "./PricingModal.module.css";
 
 interface TierDef {
@@ -93,27 +101,8 @@ function promoPricing(
   };
 }
 
-/** The metered quotas, in the shipped default numbers (`server/src/config.rs`). */
-const ROWS: {
-  label: string;
-  values: Record<PlanTier, string>;
-  /** Optional per-tier scope suffix, shown muted after the label on the cards. */
-  notes?: Partial<Record<PlanTier, string>>;
-}[] = [
-  { label: "Scheduled posts", values: { free: "3", plus: "30", pro: "Unlimited" } },
-  { label: "Never-expire panels", values: { free: "5", plus: "25", pro: "Unlimited" } },
-  { label: "Saved messages", values: { free: "10", plus: "100", pro: "Unlimited" } },
-  { label: "Posted history", values: { free: "Last 10", plus: "Last 100", pro: "Unlimited" } },
-  { label: "Custom bots", values: { free: "1", plus: "2", pro: "5" } },
-  { label: "Live co-editors", values: { free: "2", plus: "6", pro: "25" } },
-  // Free's allowance is per user; on paid tiers it's a pool the whole server
-  // shares (with a per-member ceiling), hence the differing scope note.
-  {
-    label: "AI requests / day",
-    values: { free: "8", plus: "20", pro: "40" },
-    notes: { free: "per person", plus: "server-wide", pro: "server-wide" },
-  },
-];
+/** The metered quotas (`pricingView.ts`, where they're testable). */
+const ROWS = QUOTA_ROWS;
 
 const INCLUDED =
   "Every plan includes the full builder, all templates, unlimited webhooks, unlimited tickets, link plugins, and share links. Premium applies to one server — buy it again (or move it) for another.";
@@ -136,6 +125,10 @@ export function PricingModal() {
   const planError = usePlanStore((s) => s.error);
   const close = usePlanStore((s) => s.closePricing);
   const reloadPlan = usePlanStore((s) => s.load);
+  // The prompt that opened the modal: the limit to open on, and the label every
+  // funnel event carries.
+  const openedFrom = usePlanStore((s) => s.openedFrom);
+  const funnelFrom = openedFrom ?? "unknown";
   const guilds = useAuthStore((s) => s.guilds);
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
@@ -162,6 +155,10 @@ export function PricingModal() {
   }, [authStatus, authUser]);
 
   const currentTier: PlanTier | null = plan?.tier ?? null;
+  // A prompt about one limit opens on that limit — the server's allowance and
+  // what each higher plan gives — and marks its row on every card, so nobody
+  // has to find their problem in a price list.
+  const focus = limitFocus(openedFrom, currentTier);
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
   const canUpgradeHere = billing && !!guildId;
 
@@ -288,10 +285,19 @@ export function PricingModal() {
     // plan has reloaded to the new tier, and the success screen wants the "before".
     purchaseRef.current = { tier, from: currentTier ?? "free", interval: period };
     setCheckout({ tier, clientSecret: res.clientSecret, noCardNeeded: res.noCardNeeded });
+    trackAnalytics("checkout_started", { opened_from: funnelFrom, tier, interval: period });
   };
 
   const onComplete = () => {
     setDone(true);
+    const bought = purchaseRef.current;
+    if (bought) {
+      trackAnalytics("checkout_completed", {
+        opened_from: funnelFrom,
+        tier: bought.tier,
+        interval: bought.interval,
+      });
+    }
     // Payment succeeded. Force the server to pick up the new subscription now
     // (the webhook can lag or be blocked, and the backfill is throttled) *before*
     // reloading the plan, so the new tier actually shows instead of the old one.
@@ -545,6 +551,8 @@ export function PricingModal() {
         />
       ) : null}
 
+      {focus ? <LimitFocusNote focus={focus} /> : null}
+
       {coveredByOther ? (
         <p className={styles.coveredNote}>
           This server is already on <strong>{tierName(currentTier!)}</strong>, covered by another
@@ -637,6 +645,7 @@ export function PricingModal() {
               canBuy={canBuy}
               starting={starting === t.id}
               disabled={starting !== null}
+              focusKey={focus?.key ?? null}
               onBuy={() => void startCheckout(t.id as PaidTier)}
             />
           );
@@ -680,6 +689,7 @@ function PlanCard({
   canBuy,
   starting,
   disabled,
+  focusKey,
   onBuy,
 }: {
   tier: TierDef;
@@ -693,6 +703,8 @@ function PlanCard({
   canBuy: boolean;
   starting: boolean;
   disabled: boolean;
+  /** The limit the modal opened on, marked on this card's list. */
+  focusKey: QuotaRow["key"] | null;
   onBuy: () => void;
 }) {
   const listPrice = formatUsd(period === "year" ? tier.yearly : tier.monthly);
@@ -742,7 +754,7 @@ function PlanCard({
         {ROWS.map((r) => {
           const v = r.values[tier.id];
           return (
-            <li key={r.label} className={styles.quota}>
+            <li key={r.label} className={cn(styles.quota, r.key === focusKey && styles.quotaFocus)}>
               <span className={cn(styles.quotaVal, v === "Unlimited" && styles.quotaUnlimited)}>
                 {v}
               </span>
@@ -757,6 +769,22 @@ function PlanCard({
         })}
       </ul>
     </div>
+  );
+}
+
+/** The line a limit prompt opens the modal on: "Saved messages: 10 on Free ·
+ *  100 on Plus · Unlimited on Pro". */
+function LimitFocusNote({ focus }: { focus: LimitFocus }) {
+  return (
+    <p className={styles.focusNote}>
+      <strong>{focus.label}:</strong> {focus.current.value} on {tierName(focus.current.tier)}
+      {focus.upgrades.map((u) => (
+        <span key={u.tier}>
+          {" · "}
+          <strong>{u.value}</strong> on {tierName(u.tier)}
+        </span>
+      ))}
+    </p>
   );
 }
 

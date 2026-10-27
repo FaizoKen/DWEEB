@@ -577,3 +577,46 @@ describe("parseRoomThread", () => {
     expect(parseRoomThread({ id: 42 })).toBeNull();
   });
 });
+
+describe("collab: someone turned away at the plan's cap", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeSocket);
+    FakeSocket.instances = [];
+  });
+  afterEach(() => {
+    stopCollab();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("tells the room who was refused, and keeps collaborating", async () => {
+    const onTurnedAway = vi.fn<(cap: number, name: string) => void>();
+    const onConnectedChange = vi.fn<(connected: boolean) => void>();
+    useMessageStore.setState({ message: doc("a"), selectedId: null });
+    startCollab({
+      instanceId: "inst",
+      guildId: "guild",
+      self: { id: "me", name: "Faiz", avatar: null },
+      targetChannelId: "chan",
+      onRoster: () => {},
+      onConnectedChange,
+      onTurnedAway,
+    });
+    await vi.advanceTimersByTimeAsync(0); // the room ticket resolves
+    const ws = FakeSocket.instances.at(-1)!;
+    ws.open();
+    onConnectedChange.mockClear();
+
+    ws.receive({ type: "turned_away", cap: 2, name: "Sam" });
+    expect(onTurnedAway).toHaveBeenCalledWith(2, "Sam");
+    // Unlike our own `room_full`, nothing about our connection changes.
+    expect(onConnectedChange).not.toHaveBeenCalled();
+    expect(ws.readyState).toBe(FakeSocket.OPEN);
+
+    // A malformed frame still can't hand the toast anything but a number and a
+    // bounded string.
+    ws.receive({ type: "turned_away", cap: "2", name: "x".repeat(500) });
+    expect(onTurnedAway).toHaveBeenLastCalledWith(0, "x".repeat(100));
+  });
+});

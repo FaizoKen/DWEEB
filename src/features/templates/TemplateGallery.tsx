@@ -54,6 +54,8 @@ import {
   type PermanentSlots,
 } from "@/core/guild/api";
 import { usePlanStore } from "@/core/plan/planStore";
+import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
+import { nearCap, type UpgradePrompt } from "@/core/plan/upgradePrompt";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
@@ -488,6 +490,12 @@ export function TemplateGallery() {
   // Whether the slot controls render at all: the feature is on (ttl set), the
   // slot state loaded (i.e. this user may manage it), and a server is connected.
   const canManageSlots = permanent != null && permanent.ttl_days != null && !!connectedGuildId;
+  // The tabs' limit lines offer the next plan only where it could be bought.
+  const canUpgrade = isCheckoutConfigured() && !!connectedGuildId;
+  const openPlans = (from: UpgradePrompt) => {
+    closeGallery();
+    if (connectedGuildId) usePlanStore.getState().openPricing(connectedGuildId, from);
+  };
   const { libraryPostedCards, libraryDraftCards } = useMemo(() => {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
@@ -1288,6 +1296,27 @@ export function TemplateGallery() {
                         <strong>Posted history:</strong>{" "}
                         {Math.max(0, libPosted.used - pinnedPostedCount)}
                         {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
+                        {/* A full window drops the oldest post on every send, with
+                        nothing to say so — the one moment this limit costs
+                        anything, so it's the one to name it in. */}
+                        {libPosted.quota != null &&
+                        libPosted.used - pinnedPostedCount >= libPosted.quota ? (
+                          <>
+                            {" · "}each new post drops the oldest
+                            {canUpgrade ? (
+                              <>
+                                {" · "}
+                                <button
+                                  type="button"
+                                  className={styles.meterUpgrade}
+                                  onClick={() => openPlans("posted_history")}
+                                >
+                                  Keep more
+                                </button>
+                              </>
+                            ) : null}
+                          </>
+                        ) : null}
                       </p>
                     ) : null}
                     {activeFilter === SERVER_DRAFTS_FILTER ? (
@@ -1308,14 +1337,28 @@ export function TemplateGallery() {
                         {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
                         {libDrafts.quota != null && libDrafts.used > libDrafts.quota
                           ? " · over limit"
-                          : ""}
+                          : libDrafts.quota != null && libDrafts.used >= libDrafts.quota
+                            ? " · full"
+                            : ""}
+                        {canUpgrade && nearCap(libDrafts.used, libDrafts.quota) ? (
+                          <>
+                            {" · "}
+                            <button
+                              type="button"
+                              className={styles.meterUpgrade}
+                              onClick={() => openPlans("saved_messages")}
+                            >
+                              Upgrade for more
+                            </button>
+                          </>
+                        ) : null}
                       </p>
                     ) : null}
                   </>
                 ) : null}
 
                 {/* The Posted tab doubles as the never-expire slot manager: usage,
-                the upgrade path when full, and any slots whose message has no
+                the upgrade path once nearly full, and any slots whose message has no
                 card here (nothing else could free those). Hidden when the
                 feature is off or this user can't manage the server's slots. */}
                 {activeFilter === POSTED_FILTER && canManageSlots && permanent ? (
@@ -1330,15 +1373,13 @@ export function TemplateGallery() {
                         without use unless the message holds a slot — assign or free one right on
                         its card.
                       </span>
-                      {!isUnlimitedCap(permanent.cap) && permanent.used >= permanent.cap ? (
+                      {canUpgrade &&
+                      !isUnlimitedCap(permanent.cap) &&
+                      nearCap(permanent.used, permanent.cap) ? (
                         <button
                           type="button"
                           className={styles.slotStripUpgrade}
-                          onClick={() => {
-                            closeGallery();
-                            if (connectedGuildId)
-                              usePlanStore.getState().openPricing(connectedGuildId);
-                          }}
+                          onClick={() => openPlans("posted_slots")}
                         >
                           Upgrade for more
                         </button>
@@ -1405,7 +1446,7 @@ export function TemplateGallery() {
 
                 {/* The Scheduled tab's usage line — its own version of the Posted
                 slot strip: how many timed posts are live against the plan cap,
-                with the same upgrade hop when the server is at the limit. */}
+                with the same upgrade hop once the server nears the limit. */}
                 {activeFilter === SCHEDULED_FILTER &&
                 (sched.upcoming.length > 0 || sched.history.length > 0) ? (
                   <div className={styles.slotStrip}>
@@ -1417,15 +1458,11 @@ export function TemplateGallery() {
                           : `${sched.activeCount} active`}
                         {" · "}each fires once at its set time, then drops into the history below.
                       </span>
-                      {sched.quota != null && sched.activeCount >= sched.quota ? (
+                      {canUpgrade && nearCap(sched.activeCount, sched.quota) ? (
                         <button
                           type="button"
                           className={styles.slotStripUpgrade}
-                          onClick={() => {
-                            closeGallery();
-                            if (connectedGuildId)
-                              usePlanStore.getState().openPricing(connectedGuildId);
-                          }}
+                          onClick={() => openPlans("scheduled")}
                         >
                           Upgrade for more
                         </button>

@@ -270,7 +270,7 @@ export function AiChatPanel() {
                   <button
                     type="button"
                     className={styles.usageAction}
-                    onClick={() => usePlanStore.getState().openPricing(guildId.trim())}
+                    onClick={() => usePlanStore.getState().openPricing(guildId.trim(), "ai")}
                   >
                     Upgrade for more
                   </button>

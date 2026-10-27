@@ -34,7 +34,14 @@ function deferred<T>() {
 
 describe("planStore", () => {
   beforeEach(() => {
-    usePlanStore.setState({ guildId: null, plan: null, status: "idle", error: null, open: false });
+    usePlanStore.setState({
+      guildId: null,
+      plan: null,
+      status: "idle",
+      error: null,
+      open: false,
+      openedFrom: null,
+    });
     fetchGuildPlanMock.mockReset();
   });
 
@@ -141,11 +148,29 @@ describe("planStore", () => {
 
   it("openPricing(guild) opens the modal and kicks off a load", async () => {
     fetchGuildPlanMock.mockResolvedValue(PLAN);
-    usePlanStore.getState().openPricing(G1);
+    usePlanStore.getState().openPricing(G1, "plan_badge");
     expect(usePlanStore.getState().open).toBe(true);
     // fetchGuildPlan is invoked synchronously inside load(), before its first await.
     expect(fetchGuildPlanMock).toHaveBeenCalledWith(G1);
     await Promise.resolve();
+  });
+
+  it("remembers which prompt opened the plans, and counts the open", () => {
+    const gtag = vi.fn();
+    vi.stubGlobal("window", { gtag });
+    try {
+      fetchGuildPlanMock.mockResolvedValue(PLAN);
+      usePlanStore.getState().openPricing(G1, "saved_messages");
+      expect(usePlanStore.getState().openedFrom).toBe("saved_messages");
+      expect(gtag).toHaveBeenCalledWith("event", "pricing_opened", {
+        opened_from: "saved_messages",
+      });
+      // Closing forgets it, so the next open can't inherit a stale limit.
+      usePlanStore.getState().closePricing();
+      expect(usePlanStore.getState().openedFrom).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("reset() clears cached state", () => {

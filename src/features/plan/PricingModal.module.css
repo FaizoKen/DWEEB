@@ -78,6 +78,22 @@
   font-weight: 600;
 }
 
+/* The limit an upgrade prompt opened the modal on — same callout family as
+   `.coveredNote`, so it reads as context rather than as another offer. */
+.focusNote {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 10%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.focusNote strong {
+  font-weight: 600;
+}
+
 /* Cross-app bundle note; the creator name doubles as the support-server link. */
 .creatorNote {
   margin: 0;
@@ -524,6 +540,15 @@
 }
 .quotaUnlimited {
   color: var(--app-accent-text);
+}
+/* The row the modal opened on (see `.focusNote`) — marked down every card so
+   the comparison that matters reads straight across. */
+.quotaFocus {
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--app-accent) 12%, transparent);
+  color: var(--app-text);
 }
 .quotaLabel {
   font-weight: 500;

@@ -8,7 +8,10 @@ export type AnalyticsEvent =
   | "send_dialog_opened"
   | "message_posted"
   | "message_scheduled"
-  | "code_exported";
+  | "code_exported"
+  | "pricing_opened"
+  | "checkout_started"
+  | "checkout_completed";
 
 export type AnalyticsParams = Record<string, string | number | boolean>;
 
@@ -39,6 +42,12 @@ const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   message_posted: new Set(["mode"]),
   message_scheduled: new Set(["recurrence"]),
   code_exported: new Set(["language", "action"]),
+  // The upgrade funnel. `opened_from` is the prompt that opened the plans
+  // (`core/plan/upgradePrompt.ts`) and rides every step, so a purchase traces
+  // back to the limit that sold it. `tier` and `interval` are enums.
+  pricing_opened: new Set(["opened_from"]),
+  checkout_started: new Set(["opened_from", "tier", "interval"]),
+  checkout_completed: new Set(["opened_from", "tier", "interval"]),
 };
 
 /** Exposed for the test that keeps every allowlist clear of the reserved names. */

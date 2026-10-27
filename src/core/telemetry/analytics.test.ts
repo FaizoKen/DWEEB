@@ -96,3 +96,25 @@ describe("trackAnalytics", () => {
     });
   });
 });
+
+describe("upgrade funnel events", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("carry the prompt, tier and interval — nothing else", () => {
+    const gtag = vi.fn();
+    vi.stubGlobal("window", { gtag });
+    trackAnalytics("checkout_started", {
+      opened_from: "saved_messages",
+      tier: "plus",
+      interval: "month",
+      guild_id: "123456789012345678",
+    });
+    expect(gtag).toHaveBeenCalledWith("event", "checkout_started", {
+      opened_from: "saved_messages",
+      tier: "plus",
+      interval: "month",
+    });
+  });
+});

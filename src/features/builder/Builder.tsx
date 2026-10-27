@@ -13,7 +13,16 @@
  * two stay in sync without prop drilling.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { useMessageStore, type RestoredOrigin } from "@/core/state/messageStore";
 import { toastWithUndo } from "@/features/builder/undoToast";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
@@ -53,7 +62,7 @@ import {
 } from "@/ui/Icon";
 import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
-import { SaveMessageDialog } from "./components/SaveMessageDialog";
+import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
 import { PlanBadge, type PlanUsage } from "@/features/plan/PlanBadge";
@@ -94,6 +103,10 @@ interface UtilityAction {
   menuLabel: string;
   run: () => void;
 }
+
+const SaveMessageDialog = lazy(() =>
+  import("./components/SaveMessageDialog").then((m) => ({ default: m.SaveMessageDialog })),
+);
 
 interface BuilderProps {
   /** Opens the Share / Export dialog on the Share-link tab. */
@@ -440,7 +453,9 @@ function ActionBar({
     else setPostDestination(barChannel?.type ?? null, barChannel?.name ?? null);
   }, [isUpdate, destActive, barChannel, barThread, setPostDestination]);
 
-  // The save dialog behind the bar's save icon (see SaveMessageDialog).
+  // The save dialog behind the bar's save icon (see SaveMessageDialog). Loaded
+  // on first open, not at boot: it is a click away, and the boot path has no
+  // budget to spare (scripts/seo/audit.ts).
   const [saveOpen, setSaveOpen] = useState(false);
 
   // Real-time co-editing lives only in the embedded Discord Activity; offer a
@@ -629,7 +644,7 @@ function ActionBar({
                 plan={plan}
                 usage={planUsage}
                 serverName={connectedGuildName}
-                onSeePlans={() => openPricing(connectedGuildId)}
+                onSeePlans={() => openPricing(connectedGuildId, "plan_badge")}
               />
               <span className={styles.sep} aria-hidden="true" />
             </>
@@ -881,7 +896,13 @@ function ActionBar({
         </div>
       </div>
 
-      <SaveMessageDialog open={saveOpen} onClose={() => setSaveOpen(false)} />
+      {saveOpen ? (
+        <ChunkErrorBoundary onDismiss={() => setSaveOpen(false)}>
+          <Suspense fallback={null}>
+            <SaveMessageDialog open onClose={() => setSaveOpen(false)} />
+          </Suspense>
+        </ChunkErrorBoundary>
+      ) : null}
     </>
   );
 }

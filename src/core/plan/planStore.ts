@@ -19,6 +19,8 @@
 import { create } from "zustand";
 import { fetchGuildPlan, isAuthError, type PlanInfo } from "@/core/guild/api";
 import { isProxyConfigured } from "@/core/guild/config";
+import { trackAnalytics } from "@/core/telemetry/analytics";
+import type { UpgradePrompt } from "./upgradePrompt";
 
 export type PlanStatus = "idle" | "loading" | "ready" | "error";
 
@@ -36,13 +38,17 @@ interface PlanState {
    *  servers you manage…"), which is what the pricing modal prints. */
   error: string | null;
   open: boolean;
+  /** The prompt that opened the modal — it opens on the limit that prompt is
+   *  about, and it labels the checkout funnel. Null while closed. */
+  openedFrom: UpgradePrompt | null;
 
   /** Load a server's plan from the proxy. Skips the network on a warm `ready`
    *  for the *same* server unless `force`; always reloads for a different one.
    *  No-op without a configured proxy or a guild id. */
   load(guildId: string, force?: boolean): Promise<void>;
-  /** Open the pricing modal for a server, loading its plan first. */
-  openPricing(guildId: string): void;
+  /** Open the pricing modal for a server, loading its plan first. `from` names
+   *  the control that asked (see `upgradePrompt.ts`). */
+  openPricing(guildId: string, from: UpgradePrompt): void;
   closePricing(): void;
   /** Drop cached plan state — called on sign-out and when disconnecting. */
   reset(): void;
@@ -56,6 +62,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
   status: "idle",
   error: null,
   open: false,
+  openedFrom: null,
 
   async load(guildId, force = false) {
     if (!isProxyConfigured()) return;
@@ -93,17 +100,25 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     }
   },
 
-  openPricing(guildId) {
-    set({ open: true });
+  openPricing(guildId, from) {
+    set({ open: true, openedFrom: from });
+    trackAnalytics("pricing_opened", { opened_from: from });
     void get().load(guildId);
   },
 
   closePricing() {
-    set({ open: false });
+    set({ open: false, openedFrom: null });
   },
 
   reset() {
     accountGeneration += 1;
-    set({ guildId: null, plan: null, status: "idle", error: null, open: false });
+    set({
+      guildId: null,
+      plan: null,
+      status: "idle",
+      error: null,
+      open: false,
+      openedFrom: null,
+    });
   },
 }));

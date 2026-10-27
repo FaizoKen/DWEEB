@@ -462,7 +462,7 @@ function AccountPanel({
                     className={cn(styles.serverSubRow, styles.plansRow)}
                     onClick={() => {
                       onClose();
-                      openPricing(connectedId ?? "");
+                      openPricing(connectedId ?? "", "account_menu");
                     }}
                   >
                     <SparkleIcon size={14} className={styles.plansSparkle} />

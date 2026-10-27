@@ -74,6 +74,8 @@ import { actorDisplayName, peerReplaceNotice } from "./roomReplace";
 import { setActivityToken } from "./runtime";
 import { startHandshakeTrace } from "./telemetry";
 import { missingUploadCount, missingUploadsMessage } from "./uploads";
+import { shouldNoteTurnedAway, turnedAwayNotice } from "./turnedAway";
+import type { UpgradePrompt } from "@/core/plan/upgradePrompt";
 
 export type ActivityStatus = "idle" | "connecting" | "ready" | "error";
 
@@ -265,8 +267,9 @@ interface ActivityState {
   /** Open the web app's pricing page for a specific server. Embedded checkout is
    *  impossible (the Activity sandbox can't run Stripe), so upgrading happens on
    *  the site: this hands off to `/?plans=<guildId>`, which opens the pricing
-   *  modal scoped to that server (signing the user in first if needed). */
-  openPlansOnWeb(guildId: string): Promise<void>;
+   *  modal scoped to that server (signing the user in first if needed). `from`
+   *  names the prompt that asked (default: the plan pill's hand-off). */
+  openPlansOnWeb(guildId: string, from?: UpgradePrompt): Promise<void>;
   /** Open the web app's custom-bot settings for the exact destination server.
    *  The web deep link signs in if needed, selects that guild, and opens its
    *  configuration dialog. */
@@ -512,6 +515,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         onRestored: () =>
           pushToast("Reconnected — your edits sync with the room again.", "success"),
       });
+      // The co-editor cap is the launching server's, so its plans are the ones
+      // to show when the room turns someone away.
+      const seePlansAction = (id: string) => ({
+        label: "See plans",
+        onClick: () => void get().openPlansOnWeb(id, "room_full"),
+      });
 
       // Open the shared editing room. A DM launch passes no guild — the room is
       // keyed by the unguessable instance id instead (see `server/activity.rs`).
@@ -545,16 +554,28 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             set({ targetChannelId: channelId, targetThread: thread });
           }
         },
-        // The room is full for the host's plan tier — keep editing solo. Collab
-        // has stopped retrying, so there's no "reconnecting…" to announce.
+        // The room is full for the server's plan tier — keep editing solo. Collab
+        // has stopped retrying, so there's no "reconnecting…" to announce. The
+        // plans are one tap away, since a manager turned away may well be the
+        // one who can raise the cap.
         onRoomFull: (cap) => {
           connection.halt();
           pushToast(
             cap > 0
-              ? `This room is full — the host's plan allows ${cap} live editors. You can keep editing on your own.`
+              ? `This room is full — this server's plan allows ${cap} live editors. You can keep editing on your own.`
               : "This collaboration room is full. You can keep editing on your own.",
             "info",
+            guildId ? { action: seePlansAction(guildId) } : {},
           );
+        },
+        // Someone tried to join and the room was full. The people already here
+        // are the ones who'd want the cap raised, and nothing else tells them a
+        // teammate was turned away. At most one notice per ten minutes.
+        onTurnedAway: (cap, name) => {
+          if (!guildId || !shouldNoteTurnedAway(Date.now())) return;
+          pushToast(turnedAwayNotice(name, cap), "info", {
+            action: seePlansAction(guildId),
+          });
         },
         // The Activity's sign-in is no longer valid (revoked/expired token, or
         // membership lost) — collab has stopped for good; editing continues
@@ -1001,11 +1022,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async openPlansOnWeb(guildId: string) {
+  async openPlansOnWeb(guildId: string, from: UpgradePrompt = "activity") {
     // Deep-link the web app straight to this server's pricing modal. No draft is
     // carried — upgrading is a side-trip; the draft stays live here (and in the
-    // server-side collab room) for when they return.
-    const url = `${WEB_APP_BASE_URL}/?plans=${encodeURIComponent(guildId)}`;
+    // server-side collab room) for when they return. `plans_from` names the
+    // prompt, so the modal opens on its limit (see `usePlansDeepLink`).
+    const url = `${WEB_APP_BASE_URL}/?plans=${encodeURIComponent(guildId)}&plans_from=${from}`;
     try {
       // The sandboxed iframe can't navigate to the site itself — hand the link to
       // the host client (same path as "Open on web").

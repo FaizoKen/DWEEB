@@ -120,6 +120,17 @@ async function readError(res: Response): Promise<string> {
   return data?.error ?? `Server returned ${res.status}.`;
 }
 
+/**
+ * Whether a refused create (or resume) hit the *server's* scheduled-post cap —
+ * the plan limit, which upgrading raises — rather than the per-webhook ceiling,
+ * which no plan changes. Both answer 409; only the server's own sentence tells
+ * them apart ("This server already has the maximum of 3 scheduled posts…" vs
+ * "That webhook already has the maximum of …"), so the error text is the input.
+ */
+export function isServerScheduleCap(error: string | null): boolean {
+  return !!error && /^This server already has the maximum of \d+ scheduled posts/.test(error);
+}
+
 /** Create a schedule. The `manage_token` it returns is shown once — store it. */
 export async function createSchedule(input: CreateScheduleInput): Promise<CreateScheduleResult> {
   if (!isScheduleConfigured()) {

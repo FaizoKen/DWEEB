@@ -112,3 +112,23 @@
   font-weight: 600;
   color: var(--app-text);
 }
+
+/* A limit the server has used up — the one fact in this list that explains why
+   something just stopped working, so it is the one that stands out. */
+.limitRow[data-full] .limitLabel,
+.limitRow[data-full] .limitVal {
+  color: var(--app-accent-text, #aeb6ff);
+}
+
+/* The running offer, beside the Upgrade item it applies to. */
+.offer {
+  margin: 0;
+  padding: 4px 11px 2px;
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+.offer strong {
+  font-weight: 700;
+  color: var(--app-accent-text, #aeb6ff);
+}

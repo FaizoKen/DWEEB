@@ -18,6 +18,7 @@
 import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
 import { ChevronDownIcon, ExternalLinkIcon } from "@/ui/Icon";
 import type { PlanInfo, PlanTier } from "@/core/guild/api";
+import { promoFor } from "@/core/plan/promo";
 import styles from "./PlanBadge.module.css";
 
 const TIER_LABEL: Record<PlanTier, string> = { free: "Free", plus: "Plus", pro: "Pro" };
@@ -56,6 +57,11 @@ function limitRowText(cap: number | null | undefined, used: number | undefined):
   return cap == null ? `${used} used` : `${used} / ${cap}`;
 }
 
+/** Whether a finite limit is fully used — known only where usage is. */
+function isUsedUp(cap: number | null | undefined, used: number | undefined): boolean {
+  return cap != null && used !== undefined && used >= cap;
+}
+
 export function PlanBadge({
   plan,
   usage,
@@ -73,6 +79,10 @@ export function PlanBadge({
 }) {
   const paid = plan.tier !== "free";
   const name = TIER_LABEL[plan.tier];
+  // The running campaign, said once here beside the Upgrade it applies to —
+  // never on the pill, which stays a quiet status. Free servers only: the
+  // campaign covers Plus, the step up from Free.
+  const offer = !paid && plan.billing ? promoFor("plus", "month") : null;
   return (
     <Menu
       align="end"
@@ -102,7 +112,11 @@ export function PlanBadge({
             {/* An absent key (proxy predating the field) hides the row —
                 `undefined` must not render as "Unlimited". */}
             {LIMIT_ROWS.filter((r) => plan.limits[r.key] !== undefined).map((r) => (
-              <li key={r.key} className={styles.limitRow}>
+              <li
+                key={r.key}
+                className={styles.limitRow}
+                data-full={isUsedUp(plan.limits[r.key], usage?.[r.key]) ? "" : undefined}
+              >
                 <span className={styles.limitLabel}>{r.label}</span>
                 <span className={styles.limitVal}>
                   {limitRowText(plan.limits[r.key], usage?.[r.key])}
@@ -113,6 +127,14 @@ export function PlanBadge({
           {plan.billing ? (
             <>
               <MenuDivider />
+              {offer ? (
+                <p className={styles.offer}>
+                  <strong>{offer.percentOff}% off</strong>{" "}
+                  {offer.duration === "first-payment"
+                    ? "your first payment on Plus right now."
+                    : "Plus right now."}
+                </p>
+              ) : null}
               <MenuItem
                 icon={<ExternalLinkIcon size={16} />}
                 onSelect={() => {

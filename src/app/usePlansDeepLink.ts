@@ -19,19 +19,54 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { usePlanStore } from "@/core/plan/planStore";
+import type { UpgradePrompt } from "@/core/plan/upgradePrompt";
 
-/** Survives the OAuth full-page redirect (the URL param is stripped on capture). */
+/** Survives the OAuth full-page redirect (the URL params are stripped on
+ *  capture). Holds `<guild>:<prompt>` — or a bare guild, as a tab predating the
+ *  prompt wrote it. */
 const PENDING_KEY = "dweeb.plans.pendingGuild";
+
+/** What the Activity asked for: the server, and which of its prompts sent them. */
+export interface PlansIntent {
+  guild: string;
+  from: UpgradePrompt;
+}
+
+const SNOWFLAKE = /^\d{17,20}$/;
+
+/** Only the Activity links here, so only its prompts are read — anything else
+ *  is its plain hand-off. Kept to this one comparison rather than the full
+ *  prompt list, because this hook is on the boot path. */
+function activityPrompt(value: string | null | undefined): UpgradePrompt {
+  return value === "room_full" ? "room_full" : "activity";
+}
 
 /** The `?plans=<id>` value, validated to the Discord snowflake shape. */
 export function readPlansParam(search: string): string | null {
   const id = new URLSearchParams(search).get("plans");
-  return id && /^\d{17,20}$/.test(id) ? id : null;
+  return id && SNOWFLAKE.test(id) ? id : null;
+}
+
+/** The whole `?plans=<id>&plans_from=<prompt>` link. A missing or unknown prompt
+ *  reads as the Activity's plain hand-off. */
+export function readPlansIntent(search: string): PlansIntent | null {
+  const guild = readPlansParam(search);
+  if (!guild) return null;
+  return { guild, from: activityPrompt(new URLSearchParams(search).get("plans_from")) };
+}
+
+/** A stored intent, read back. */
+export function parsePendingIntent(stored: string | null): PlansIntent | null {
+  if (!stored) return null;
+  const [guild = "", from] = stored.split(":");
+  if (!SNOWFLAKE.test(guild)) return null;
+  return { guild, from: activityPrompt(from) };
 }
 
 function stripPlansParam(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete("plans");
+  url.searchParams.delete("plans_from");
   window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }
 
@@ -42,18 +77,18 @@ export function usePlansDeepLink(): void {
 
   // The server we owe a pricing modal, captured once from the URL (or a persisted
   // pending intent left by a login redirect). Null when there's no plans link.
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<PlansIntent | null>(null);
   const captured = useRef(false);
   const loginStarted = useRef(false);
 
   useEffect(() => {
     if (captured.current) return;
     captured.current = true;
-    let guild = readPlansParam(window.location.search);
-    if (guild) {
+    let intent = readPlansIntent(window.location.search);
+    if (intent) {
       // Stash the intent synchronously so it outlives a full-page OAuth redirect…
       try {
-        sessionStorage.setItem(PENDING_KEY, guild);
+        sessionStorage.setItem(PENDING_KEY, `${intent.guild}:${intent.from}`);
       } catch {
         /* no sessionStorage — the in-memory `pending` still covers the popup path */
       }
@@ -63,12 +98,12 @@ export function usePlansDeepLink(): void {
       setTimeout(stripPlansParam, 0);
     } else {
       try {
-        guild = sessionStorage.getItem(PENDING_KEY);
+        intent = parsePendingIntent(sessionStorage.getItem(PENDING_KEY));
       } catch {
-        guild = null;
+        intent = null;
       }
     }
-    if (guild) setPending(guild);
+    if (intent) setPending(intent);
   }, []);
 
   useEffect(() => {
@@ -79,7 +114,7 @@ export function usePlansDeepLink(): void {
       } catch {
         /* ignore */
       }
-      openPricing(pending);
+      openPricing(pending.guild, pending.from);
       setPending(null);
     } else if (status === "anon") {
       // Signed out: ask once for a sign-in the user starts. Opening the popup

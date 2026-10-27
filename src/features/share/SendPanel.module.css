@@ -334,6 +334,19 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The way through an error, inline after its sentence (a plan limit's upgrade). */
+.errorAction {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent-text);
+}
+.errorAction:hover {
+  text-decoration: underline;
+}
 
 .errorSub {
   margin-top: 4px;

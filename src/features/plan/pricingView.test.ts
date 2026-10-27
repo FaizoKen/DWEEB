@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlanInfo } from "@/core/guild/api";
-import { pricingView, splitQuota } from "./pricingView";
+import { limitFocus, pricingView, QUOTA_ROWS, splitQuota } from "./pricingView";
+import { promptLimit } from "@/core/plan/upgradePrompt";
 
 /**
  * The pricing modal's state, read off the plan store. Every Upgrade, promo, and
@@ -55,5 +56,49 @@ describe("splitQuota", () => {
   it("has nothing to count in a value that ends in no number", () => {
     expect(splitQuota("Unlimited")).toBeNull();
     expect(splitQuota("")).toBeNull();
+  });
+});
+
+describe("limitFocus", () => {
+  it("opens on the limit a prompt was about, with every higher plan's allowance", () => {
+    expect(limitFocus("saved_messages", "free")).toEqual({
+      key: "library",
+      label: "Saved messages",
+      current: { tier: "free", value: "10" },
+      upgrades: [
+        { tier: "plus", value: "100" },
+        { tier: "pro", value: "Unlimited" },
+      ],
+    });
+    // On Plus, only Pro is above.
+    expect(limitFocus("room_full", "plus")).toMatchObject({
+      label: "Live co-editors",
+      current: { tier: "plus", value: "6" },
+      upgrades: [{ tier: "pro", value: "25" }],
+    });
+  });
+
+  it("has nothing to point at for a general entry, an unknown plan, or the top tier", () => {
+    expect(limitFocus("plan_badge", "free")).toBeNull();
+    expect(limitFocus(null, "free")).toBeNull();
+    expect(limitFocus("saved_messages", null)).toBeNull();
+    expect(limitFocus("saved_messages", "pro")).toBeNull();
+  });
+
+  it("names a row for every limit a prompt can point at", () => {
+    const keys = new Set(QUOTA_ROWS.map((r) => r.key));
+    for (const prompt of [
+      "send_slots",
+      "posted_slots",
+      "posted_history",
+      "scheduled",
+      "saved_messages",
+      "custom_bots",
+      "ai",
+      "room_full",
+    ] as const) {
+      const key = promptLimit(prompt);
+      expect(key && keys.has(key), prompt).toBe(true);
+    }
   });
 });

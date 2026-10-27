@@ -354,7 +354,7 @@ export function CustomBotDialog({
                 className={styles.linkBtn}
                 onClick={() => {
                   onClose();
-                  usePlanStore.getState().openPricing(guildId);
+                  usePlanStore.getState().openPricing(guildId, "custom_bots");
                 }}
               >
                 Upgrade for more
@@ -372,7 +372,7 @@ export function CustomBotDialog({
                 className={styles.linkBtn}
                 onClick={() => {
                   onClose();
-                  usePlanStore.getState().openPricing(guildId);
+                  usePlanStore.getState().openPricing(guildId, "custom_bots");
                 }}
               >
                 upgrade
