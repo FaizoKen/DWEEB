@@ -176,7 +176,7 @@ body > h2:first-of-type,
 .context {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px 8px;
   margin-bottom: 22px;
   padding: 9px 12px;
@@ -192,12 +192,19 @@ body > h2:first-of-type,
   flex: none;
   width: 8px;
   height: 8px;
+  margin-top: 5.5px;
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-soft);
 }
 .context b {
   color: var(--text);
+}
+/* A lone sentence (a warning) wraps beside the dot; it used to drop onto its
+   own line under it, as one flex item too wide for the first. */
+.context > span:only-child {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .context .sep {
   color: var(--subtle);
