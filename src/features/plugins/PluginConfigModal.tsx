@@ -130,7 +130,35 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
           ) : undefined
         }
       >
-        <div className={styles.frameWrap}>
+        <p className={styles.disclosure}>
+          Set up by <strong>{manifest.name}</strong>. DWEEB only stores the resulting action id on
+          this component.
+          {manifest.resources?.length ? (
+            <>
+              {" "}
+              It may read{" "}
+              {manifest.resources.map((resource) => PLUGIN_RESOURCE_LABELS[resource]).join(", ")}.
+            </>
+          ) : (
+            " It has not declared access to editor data."
+          )}
+          {manifest.resources?.includes("savedWebhook")
+            ? " A saved webhook is shared only after you approve that destination."
+            : null}
+        </p>
+        {compatibilityError ? (
+          <p className={styles.error} role="alert">
+            {compatibilityError}
+          </p>
+        ) : null}
+        {saveError ? (
+          <p className={styles.error} role="alert">
+            {saveError}
+          </p>
+        ) : null}
+        {/* Full-bleed: the plugin page paints the dialog's own surface, and its
+            sticky action bar sits on the dialog's bottom edge like a footer. */}
+        <div className={cn(styles.frameWrap, styles.frameFlush)}>
           <iframe
             // Bumped by Retry: a new element is the only way to re-request a
             // document the browser already failed (or cached) for this src.
@@ -150,6 +178,7 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
             <div className={styles.frameCover}>
               {frameState === "loading" ? (
                 <p className={styles.frameCoverText} role="status">
+                  <span className={styles.spinner} aria-hidden="true" />
                   Loading {manifest.name}…
                 </p>
               ) : (
@@ -160,33 +189,6 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
             </div>
           ) : null}
         </div>
-        {compatibilityError ? (
-          <p className={styles.error} role="alert">
-            {compatibilityError}
-          </p>
-        ) : null}
-        {saveError ? (
-          <p className={styles.error} role="alert">
-            {saveError}
-          </p>
-        ) : null}
-        <p className={styles.note}>
-          Configuration is handled by <strong>{manifest.name}</strong>. DWEEB only stores the
-          resulting action id on this component.
-          {manifest.resources?.length ? (
-            <>
-              {" "}
-              This plugin may request{" "}
-              <strong>
-                {manifest.resources.map((resource) => PLUGIN_RESOURCE_LABELS[resource]).join(", ")}
-              </strong>
-              .
-            </>
-          ) : (
-            " It has not declared access to editor data."
-          )}{" "}
-          Saved webhook credentials are shared only after you approve a specific destination.
-        </p>
       </Modal>
 
       <Modal

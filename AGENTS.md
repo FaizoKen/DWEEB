@@ -2332,6 +2332,24 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   a retryable notice with Close/Retry in the modal's only footer (a live plugin renders its own
   Save/Cancel, so the footer exists only in the timeout state); Retry remounts the iframe by key.
   Copy and refusal rules are pinned in `configRejection.test.ts`.
+- **The nine plugin config pages share one stylesheet, copied in — edit the source, then sync**
+  (2026-10-28 redesign). Each `plugins/<crate>/static/config.html` is `include_str!`'d by its own
+  crate and built in its own Docker context, so it can't link a common file:
+  `plugins/_shared/plugin-ui.css` is the single source, `bun run sync:plugin-ui` rewrites every
+  page's `<style data-plugin-ui>` block from it, and `src/core/plugins/pluginUi.test.ts` fails on
+  a page that drifted (and on one whose Save left the `.bar`). Page-only styles go in a second
+  `<style>` after the block. The tokens mirror the editor's (`tokens.css`) because
+  `PluginConfigModal` frames interactive plugins **full-bleed** (`.frameFlush`, cancelling
+  `--modal-pad`): the page paints the dialog's own surface and its **sticky `.bar`** (Cancel +
+  Save, with the page's `#error` inside it) sits on the dialog's bottom edge like a footer — the
+  old end-of-document bar sat below the fold of a capped, nested scroll box. Conventions the CSS
+  relies on: the server status is one `.context` line (`.warn`/`.bad`), never a numbered step;
+  role/channel pickers are `<label>` chips inside `.roles`/`.picker`/`.list` (input hidden but
+  focusable, selection via `:has(:checked)`); a `.checkrow`/`.check` checkbox renders as a switch;
+  only `body > h2:first-of-type` and a panel's first `h2` drop the section divider, so keep a
+  section heading out of a show/hide wrapper (Tickets' `#topicsTitle`). Link-plugin pages are
+  external (RoleLogic) and keep the bordered frame. Test locally by serving the pages on the dev
+  plugin ports (`core/plugins/registry.ts`, 8090–8099) with mocked `/api/*`.
 - **The Share dialog keeps a hand-typed webhook across its tabs and names itself by intent**
   (`core/webhook/webhookDraft.ts`, `features/share/sendCopy.ts`). Each tab mounts its own panel,
   so the pasted URL — even after "Done — use this webhook" — died on a tab switch and Update needed

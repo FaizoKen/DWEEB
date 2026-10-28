@@ -186,11 +186,9 @@
 /* Amber pill flagging a plugin that needs the bot invited (a login + invite). */
 .loginTag {
   flex: none;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
   border-radius: 999px;
   background: var(--app-warning-soft);
   color: var(--app-warning-text);
@@ -207,8 +205,16 @@
   color: var(--app-text-muted);
 }
 
+/* Two lines at most: the manifests describe every feature, and a full paragraph
+   per row made the list a wall of text. The whole line stays on hover. */
 .rowDesc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   font-size: 12px;
+  line-height: 1.45;
   color: var(--app-text-muted);
 }
 

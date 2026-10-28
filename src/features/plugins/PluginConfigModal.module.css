@@ -16,6 +16,58 @@
   background: var(--app-bg-input);
 }
 
+/* The interactive plugins' pages paint the dialog's own surface and carry a
+   sticky Save bar, so their frame runs edge to edge down to the dialog's bottom
+   edge — cancelling the body padding the Modal exposes as `--modal-pad` — and
+   reads as part of the dialog instead of a box inside it. */
+.frameFlush {
+  margin: 0 calc(-1 * var(--modal-pad)) calc(-1 * var(--modal-pad));
+  border: 0;
+  border-top: 1px solid var(--app-border);
+  border-radius: 0;
+  background: var(--app-bg-elevated);
+}
+
+.frameFlush .frame {
+  /* One scroll area: tall enough to use the dialog's height, short enough
+     that the dialog body itself never has to scroll as well. */
+  max-height: min(calc(100dvh - 220px - var(--app-sait) - var(--app-saib)), 760px);
+}
+
+.frameFlush .frameCover {
+  background: var(--app-bg-elevated);
+}
+
+.disclosure {
+  margin: -4px 0 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--app-text-subtle);
+}
+
+.disclosure strong {
+  color: var(--app-text-muted);
+  font-weight: 600;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid var(--app-border-strong);
+  border-top-color: var(--app-accent);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .frame {
   display: block;
   width: 100%;
@@ -65,7 +117,7 @@
 }
 
 .error {
-  margin: 10px 2px 0;
+  margin: 0;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--app-danger) 50%, transparent);
   border-radius: var(--app-radius-sm);

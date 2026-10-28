@@ -221,7 +221,9 @@ export function PluginLibraryModal({
                 ) : null}
               </span>
               {manifest.description ? (
-                <span className={styles.rowDesc}>{manifest.description}</span>
+                <span className={styles.rowDesc} title={manifest.description}>
+                  {manifest.description}
+                </span>
               ) : null}
             </span>
             {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
@@ -236,7 +238,9 @@ export function PluginLibraryModal({
               aria-controls={listId}
               aria-label={`${open ? "Hide" : "Show"} ${presets.length} template${presets.length === 1 ? "" : "s"}`}
             >
-              <span className={styles.toggleCount}>{presets.length}</span>
+              <span className={styles.toggleCount} aria-hidden>
+                {presets.length} template{presets.length === 1 ? "" : "s"}
+              </span>
               <svg
                 className={open ? styles.chevronOpen : styles.chevron}
                 width="14"
@@ -314,7 +318,9 @@ export function PluginLibraryModal({
                 ) : null}
               </span>
               {manifest.description ? (
-                <span className={styles.rowDesc}>{manifest.description}</span>
+                <span className={styles.rowDesc} title={manifest.description}>
+                  {manifest.description}
+                </span>
               ) : null}
             </span>
           </button>
