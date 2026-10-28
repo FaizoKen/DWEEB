@@ -4,254 +4,1123 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Self Role — configure</title>
+<style data-plugin-ui>
+/*
+ * Shared look for every plugin's config page (plugins/<crate>/static/config.html).
+ *
+ * Each page is served by its own crate with `include_str!` and built in its own
+ * Docker context, so a page can't link a common file. Instead this stylesheet is
+ * the single source and `bun run sync:plugin-ui` copies it into every page's
+ * `<style data-plugin-ui>` block; `src/core/plugins/pluginUi.test.ts` fails when a
+ * page's copy drifts. Edit this file, then run the sync.
+ *
+ * The page is framed full-bleed inside DWEEB's "Configure …" dialog, so these
+ * tokens mirror the editor's own (`src/styles/tokens.css`): the page background
+ * is the dialog's surface, and the sticky action bar reads as the dialog footer.
+ * Page-specific widgets keep their own `<style>` after this block and may use
+ * the legacy names (`--panel`, `--panel-2`, `--green`, `--yellow`), aliased below.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #17191f;
+  --surface: #1a1d23;
+  --input: #1e2128;
+  --hover: #242833;
+  --active: #2c313d;
+  --border: #2a2e38;
+  --border-strong: #3b4150;
+  --text: #eceef3;
+  --muted: #aab1bf;
+  --subtle: #828a99;
+  --accent: #5865f2;
+  --accent-hover: #4752c4;
+  --accent-soft: rgba(88, 101, 242, 0.16);
+  --accent-text: #aeb6ff;
+  --danger: #f04747;
+  --danger-soft: rgba(240, 71, 71, 0.12);
+  --danger-text: #ff8a8c;
+  --success: #2dc06b;
+  --success-soft: rgba(45, 192, 107, 0.12);
+  --success-text: #6ddf9e;
+  --warning: #f0b232;
+  --warning-soft: rgba(240, 178, 50, 0.12);
+  --warning-text: #f7cb6b;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --pad: 20px;
+  --ring: 0 0 0 2px var(--accent);
+  /* Legacy names the page-specific styles still use. */
+  --panel: var(--surface);
+  --panel-2: var(--input);
+  --green: var(--success);
+  --yellow: var(--warning);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f5f6f8;
+  --input: #ffffff;
+  --hover: #eef0f3;
+  --active: #e3e6eb;
+  --border: #dcdfe5;
+  --border-strong: #c4c9d2;
+  --text: #1e1f22;
+  --muted: #4e5058;
+  --subtle: #6b6f78;
+  --accent-text: #4752c4;
+  --danger-text: #c22d31;
+  --success-text: #1a7f45;
+  --warning-text: #946200;
+}
+
+* {
+  box-sizing: border-box;
+}
+/* Chromium/WebKit take the ::-webkit-scrollbar rules below; setting the
+   standard properties there too would override them (and Windows then draws
+   arrow buttons on the thin bar), so they are only for engines without them. */
+@supports not selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+body {
+  margin: 0;
+  padding: var(--pad) var(--pad) 0;
+  font:
+    14px/1.5 "gg sans",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent-text);
+}
+b,
+strong {
+  font-weight: 650;
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+/* A section title, optionally numbered with `.step-num`. Sentence case: the
+   old uppercase labels shouted and were harder to scan. */
+h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 10px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+/* No divider above the page's first section, or the first one in a panel. */
+body > h2:first-of-type,
+.details-body > h2:first-child,
+.adv-body > h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.step-num {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--subtle);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Server context line ────────────────────────────────────────────────── */
+/* Which server the page is building for, as one quiet line above the form —
+   it used to take a whole numbered step. `.warn` when no server is connected. */
+.context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 22px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.context::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+.context b {
+  color: var(--text);
+}
+.context .sep {
+  color: var(--subtle);
+}
+.context.warn {
+  border-color: rgba(240, 178, 50, 0.32);
+  background: var(--warning-soft);
+  color: var(--text);
+}
+.context.warn::before {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px rgba(240, 178, 50, 0.2);
+}
+.context.bad {
+  border-color: rgba(240, 71, 71, 0.35);
+  background: var(--danger-soft);
+  color: var(--text);
+}
+.context.bad::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(240, 71, 71, 0.2);
+}
+.context + .callout {
+  margin: -12px 0 22px;
+}
+.context .note {
+  flex-basis: 100%;
+  padding-left: 16px;
+}
+
+/* ── Labels, hints, inline code ─────────────────────────────────────────── */
+label.lbl {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.hint {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.hint b {
+  color: var(--text);
+}
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font:
+    12px ui-monospace,
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    monospace;
+}
+.req {
+  color: var(--danger-text);
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+input[type="text"],
+input[type="url"],
+input[type="number"],
+input[type="password"],
+input[type="search"],
+input[type="datetime-local"],
+input[type="color"],
+select,
+textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--subtle);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aab1bf' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+select option {
+  background: var(--input);
+  color: var(--text);
+}
+input[type="color"] {
+  padding: 4px;
+  cursor: pointer;
+}
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+.row2 {
+  display: flex;
+  gap: 12px;
+}
+.row2 > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Checkboxes and radios: drawn, so they read on the dark surface. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--input);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 59%, 39% 98%, 100% 21%, 85% 7%, 38% 67%);
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+input[type="radio"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:checked::before,
+input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A setting row: a switch, then its label (and an optional `.t`/`.d` pair). */
+.checkrow,
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.checkrow label,
+.check label {
+  margin: 0;
+  cursor: pointer;
+}
+.checkrow input[type="checkbox"],
+.check input[type="checkbox"] {
+  width: 34px;
+  height: 20px;
+  margin-top: 1px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--active);
+  place-items: center start;
+  padding: 0 3px;
+}
+.checkrow input[type="checkbox"]::before,
+.check input[type="checkbox"]::before {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  clip-path: none;
+  background: #fff;
+  transform: none;
+  transition: transform 140ms ease;
+}
+.checkrow input[type="checkbox"]:checked,
+.check input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+.checkrow input[type="checkbox"]:checked::before,
+.check input[type="checkbox"]:checked::before {
+  transform: translateX(14px);
+}
+.check .t {
+  display: block;
+  font-weight: 600;
+}
+.check .d {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--hover);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+button:hover {
+  background: var(--active);
+  border-color: var(--border-strong);
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+button.primary:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
+}
+button:disabled,
+button:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+button.ghost:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+/* "+ Add …" buttons under a list. */
+button.add,
+.add-option,
+button.dashed {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+button.add:hover,
+.add-option:hover,
+button.dashed:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+/* Square icon buttons (move up/down, remove). */
+button.icon {
+  flex: none;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+button.icon:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+button.icon.del:hover {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+/* ── Sticky action bar ─────────────────────────────────────────────────── */
+/* Save stays in reach however long the form is: the dialog frames this page
+   at a capped height, so a bar at the end of the document used to sit below
+   the fold of a nested scroll box. Errors render in the bar, beside Save. */
+.bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 28px calc(-1 * var(--pad)) 0;
+  padding: 12px var(--pad);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 24px -12px rgba(0, 0, 0, 0.55);
+}
+.bar .grow {
+  flex: 1;
+}
+.bar .err {
+  flex: 1 1 100%;
+  order: -1;
+  margin: 0 0 2px;
+}
+.err {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(240, 71, 71, 0.35);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.err:empty {
+  display: none;
+}
+
+/* ── Callouts ───────────────────────────────────────────────────────────── */
+.callout {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  border-radius: var(--radius);
+  background: rgba(88, 101, 242, 0.08);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.callout.good {
+  border-color: rgba(45, 192, 107, 0.3);
+  background: var(--success-soft);
+}
+.callout.warn {
+  border-color: rgba(240, 178, 50, 0.32);
+  background: var(--warning-soft);
+}
+.callout.bad {
+  border-color: rgba(240, 71, 71, 0.35);
+  background: var(--danger-soft);
+}
+.callout b {
+  color: var(--text);
+}
+.callout a {
+  font-weight: 600;
+}
+
+/* ── Disclosures ───────────────────────────────────────────────────────── */
+details {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform 140ms ease;
+}
+details[open] > summary::before {
+  transform: rotate(90deg);
+}
+summary:hover {
+  background: var(--hover);
+}
+summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+details[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+summary .sub {
+  font-weight: 400;
+  color: var(--subtle);
+  font-size: 13px;
+}
+.details-body,
+.adv-body,
+.gate-body,
+.route-body {
+  padding: 4px 14px 16px;
+}
+
+/* ── Role / channel pickers ────────────────────────────────────────────── */
+/* Each option is a `<label>` holding its input, a colour dot and a name. They
+   render as wrapping chips — a long list of full-width rows (one per role, for
+   every picker on the page) made these forms several screens tall. The input
+   stays focusable and announced; it is only hidden visually. */
+.roles,
+.picker,
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 196px;
+  overflow: auto;
+  padding: 2px;
+}
+.roles .role,
+.picker .item,
+.list .pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input);
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.roles .role:hover,
+.picker .item:hover,
+.list .pick:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.roles .role input,
+.picker .item input,
+.list .pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.roles .role:has(input:checked),
+.picker .item:has(input:checked),
+.list .pick:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.roles .role:has(input:checked)::after,
+.picker .item:has(input:checked)::after,
+.list .pick:has(input:checked)::after {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 1px;
+  background: var(--accent-text);
+  clip-path: polygon(14% 44%, 0 59%, 39% 98%, 100% 21%, 85% 7%, 38% 67%);
+}
+.roles .role:has(input:focus-visible),
+.picker .item:has(input:focus-visible),
+.list .pick:has(input:focus-visible) {
+  box-shadow: var(--ring);
+}
+.roles .role:has(input:disabled),
+.picker .item:has(input:disabled),
+.list .pick:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.roles .role:has(input:disabled) input,
+.picker .item:has(input:disabled) input,
+.list .pick:has(input:disabled) input {
+  cursor: not-allowed;
+}
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.roles .role .name,
+.picker .item .name,
+.list .pick .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roles .tag,
+.picker .tag,
+.list .tag,
+.warn-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--active);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.warn-tag {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+.roles > .hint,
+.picker > .hint,
+.list > .hint {
+  margin: 4px 2px;
+}
+.role-search,
+.search {
+  margin-top: 8px;
+  padding-left: 34px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23828a99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 11px center;
+}
+.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Segmented choices ─────────────────────────────────────────────────── */
+/* Two or three mutually exclusive options: `.seg` holds plain buttons (the
+   chosen one `.sel`); `.modes` holds richer cards (`.mode.sel` / `.mode.on`). */
+.seg,
+.miniseg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+}
+.seg button,
+.miniseg button {
+  flex: 1;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.miniseg button {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+.seg button:hover,
+.miniseg button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.seg button.sel,
+.miniseg button.sel {
+  background: var(--active);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.mode {
+  position: relative;
+  display: block;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+  text-align: left;
+  font-weight: 400;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.mode:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.mode.sel,
+.mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.mode:has(input:focus-visible) {
+  box-shadow: var(--ring);
+}
+
+/* ── Placeholder chips ─────────────────────────────────────────────────── */
+.vars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.vars .chip {
+  min-height: 26px;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font:
+    600 12px ui-monospace,
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    monospace;
+}
+.vars .chip:hover {
+  border-color: var(--accent);
+  background: rgba(88, 101, 242, 0.26);
+}
+
+/* ── Repeating item cards (topics, options, questions…) ────────────────── */
+.card,
+.field,
+.group {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+@media (max-width: 480px) {
+  :root {
+    --pad: 14px;
+  }
+  .row2 {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
+</style>
     <style>
-      :root {
-        color-scheme: dark;
-        --bg: #1e1f22;
-        --panel: #2b2d31;
-        --panel-2: #232428;
-        --border: #3a3c41;
-        --text: #f2f3f5;
-        --muted: #b5bac1;
-        --accent: #5865f2;
-        --green: #3ba55d;
-        --yellow: #f0b232;
-        --danger: #da373c;
-        --radius: 8px;
+      /* Self Role only — the shared look lives in the block above. */
+
+      /* Behaviour cards: the radio is hidden, the card is the control. */
+      .modes {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
-      [data-theme="light"] {
-        color-scheme: light;
-        --bg: #ffffff;
-        --panel: #f2f3f5;
-        --panel-2: #e3e5e8;
-        --border: #d7d9dc;
-        --text: #1e1f22;
-        --muted: #4e5058;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 16px;
-        font: 14px/1.5 system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-      }
-      h2 {
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
-        margin: 20px 0 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      h2:first-of-type { margin-top: 0; }
-      .step-num {
-        flex: none;
-        display: inline-grid;
-        place-items: center;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: var(--accent);
-        color: #fff;
-        font-size: 12px;
-        font-weight: 700;
-      }
-      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
-      input[type="text"], input[type="password"], input[type="number"], select, textarea {
+      .mode input {
+        position: absolute;
+        inset: 0;
         width: 100%;
-        padding: 8px 10px;
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        font: inherit;
-      }
-      input:focus-visible, select:focus-visible, textarea:focus-visible {
-        outline: none;
-        border-color: var(--accent);
-      }
-      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-      .hint code, .callout code { color: var(--accent); }
-      .row2 { display: flex; gap: 8px; }
-      .row2 > * { flex: 1; }
-      button {
-        padding: 8px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
+        height: 100%;
+        margin: 0;
+        opacity: 0;
         cursor: pointer;
       }
-      button:hover { border-color: var(--accent); }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
-      .bar .grow { flex: 1; }
-      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
-
-      /* Disabled (locked) sections before the bot is connected. */
-      .locked { opacity: 0.45; pointer-events: none; filter: grayscale(0.3); }
-
-      /* Callouts. */
-      .callout {
-        border: 1px solid var(--border);
-        border-left: 3px solid var(--accent);
-        background: var(--panel);
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 13px;
-        margin-top: 8px;
+      .mode .m-title {
+        font-weight: 650;
       }
-      .callout.good { border-left-color: var(--green); }
-      .callout.warn { border-left-color: var(--yellow); }
-      .callout.bad { border-left-color: var(--danger); }
-      .callout b { color: var(--text); }
-
-      details { margin-top: 8px; }
-      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
-      details ol { margin: 8px 0 0; padding-left: 20px; }
-      details li { margin: 4px 0; color: var(--muted); }
-
-      /* The "Advanced options" disclosure. */
-      details.adv {
-        margin-top: 18px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel-2);
-      }
-      details.adv > summary {
-        cursor: pointer;
-        padding: 11px 13px;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-        list-style: none;
-      }
-      details.adv > summary::-webkit-details-marker { display: none; }
-      details.adv > summary::before { content: "▸ "; color: var(--muted); }
-      details.adv[open] > summary::before { content: "▾ "; }
-      details.adv > summary .sub {
-        font-weight: 400;
+      .mode .m-desc {
+        margin-top: 3px;
+        font-size: 12.5px;
+        line-height: 1.4;
         color: var(--muted);
-        text-transform: none;
-        letter-spacing: 0;
       }
-      .adv-body { padding: 2px 13px 13px; }
-      .adv-block { padding: 12px 0; border-top: 1px solid var(--border); }
-      .adv-block:first-child { border-top: none; padding-top: 4px; }
-      .adv-title { font-weight: 600; font-size: 13px; }
-      .adv-desc { font-size: 12px; color: var(--muted); margin: 2px 0 8px; }
+      @media (max-width: 520px) {
+        .modes {
+          grid-template-columns: 1fr;
+        }
+      }
 
-      /* Role list. */
-      .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 320px; overflow: auto; }
-      .role {
+      /* A role a self-role menu can never hand out. */
+      .roles .role.blocked {
+        opacity: 0.6;
+      }
+
+      /* "More options" blocks. */
+      .adv-block {
+        padding: 16px 0;
+        border-top: 1px solid var(--border);
+      }
+      .adv-block:first-child {
+        border-top: none;
+        padding-top: 6px;
+      }
+      .adv-title {
+        font-weight: 650;
+        font-size: 14px;
+      }
+      .adv-desc {
+        margin: 3px 0 10px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .narrow {
+        max-width: 180px;
+      }
+      .seg {
+        margin-top: 10px;
+      }
+
+      /* Per-option editor rows (string select): emoji + role + subtitle. */
+      .opts {
         display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 7px 9px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel-2);
-        cursor: pointer;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
       }
-      .role:hover { border-color: var(--accent); }
-      .role input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
-      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
-      .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .role .warn-tag { flex: none; font-size: 11px; color: var(--yellow); }
-      .role.blocked { opacity: 0.7; }
-      .role-search { margin-top: 8px; }
-      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
-
-      /* Mode cards. */
-      .modes { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-      .mode {
-        display: flex;
-        gap: 10px;
-        padding: 9px 11px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        cursor: pointer;
-        background: var(--panel-2);
-      }
-      .mode:hover { border-color: var(--accent); }
-      .mode.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
-      .mode input { margin: 2px 0 0; width: auto; accent-color: var(--accent); flex: none; }
-      .mode .m-title { font-weight: 600; }
-      .mode .m-desc { font-size: 12px; color: var(--muted); }
-
-      /* Per-option editor rows (string select): emoji + role + description. */
-      .opts { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
       .optrow {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 8px 10px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+      }
+      .optrow .emoji-btn {
+        grid-row: span 2;
+      }
+      .optrow .o-name {
         display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 13px;
-        padding: 7px 8px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel-2);
-        flex-wrap: wrap;
+        min-width: 0;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .optrow .o-name { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .optrow .o-desc { flex-basis: 100%; }
       .emoji-btn {
-        flex: none; width: 44px; height: 36px; padding: 0;
-        display: inline-grid; place-items: center;
-        font-size: 20px; line-height: 1;
+        flex: none;
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+        padding: 0;
+        font-size: 22px;
+        line-height: 1;
+        background: var(--input);
       }
-      .emoji-btn.muted { opacity: 0.5; }
-      .emoji-img { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
+      .emoji-btn.muted {
+        filter: grayscale(1);
+        opacity: 0.55;
+      }
+      .emoji-img {
+        width: 22px;
+        height: 22px;
+        object-fit: contain;
+        vertical-align: middle;
+      }
 
-      /* Emoji picker popover (ported from the Quick Replies plugin). */
+      /* Emoji picker popover. */
       .emoji-pop {
         position: absolute;
         z-index: 50;
-        width: 260px;
+        width: 280px;
         max-height: 320px;
         display: flex;
         flex-direction: column;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
         padding: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
       }
       .emoji-pop-search {
-        width: 100%; padding: 6px 8px; margin-bottom: 6px;
-        background: var(--panel-2); border: 1px solid var(--border);
-        border-radius: 6px; color: var(--text); font: inherit;
+        margin-bottom: 6px;
       }
-      .emoji-pop-scroll { overflow: auto; }
+      .emoji-pop-scroll {
+        overflow: auto;
+      }
       .emoji-group-label {
-        font-size: 11px; color: var(--muted); text-transform: uppercase;
-        letter-spacing: 0.04em; margin: 8px 2px 4px;
+        margin: 8px 2px 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--subtle);
       }
-      .emoji-pop-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+      .emoji-pop-grid {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 2px;
+      }
       .emoji-cell {
-        width: 100%; aspect-ratio: 1; padding: 0; border: none; background: none;
-        display: grid; place-items: center; font-size: 18px; line-height: 1;
-        border-radius: 6px; cursor: pointer;
+        width: 100%;
+        min-height: 0;
+        aspect-ratio: 1;
+        padding: 0;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        font-size: 18px;
+        line-height: 1;
       }
-      .emoji-cell:hover { background: var(--panel-2); }
+      .emoji-cell:hover {
+        background: var(--hover);
+      }
       .emoji-clear {
-        width: 100%; text-align: left; margin-bottom: 4px;
-        color: var(--muted); font-size: 12px;
+        width: 100%;
+        min-height: 30px;
+        justify-content: flex-start;
+        margin-bottom: 4px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12.5px;
       }
-      .emoji-clear:hover { color: var(--danger); border-color: var(--danger); }
-
-      .seg { display: flex; gap: 6px; margin-top: 8px; }
-      .seg button { flex: 1; }
-      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .emoji-clear:hover {
+        color: var(--danger-text);
+        border-color: rgba(240, 71, 71, 0.4);
+        background: var(--danger-soft);
+      }
     </style>
   </head>
   <body>
-    <!-- Step 1 — the bot (always DWEEB's shared bot) ------------------------->
-    <h2><span class="step-num">1</span> <span id="step1Title">Bot &amp; server</span></h2>
+    <!-- The bot + server this menu works in (always DWEEB's shared bot). -->
     <div id="botIntro"></div>
 
     <!-- Legacy manual-connect block. The builder now signs the user in and hands
@@ -264,86 +1133,95 @@
         <input id="guildId" type="text" inputmode="numeric" autocomplete="off"
           placeholder="e.g. 123456789012345678" />
       </div>
-      <div class="bar" style="margin-top: 12px">
+      <div style="margin-top: 12px">
         <button id="connect" type="button" class="primary">Connect</button>
-        <span class="grow"></span>
         <span id="connStatus" class="hint" style="margin: 0"></span>
       </div>
     </div>
     <div class="err" id="connErr"></div>
 
-    <!-- Step 2 — choose roles ------------------------------------------------->
-    <h2><span class="step-num">2</span> <span id="rolesTitle">Choose roles</span>
+    <!-- Step 1 — choose roles ------------------------------------------------->
+    <h2><span class="step-num">1</span> <span id="rolesTitle">Choose roles</span>
       <span class="count" id="roleCount"></span></h2>
     <div id="roleSection" class="locked">
-      <input id="roleSearch" class="role-search" type="text" placeholder="Search roles…" />
+      <input id="roleSearch" class="role-search" type="text" placeholder="Search roles…" aria-label="Search roles" />
       <div id="roles" class="roles"></div>
       <div class="hint" id="rolesHint"></div>
     </div>
 
-    <!-- Step 3 — behaviour ---------------------------------------------------->
-    <h2><span class="step-num">3</span> When clicked…</h2>
+    <!-- Step 2 — behaviour ---------------------------------------------------->
+    <h2><span class="step-num">2</span> When someone clicks</h2>
     <div id="modeSection" class="locked">
       <div id="modes" class="modes"></div>
     </div>
 
     <!-- Customize the dropdown (string select only) --------------------------->
     <div id="optWrap" style="display: none">
-      <h2>Customize the dropdown <span class="count">(optional)</span></h2>
-      <div class="callout good">
-        ✓ DWEEB wires one option per role onto your menu — each one's
-        <code>Value</code> locked to the role's ID, so it can't break. Add an
-        emoji or a subtitle below to make the menu look great.
+      <h2>Dress up the dropdown <span class="count">optional</span></h2>
+      <div class="hint">
+        DWEEB adds one option per role to your menu and locks each to its role, so it can't
+        break. Give them an emoji or a subtitle.
       </div>
       <div id="optList" class="opts"></div>
     </div>
 
-    <!-- Advanced options ------------------------------------------------------>
+    <!-- Step 3 — reply -------------------------------------------------------->
+    <h2><span class="step-num">3</span> Reply to the member</h2>
+    <div id="replySection" class="locked">
+      <div class="seg" id="replySeg">
+        <button type="button" data-rmode="summary" class="sel">Automatic summary</button>
+        <button type="button" data-rmode="custom">Custom message</button>
+      </div>
+      <div class="hint" id="summaryHint">
+        A private reply with what changed, e.g. “✅ Added <b>Red</b>”. Only they see it.
+      </div>
+      <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
+        placeholder="e.g. Roles updated! Check the top of the member list."></textarea>
+    </div>
+
+    <!-- More options ---------------------------------------------------------->
     <details class="adv" id="advanced">
-      <summary>Advanced options <span class="sub">— limits, access, auto-remove, logging</span></summary>
+      <summary>More options <span class="sub">limits, access, auto-remove, logging</span></summary>
       <div class="adv-body">
         <!-- Max roles (select only). -->
         <div class="adv-block" id="maxBlock" style="display: none">
           <div class="adv-title">Limit how many a member can hold</div>
           <div class="adv-desc">
-            Leave empty for no limit. <b>1</b> turns this into a “pick one” menu —
-            choosing a role swaps out the previous one (great for colours,
-            regions, pronouns).
+            Leave empty for no limit. <b>1</b> makes it a “pick one” menu — choosing a role swaps
+            out the previous one (great for colours, regions, pronouns).
           </div>
-          <input id="maxInput" type="number" min="1" step="1" placeholder="No limit"
-            style="max-width: 160px" />
+          <input id="maxInput" class="narrow" type="number" min="1" step="1" placeholder="No limit"
+            aria-label="Maximum roles per member" />
         </div>
 
         <!-- Requirement gate. -->
         <div class="adv-block" id="reqBlock">
-          <div class="adv-title">Who can use this menu</div>
+          <div class="adv-title">Who can use it</div>
           <div class="adv-desc">
-            By default anyone can. Optionally require a role and/or a minimum
-            account age — handy for gating colour roles behind “Member”, or
-            blocking brand-new accounts.
+            Anyone, by default. Require a role (e.g. colour roles only for “Member”) or a minimum
+            account age to keep brand-new accounts out.
           </div>
           <div id="reqIntro"></div>
           <div id="reqRoleSection">
-            <input id="reqSearch" class="role-search" type="text" placeholder="Search roles to require…" />
-            <div id="reqRoles" class="roles" style="max-height: 180px"></div>
+            <input id="reqSearch" class="role-search" type="text" placeholder="Search roles to require…" aria-label="Search roles to require" />
+            <div id="reqRoles" class="roles"></div>
             <div class="seg" id="reqModeSeg">
               <button type="button" data-req="any" class="sel">Any of them</button>
               <button type="button" data-req="all">All of them</button>
             </div>
           </div>
-          <label class="lbl" for="reqAge">Minimum account age (days) — 0 for none</label>
-          <input id="reqAge" type="number" min="0" max="366" step="1" value="0" style="max-width: 160px" />
+          <label class="lbl" for="reqAge">Minimum account age <span class="count">days · 0 for none</span></label>
+          <input id="reqAge" class="narrow" type="number" min="0" max="366" step="1" value="0" />
         </div>
 
         <!-- Temporary roles. -->
         <div class="adv-block" id="expiryBlock">
-          <div class="adv-title">Auto-remove after a while (temporary roles)</div>
+          <div class="adv-title">Take the role back after a while</div>
           <div class="adv-desc">
-            Take the role back automatically a set time after it's granted —
-            perfect for event access or 24-hour pings. Off by default.
+            For temporary roles — event access, 24-hour pings. Off by default.
           </div>
           <div class="row2">
-            <select id="expirySel">
+            <select id="expirySel" aria-label="Remove the role after">
               <option value="0">Off — keep until removed</option>
               <option value="3600">1 hour</option>
               <option value="21600">6 hours</option>
@@ -353,7 +1231,7 @@
               <option value="custom">Custom…</option>
             </select>
             <input id="expiryCustom" type="number" min="1" step="1" placeholder="Minutes"
-              style="display: none" />
+              aria-label="Minutes" style="display: none" />
           </div>
         </div>
 
@@ -361,37 +1239,18 @@
         <div class="adv-block" id="logBlock">
           <div class="adv-title">Log changes to a channel</div>
           <div class="adv-desc">
-            Post a private line (“@member gained Red”) to a Discord webhook every
-            time someone uses this menu. Pick one of your saved webhooks or paste
-            a webhook URL.
+            Post a line like “@member gained Red” to a webhook each time someone uses this.
           </div>
-          <select id="logSel"></select>
+          <select id="logSel" aria-label="Log webhook"></select>
           <input id="logUrl" type="text" autocomplete="off" placeholder="https://discord.com/api/webhooks/…"
-            style="display: none; margin-top: 8px" />
+            aria-label="Webhook URL" style="display: none; margin-top: 8px" />
         </div>
       </div>
     </details>
 
-    <!-- Step 4 — reply -------------------------------------------------------->
-    <h2><span class="step-num">4</span> Reply to the member</h2>
-    <div id="replySection" class="locked">
-      <div class="seg" id="replySeg">
-        <button type="button" data-rmode="summary" class="sel">Automatic summary</button>
-        <button type="button" data-rmode="custom">Custom message</button>
-      </div>
-      <div class="hint" id="summaryHint">
-        I'll reply privately with what changed, e.g.
-        “✅ Added <b>Red</b>”. Nobody else sees it.
-      </div>
-      <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
-        placeholder="e.g. Roles updated! Check the top of the member list."></textarea>
-    </div>
-
-    <div class="err" id="error"></div>
-
     <div class="bar">
+      <div class="err" id="error" role="alert"></div>
       <button id="cancel" type="button">Cancel</button>
-      <span class="grow"></span>
       <button id="save" type="button" class="primary">Save</button>
     </div>
 
@@ -482,15 +1341,13 @@
 
         if (!defaultBot) {
           $("manualConnect").style.display = "none";
-          $("step1Title").textContent = "Bot";
-          intro.innerHTML = `<div class="callout bad">This deployment has no Self Role bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Roles</b>) for Self Role to work.</div>`;
+          intro.innerHTML = `<div class="context bad"><span>This deployment has no Self Role bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Roles</b>) for Self Role to work.</span></div>`;
           sendResize();
           return;
         }
 
         if (autoMode()) {
           $("manualConnect").style.display = "none";
-          $("step1Title").textContent = "Bot & server";
           const targetName = guildName || hostGuildName;
           const where = targetName ? `<b>${escapeHtml(targetName)}</b>` : "this server";
           if (autoState === "ok" && guildMismatch) {
@@ -498,11 +1355,11 @@
             const here = hostGuildName
               ? `<b>${escapeHtml(hostGuildName)}</b>`
               : "the server you're building for";
-            intro.innerHTML = `<div class="callout warn">⚠ This menu was set up for ${built}, but you're now building in ${here}. You can't edit ${built}'s roles from here — <a href="#" id="switchLink">switch it to ${here}</a> to rebuild it for this server, or reopen it with ${built} selected in DWEEB.</div>`;
+            intro.innerHTML = `<div class="context warn"><span>This menu was set up for ${built}, but you're now building in ${here}. You can't edit ${built}'s roles from here — <a href="#" id="switchLink">switch it to ${here}</a> to rebuild it for this server, or reopen it with ${built} selected in DWEEB.</span></div>`;
             const sw = $("switchLink");
             if (sw) sw.onclick = (e) => { e.preventDefault(); switchToHostGuild(); };
           } else if (autoState === "ok") {
-            intro.innerHTML = `<div class="callout good">✓ Using the <b>DWEEB bot</b> in ${where} — nothing to set up here.</div>`;
+            intro.innerHTML = `<div class="context"><span>Roles in ${where}</span><span class="sep">·</span><span>given by the DWEEB bot</span></div>`;
           } else if (autoState === "error") {
             const lead = autoError
               ? escapeHtml(autoError)
@@ -511,27 +1368,26 @@
             const add = invite
               ? ` <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a> ·`
               : "";
-            intro.innerHTML = `<div class="callout bad">${lead}${add} <a href="#" id="retryLink">Try again</a></div>`;
+            intro.innerHTML = `<div class="context bad"><span>${lead}${add} <a href="#" id="retryLink">Try again</a></span></div>`;
             const retry = $("retryLink");
             if (retry) retry.onclick = (e) => { e.preventDefault(); connect(); };
           } else {
-            intro.innerHTML = `<div class="callout">Connecting to ${where} with the <b>DWEEB bot</b>…</div>`;
+            intro.innerHTML = `<div class="context"><span>Loading roles from ${where}…</span></div>`;
           }
           sendResize();
           return;
         }
 
         $("manualConnect").style.display = "none";
-        $("step1Title").textContent = "Bot & server";
         const invite = botInviteUrl();
         const addBot = invite
           ? ` Haven't added the bot? <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a>.`
           : "";
         if (instanceId) {
           const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "another server";
-          intro.innerHTML = `<div class="callout warn">⚠ This menu assigns roles in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this menu to edit it.${addBot}</div>`;
+          intro.innerHTML = `<div class="context warn"><span>This menu assigns roles in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this menu to edit it.${addBot}</span></div>`;
         } else {
-          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — pick the server you're building this message for, then reopen this menu. It'll use that exact server automatically, with the <b>DWEEB bot</b> assigning roles.${addBot}</div>`;
+          intro.innerHTML = `<div class="context warn"><span>Connect your server in DWEEB first — pick the server you're building this message for, then reopen this menu. It'll use that exact server automatically, with the <b>DWEEB bot</b> assigning roles.${addBot}</span></div>`;
         }
         sendResize();
       }
@@ -696,9 +1552,9 @@
 
       function updateRoleCount() {
         $("roleCount").textContent = isSelect()
-          ? `(${selected.size} selected)`
+          ? `${selected.size} selected`
           : selected.size
-            ? "(1 selected)"
+            ? "1 selected"
             : "";
         $("rolesTitle").textContent = isSelect() ? "Choose roles" : "Choose the role";
         $("rolesHint").innerHTML = isSelect()
@@ -740,7 +1596,7 @@
           dot.style.background = hexColor(r.color);
           const name = document.createElement("span");
           name.className = "o-name";
-          name.textContent = r.name;
+          name.append(dot, document.createTextNode(r.name));
 
           const desc = document.createElement("input");
           desc.type = "text";
@@ -750,7 +1606,7 @@
           desc.value = meta.description || "";
           desc.addEventListener("input", () => { meta.description = desc.value; });
 
-          row.append(emojiBtn, dot, name, desc);
+          row.append(emojiBtn, name, desc);
           list.appendChild(row);
         }
         sendResize();

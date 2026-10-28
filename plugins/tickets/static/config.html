@@ -4,333 +4,1240 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tickets — configure</title>
+<style data-plugin-ui>
+/*
+ * Shared look for every plugin's config page (plugins/<crate>/static/config.html).
+ *
+ * Each page is served by its own crate with `include_str!` and built in its own
+ * Docker context, so a page can't link a common file. Instead this stylesheet is
+ * the single source and `bun run sync:plugin-ui` copies it into every page's
+ * `<style data-plugin-ui>` block; `src/core/plugins/pluginUi.test.ts` fails when a
+ * page's copy drifts. Edit this file, then run the sync.
+ *
+ * The page is framed full-bleed inside DWEEB's "Configure …" dialog, so these
+ * tokens mirror the editor's own (`src/styles/tokens.css`): the page background
+ * is the dialog's surface, and the sticky action bar reads as the dialog footer.
+ * Page-specific widgets keep their own `<style>` after this block and may use
+ * the legacy names (`--panel`, `--panel-2`, `--green`, `--yellow`), aliased below.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #17191f;
+  --surface: #1a1d23;
+  --input: #1e2128;
+  --hover: #242833;
+  --active: #2c313d;
+  --border: #2a2e38;
+  --border-strong: #3b4150;
+  --text: #eceef3;
+  --muted: #aab1bf;
+  --subtle: #828a99;
+  --accent: #5865f2;
+  --accent-hover: #4752c4;
+  --accent-soft: rgba(88, 101, 242, 0.16);
+  --accent-text: #aeb6ff;
+  --danger: #f04747;
+  --danger-soft: rgba(240, 71, 71, 0.12);
+  --danger-text: #ff8a8c;
+  --success: #2dc06b;
+  --success-soft: rgba(45, 192, 107, 0.12);
+  --success-text: #6ddf9e;
+  --warning: #f0b232;
+  --warning-soft: rgba(240, 178, 50, 0.12);
+  --warning-text: #f7cb6b;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --pad: 20px;
+  --ring: 0 0 0 2px var(--accent);
+  /* Legacy names the page-specific styles still use. */
+  --panel: var(--surface);
+  --panel-2: var(--input);
+  --green: var(--success);
+  --yellow: var(--warning);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f5f6f8;
+  --input: #ffffff;
+  --hover: #eef0f3;
+  --active: #e3e6eb;
+  --border: #dcdfe5;
+  --border-strong: #c4c9d2;
+  --text: #1e1f22;
+  --muted: #4e5058;
+  --subtle: #6b6f78;
+  --accent-text: #4752c4;
+  --danger-text: #c22d31;
+  --success-text: #1a7f45;
+  --warning-text: #946200;
+}
+
+* {
+  box-sizing: border-box;
+}
+/* Chromium/WebKit take the ::-webkit-scrollbar rules below; setting the
+   standard properties there too would override them (and Windows then draws
+   arrow buttons on the thin bar), so they are only for engines without them. */
+@supports not selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+body {
+  margin: 0;
+  padding: var(--pad) var(--pad) 0;
+  font:
+    14px/1.5 "gg sans",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent-text);
+}
+b,
+strong {
+  font-weight: 650;
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+/* A section title, optionally numbered with `.step-num`. Sentence case: the
+   old uppercase labels shouted and were harder to scan. */
+h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 10px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+/* No divider above the page's first section, or the first one in a panel. */
+body > h2:first-of-type,
+.details-body > h2:first-child,
+.adv-body > h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.step-num {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--subtle);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Server context line ────────────────────────────────────────────────── */
+/* Which server the page is building for, as one quiet line above the form —
+   it used to take a whole numbered step. `.warn` when no server is connected. */
+.context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 22px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.context::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+.context b {
+  color: var(--text);
+}
+.context .sep {
+  color: var(--subtle);
+}
+.context.warn {
+  border-color: rgba(240, 178, 50, 0.32);
+  background: var(--warning-soft);
+  color: var(--text);
+}
+.context.warn::before {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px rgba(240, 178, 50, 0.2);
+}
+.context.bad {
+  border-color: rgba(240, 71, 71, 0.35);
+  background: var(--danger-soft);
+  color: var(--text);
+}
+.context.bad::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(240, 71, 71, 0.2);
+}
+.context + .callout {
+  margin: -12px 0 22px;
+}
+.context .note {
+  flex-basis: 100%;
+  padding-left: 16px;
+}
+
+/* ── Labels, hints, inline code ─────────────────────────────────────────── */
+label.lbl {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.hint {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.hint b {
+  color: var(--text);
+}
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font:
+    12px ui-monospace,
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    monospace;
+}
+.req {
+  color: var(--danger-text);
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+input[type="text"],
+input[type="url"],
+input[type="number"],
+input[type="password"],
+input[type="search"],
+input[type="datetime-local"],
+input[type="color"],
+select,
+textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--subtle);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aab1bf' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+select option {
+  background: var(--input);
+  color: var(--text);
+}
+input[type="color"] {
+  padding: 4px;
+  cursor: pointer;
+}
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+.row2 {
+  display: flex;
+  gap: 12px;
+}
+.row2 > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Checkboxes and radios: drawn, so they read on the dark surface. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--input);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 59%, 39% 98%, 100% 21%, 85% 7%, 38% 67%);
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+input[type="radio"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:checked::before,
+input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A setting row: a switch, then its label (and an optional `.t`/`.d` pair). */
+.checkrow,
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.checkrow label,
+.check label {
+  margin: 0;
+  cursor: pointer;
+}
+.checkrow input[type="checkbox"],
+.check input[type="checkbox"] {
+  width: 34px;
+  height: 20px;
+  margin-top: 1px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--active);
+  place-items: center start;
+  padding: 0 3px;
+}
+.checkrow input[type="checkbox"]::before,
+.check input[type="checkbox"]::before {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  clip-path: none;
+  background: #fff;
+  transform: none;
+  transition: transform 140ms ease;
+}
+.checkrow input[type="checkbox"]:checked,
+.check input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+.checkrow input[type="checkbox"]:checked::before,
+.check input[type="checkbox"]:checked::before {
+  transform: translateX(14px);
+}
+.check .t {
+  display: block;
+  font-weight: 600;
+}
+.check .d {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--hover);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+button:hover {
+  background: var(--active);
+  border-color: var(--border-strong);
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+button.primary:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
+}
+button:disabled,
+button:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+button.ghost:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+/* "+ Add …" buttons under a list. */
+button.add,
+.add-option,
+button.dashed {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+button.add:hover,
+.add-option:hover,
+button.dashed:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+/* Square icon buttons (move up/down, remove). */
+button.icon {
+  flex: none;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+button.icon:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+button.icon.del:hover {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+/* ── Sticky action bar ─────────────────────────────────────────────────── */
+/* Save stays in reach however long the form is: the dialog frames this page
+   at a capped height, so a bar at the end of the document used to sit below
+   the fold of a nested scroll box. Errors render in the bar, beside Save. */
+.bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 28px calc(-1 * var(--pad)) 0;
+  padding: 12px var(--pad);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 24px -12px rgba(0, 0, 0, 0.55);
+}
+.bar .grow {
+  flex: 1;
+}
+.bar .err {
+  flex: 1 1 100%;
+  order: -1;
+  margin: 0 0 2px;
+}
+.err {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(240, 71, 71, 0.35);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.err:empty {
+  display: none;
+}
+
+/* ── Callouts ───────────────────────────────────────────────────────────── */
+.callout {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  border-radius: var(--radius);
+  background: rgba(88, 101, 242, 0.08);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.callout.good {
+  border-color: rgba(45, 192, 107, 0.3);
+  background: var(--success-soft);
+}
+.callout.warn {
+  border-color: rgba(240, 178, 50, 0.32);
+  background: var(--warning-soft);
+}
+.callout.bad {
+  border-color: rgba(240, 71, 71, 0.35);
+  background: var(--danger-soft);
+}
+.callout b {
+  color: var(--text);
+}
+.callout a {
+  font-weight: 600;
+}
+
+/* ── Disclosures ───────────────────────────────────────────────────────── */
+details {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform 140ms ease;
+}
+details[open] > summary::before {
+  transform: rotate(90deg);
+}
+summary:hover {
+  background: var(--hover);
+}
+summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+details[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+summary .sub {
+  font-weight: 400;
+  color: var(--subtle);
+  font-size: 13px;
+}
+.details-body,
+.adv-body,
+.gate-body,
+.route-body {
+  padding: 4px 14px 16px;
+}
+
+/* ── Role / channel pickers ────────────────────────────────────────────── */
+/* Each option is a `<label>` holding its input, a colour dot and a name. They
+   render as wrapping chips — a long list of full-width rows (one per role, for
+   every picker on the page) made these forms several screens tall. The input
+   stays focusable and announced; it is only hidden visually. */
+.roles,
+.picker,
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 196px;
+  overflow: auto;
+  padding: 2px;
+}
+.roles .role,
+.picker .item,
+.list .pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input);
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.roles .role:hover,
+.picker .item:hover,
+.list .pick:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.roles .role input,
+.picker .item input,
+.list .pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.roles .role:has(input:checked),
+.picker .item:has(input:checked),
+.list .pick:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.roles .role:has(input:checked)::after,
+.picker .item:has(input:checked)::after,
+.list .pick:has(input:checked)::after {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 1px;
+  background: var(--accent-text);
+  clip-path: polygon(14% 44%, 0 59%, 39% 98%, 100% 21%, 85% 7%, 38% 67%);
+}
+.roles .role:has(input:focus-visible),
+.picker .item:has(input:focus-visible),
+.list .pick:has(input:focus-visible) {
+  box-shadow: var(--ring);
+}
+.roles .role:has(input:disabled),
+.picker .item:has(input:disabled),
+.list .pick:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.roles .role:has(input:disabled) input,
+.picker .item:has(input:disabled) input,
+.list .pick:has(input:disabled) input {
+  cursor: not-allowed;
+}
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.roles .role .name,
+.picker .item .name,
+.list .pick .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roles .tag,
+.picker .tag,
+.list .tag,
+.warn-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--active);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.warn-tag {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+.roles > .hint,
+.picker > .hint,
+.list > .hint {
+  margin: 4px 2px;
+}
+.role-search,
+.search {
+  margin-top: 8px;
+  padding-left: 34px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23828a99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 11px center;
+}
+.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Segmented choices ─────────────────────────────────────────────────── */
+/* Two or three mutually exclusive options: `.seg` holds plain buttons (the
+   chosen one `.sel`); `.modes` holds richer cards (`.mode.sel` / `.mode.on`). */
+.seg,
+.miniseg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+}
+.seg button,
+.miniseg button {
+  flex: 1;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.miniseg button {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+.seg button:hover,
+.miniseg button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.seg button.sel,
+.miniseg button.sel {
+  background: var(--active);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.mode {
+  position: relative;
+  display: block;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+  text-align: left;
+  font-weight: 400;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.mode:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.mode.sel,
+.mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.mode:has(input:focus-visible) {
+  box-shadow: var(--ring);
+}
+
+/* ── Placeholder chips ─────────────────────────────────────────────────── */
+.vars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.vars .chip {
+  min-height: 26px;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font:
+    600 12px ui-monospace,
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    monospace;
+}
+.vars .chip:hover {
+  border-color: var(--accent);
+  background: rgba(88, 101, 242, 0.26);
+}
+
+/* ── Repeating item cards (topics, options, questions…) ────────────────── */
+.card,
+.field,
+.group {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+@media (max-width: 480px) {
+  :root {
+    --pad: 14px;
+  }
+  .row2 {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
+</style>
     <style>
-      :root {
-        color-scheme: dark;
-        --bg: #1e1f22;
-        --panel: #2b2d31;
-        --panel-2: #232428;
-        --border: #3a3c41;
-        --text: #f2f3f5;
-        --muted: #b5bac1;
-        --accent: #5865f2;
-        --green: #3ba55d;
-        --yellow: #f0b232;
-        --danger: #da373c;
-        --radius: 8px;
-      }
-      [data-theme="light"] {
-        color-scheme: light;
-        --bg: #ffffff;
-        --panel: #f2f3f5;
-        --panel-2: #e3e5e8;
-        --border: #d7d9dc;
-        --text: #1e1f22;
-        --muted: #4e5058;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 16px;
-        font: 14px/1.5 system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-      }
-      h2 {
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
-        margin: 20px 0 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      h2:first-of-type { margin-top: 0; }
-      .step-num {
-        flex: none;
-        display: inline-grid;
-        place-items: center;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: var(--accent);
-        color: #fff;
-        font-size: 12px;
-        font-weight: 700;
-      }
-      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
-      input[type="text"], input[type="number"], select, textarea {
-        width: 100%;
-        padding: 8px 10px;
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        font: inherit;
-      }
-      textarea { resize: vertical; }
-      input:focus-visible, select:focus-visible, textarea:focus-visible {
-        outline: none;
-        border-color: var(--accent);
-      }
-      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-      .hint code, .callout code { color: var(--accent); }
-      .row2 { display: flex; gap: 8px; }
-      .row2 > * { flex: 1; }
-      button {
-        padding: 8px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
-        cursor: pointer;
-      }
-      button:hover { border-color: var(--accent); }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
-      .bar .grow { flex: 1; }
-      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
-
-      .locked { opacity: 0.45; pointer-events: none; filter: grayscale(0.3); }
-
-      .callout {
-        border: 1px solid var(--border);
-        border-left: 3px solid var(--accent);
-        background: var(--panel);
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 13px;
+      /* Tickets only — the shared look lives in the block above. */
+      .seg {
         margin-top: 8px;
       }
-      .callout.good { border-left-color: var(--green); }
-      .callout.warn { border-left-color: var(--yellow); }
-      .callout.bad { border-left-color: var(--danger); }
-      .callout b { color: var(--text); }
+      .help ol {
+        margin: 8px 0 0;
+        padding-left: 20px;
+      }
+      .help li {
+        margin: 4px 0;
+        color: var(--muted);
+      }
 
-      details { margin-top: 8px; }
-      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
-      details.adv { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 8px; }
-      details.adv > summary { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-      .help ol { margin: 8px 0 0; padding-left: 20px; }
-      .help li { margin: 4px 0; color: var(--muted); }
-
-      .list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 280px; overflow: auto; }
-      .pick {
+      /* Editor rows (topics / intake questions). */
+      .editor {
         display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .editor .item {
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+      }
+      .editor .item .head {
+        display: flex;
+        gap: 6px;
         align-items: center;
-        gap: 10px;
-        padding: 7px 9px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel-2);
-        cursor: pointer;
       }
-      .pick:hover { border-color: var(--accent); }
-      .pick input { flex: none; margin: 0; accent-color: var(--accent); }
-      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
-      .pick .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .pick .tag { flex: none; font-size: 11px; color: var(--yellow); }
-      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
-      .search { margin-top: 8px; }
-
-      .seg { display: flex; gap: 6px; margin-top: 8px; }
-      .seg button { flex: 1; }
-      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-      .check { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; }
-      .check input { margin: 3px 0 0; accent-color: var(--accent); flex: none; }
-      .check .t { font-size: 13px; }
-      .check .d { font-size: 12px; color: var(--muted); }
-
-      /* Editor rows (topics / intake). */
-      .editor { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-      .item {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel-2);
-        padding: 10px;
+      .editor .item .head .grow {
+        flex: 1;
+        font-weight: 600;
       }
-      .item .head { display: flex; gap: 8px; align-items: center; }
-      .item .head .grow { flex: 1; }
-      .item .head button { padding: 4px 8px; font-size: 12px; }
-      .item .sub { display: flex; gap: 8px; margin-top: 8px; }
-      .item .sub > * { flex: 1; }
-      .miniseg { display: flex; gap: 4px; }
-      .miniseg button { padding: 6px 8px; font-size: 12px; }
-      .miniseg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
-      .add { margin-top: 8px; }
+      .editor .item .sub {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .editor .item .sub > * {
+        flex: 1;
+        min-width: 0;
+      }
+      .editor .item .sub .miniseg {
+        flex: none;
+      }
+      /* A topic's emoji box needs room for a pasted <:name:id>, not half the row. */
+      .editor .item .sub > input:first-child {
+        flex: 0 0 120px;
+      }
+      button.add {
+        margin-top: 10px;
+      }
 
       /* A problem the bot has with the picked category / log channel. */
-      .warn-text { font-size: 12px; color: var(--yellow); margin-top: 6px; white-space: pre-line; }
-      .warn-text:empty { display: none; }
-
-      /* Per-topic routing (category + extra staff). */
-      details.route { margin-top: 8px; }
-      details.route > summary { font-size: 12px; }
-      details.route .badge { color: var(--muted); }
-      .route-body { padding: 4px 0 0 2px; }
-      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
-      .chip {
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 3px 4px 3px 8px; border: 1px solid var(--border); border-radius: 999px;
-        font-size: 12px; background: var(--panel);
+      .warn-text {
+        margin-top: 8px;
+        padding: 8px 11px;
+        border: 1px solid rgba(240, 178, 50, 0.3);
+        border-radius: var(--radius);
+        background: var(--warning-soft);
+        color: var(--warning-text);
+        font-size: 12.5px;
+        line-height: 1.5;
+        white-space: pre-line;
       }
-      .chip button { padding: 0 6px; border: 0; background: none; line-height: 1.4; }
-      .chips select { width: auto; flex: 1; min-width: 140px; padding: 4px 8px; font-size: 12px; }
+      .warn-text:empty {
+        display: none;
+      }
+
+      /* Per-topic routing (category + extra staff), nested in its topic card. */
+      details.route {
+        margin-top: 10px;
+        border-radius: var(--radius);
+        background: var(--bg);
+      }
+      details.route > summary {
+        padding: 8px 10px;
+        border-radius: var(--radius);
+        font-size: 13px;
+      }
+      details.route .badge {
+        font-weight: 400;
+        color: var(--subtle);
+      }
+      .route-body {
+        padding: 0 10px 12px;
+      }
+      .route-body > label.lbl:first-child {
+        margin-top: 4px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+        align-items: center;
+      }
+      .chips .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 3px 2px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--input);
+        font-size: 12.5px;
+      }
+      .chips .chip button {
+        width: 22px;
+        min-height: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .chips .chip button:hover {
+        background: var(--danger-soft);
+        color: var(--danger-text);
+      }
+      .chips select {
+        width: auto;
+        flex: 1;
+        min-width: 150px;
+        min-height: 32px;
+        padding: 4px 30px 4px 10px;
+        font-size: 12.5px;
+      }
+      .sub-h {
+        margin: 22px 0 4px;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .details-body > .sub-h:first-child {
+        margin-top: 6px;
+      }
     </style>
   </head>
   <body>
-    <!-- Step 1 — the shared DWEEB bot --------------------------------------->
-    <h2><span class="step-num">1</span> <span id="step1Title">Bot &amp; server</span></h2>
+    <!-- The shared DWEEB bot + server, and its permission pre-flight. -->
     <div id="botIntro"></div>
     <!-- Hidden value-holder for the connected server id (auto-filled). -->
     <input id="guildId" type="hidden" />
     <div class="err" id="connErr"></div>
 
-    <!-- Step 2 — topics (string select only) -------------------------------->
+    <!-- Topics (string select only) ------------------------------------------>
+    <h2 id="topicsTitle" style="display: none"><span class="step-num">1</span> Menu topics <span class="count" id="topicCount"></span></h2>
     <div id="topicsWrap" style="display: none">
-      <h2><span class="step-num">2</span> Menu topics <span class="count" id="topicCount"></span></h2>
       <div id="topicsSection" class="locked">
         <div class="hint">
-          Each topic is one entry in the dropdown. Picking it opens a ticket
-          tagged with that topic — DWEEB wires the option values for you. Open
-          a topic's <b>Routing</b> to send its tickets to their own category or
-          team.
+          Each topic is one choice in the dropdown and opens a ticket tagged with it. Open a
+          topic's <b>Routing</b> to send its tickets to their own category or team.
         </div>
         <div id="topics" class="editor"></div>
         <button type="button" id="addTopic" class="add">+ Add topic</button>
       </div>
     </div>
 
-    <!-- Step 3 — staff & channels ------------------------------------------->
-    <h2><span class="step-num" id="staffStepNum">2</span> Who handles tickets
+    <!-- Staff & channels ------------------------------------------------------>
+    <h2><span class="step-num" id="staffStepNum">1</span> Who handles tickets
       <span class="count" id="staffCount"></span></h2>
     <div id="staffSection" class="locked">
-      <label class="lbl">Each ticket is…</label>
+      <label class="lbl">Each ticket is</label>
       <div class="seg" id="modeSeg">
         <button type="button" data-mode="channel" class="sel">A private channel</button>
         <button type="button" data-mode="thread">A private thread</button>
       </div>
       <div class="hint" id="modeHint"></div>
 
-      <label class="lbl">Staff roles — they can see &amp; reply in every ticket</label>
-      <input id="staffSearch" class="search" type="text" placeholder="Search roles…" />
+      <label class="lbl">Staff roles <span class="count">see &amp; reply in every ticket</span></label>
+      <input id="staffSearch" class="search" type="text" placeholder="Search roles…" aria-label="Search staff roles" />
       <div id="staffRoles" class="list"></div>
       <div class="hint" id="staffHint"></div>
       <div class="warn-text" id="staffWarn"></div>
 
       <div id="categoryBlock">
-        <label class="lbl" for="category">Create ticket channels under…</label>
+        <label class="lbl" for="category">Create ticket channels under</label>
         <select id="category"></select>
-        <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root. If the category fills up (Discord allows 50 channels) or the bot can't use it, tickets open at the top level instead of failing.</div>
+        <div class="hint">
+          A category keeps tickets tidy. If it fills up (Discord allows 50 channels) or the bot
+          can't use it, tickets open at the top level instead of failing.
+        </div>
         <div class="warn-text" id="categoryWarn"></div>
       </div>
 
       <div id="threadBlock" style="display: none">
-        <label class="lbl" for="threadChannel">Open ticket threads in…</label>
+        <label class="lbl" for="threadChannel">Open ticket threads in</label>
         <select id="threadChannel"></select>
-        <div class="hint">Usually your support channel. Members need to see it to see their ticket — they don't need to post there. Discord only makes private threads in text channels, not announcement or forum channels.</div>
+        <div class="hint">
+          Usually your support channel. Members need to see it (not post in it) to see their
+          ticket. Private threads only work in text channels.
+        </div>
         <div class="warn-text" id="threadWarn"></div>
       </div>
 
-      <label class="lbl" for="logChannel">Log &amp; transcript channel</label>
+      <label class="lbl" for="logChannel">Log &amp; transcript channel <span class="count">optional</span></label>
       <select id="logChannel"></select>
-      <div class="hint">Where open, close and reopen notices and HTML transcripts are posted. Optional.</div>
+      <div class="hint">Where open, close and reopen notices and transcripts are posted.</div>
       <div class="warn-text" id="logWarn"></div>
     </div>
 
-    <!-- Step 4 — welcome ---------------------------------------------------->
-    <h2><span class="step-num" id="welcomeStepNum">3</span> Welcome message</h2>
+    <!-- Welcome --------------------------------------------------------------->
+    <h2><span class="step-num" id="welcomeStepNum">2</span> Welcome message</h2>
     <div id="welcomeSection" class="locked">
-      <textarea id="welcome" rows="4" maxlength="1500"></textarea>
+      <textarea id="welcome" rows="4" maxlength="1500" aria-label="Welcome message"></textarea>
+      <div class="vars">
+        <span>Placeholders:</span>
+        <code>{user}</code><code>{username}</code><code>{ticket}</code><code>{topic}</code><code>{staff}</code>
+      </div>
       <div class="hint">
-        Placeholders: <code>{user}</code> (mention) · <code>{username}</code> ·
-        <code>{ticket}</code> (link to the ticket) · <code>{topic}</code> ·
-        <code>{staff}</code> (your staff roles).
+        <code>{user}</code> mentions the opener, <code>{ticket}</code> links the ticket and
+        <code>{staff}</code> names your staff roles.
       </div>
 
-      <!-- Advanced — hidden by default so the quick path is short. -->
+      <!-- More options — collapsed so the quick path stays short. -->
       <details class="adv">
-        <summary>Advanced options</summary>
-
-        <h2 style="margin-top:16px"><span class="step-num">+</span> Intake form
-          <span class="count" id="intakeCount"></span></h2>
-        <div class="hint">
-          Ask 0–5 questions in a pop-up <b>before</b> the ticket opens. Leave empty
-          to open instantly. Answers are posted at the top of the ticket.
-        </div>
-        <div id="intake" class="editor"></div>
-        <button type="button" id="addField" class="add">+ Add question</button>
-
-        <h2 style="margin-top:20px"><span class="step-num">+</span> Names &amp; pings</h2>
-        <label class="lbl">Ticket name</label>
-        <div class="seg" id="namingSeg">
-          <button type="button" data-naming="number" class="sel">Numbered · ticket-0001</button>
-          <button type="button" data-naming="username">Username · ticket-name</button>
-        </div>
-        <label class="check"><input type="checkbox" id="pingOpener" checked />
-          <span><span class="t">Ping the opener</span><div class="d">Mention them in the welcome so they get a notification.</div></span></label>
-        <label class="check"><input type="checkbox" id="pingStaff" />
-          <span><span class="t" id="pingStaffT">Ping staff roles</span><div class="d" id="pingStaffD">Notify your staff roles when a ticket opens (roles must be mentionable).</div></span></label>
-
-        <h2 style="margin-top:20px"><span class="step-num">+</span> Closing</h2>
-        <label class="lbl">When a ticket is closed</label>
-        <div class="seg" id="closeSeg">
-          <button type="button" data-close="delete" class="sel" id="closeDeleteBtn">Delete the channel</button>
-          <button type="button" data-close="lock" id="closeLockBtn">Lock &amp; keep it</button>
-        </div>
-        <div class="hint" id="closeHint"></div>
-        <label class="check"><input type="checkbox" id="closeConfirm" checked />
-          <span><span class="t">Ask for a reason on close</span><div class="d">Pops a quick box (also guards against an accidental close).</div></span></label>
-        <label class="check"><input type="checkbox" id="openerClose" checked />
-          <span><span class="t">Let the opener close their own ticket</span><div class="d">Staff can always close; this also lets the person who opened it.</div></span></label>
-        <label class="check"><input type="checkbox" id="claimEnabled" checked />
-          <span><span class="t">Show a Claim button</span><div class="d">Staff can take ownership of a ticket (and release it) so two people don't double up.</div></span></label>
-        <label class="check"><input type="checkbox" id="transcripts" />
-          <span><span class="t">Save an HTML transcript on close</span><div class="d" id="transcriptsHint">Posted to the log channel above.</div></span></label>
-        <label class="check"><input type="checkbox" id="transcriptDm" />
-          <span><span class="t">Also DM the transcript to the person who opened the ticket</span><div class="d">Best-effort — members who don't accept DMs from server members won't get it.</div></span></label>
-        <div class="callout warn" id="contentNotice" style="display: none">
-          This bot can't read what members type — Discord only shares message
-          text with apps that have the <b>Message Content</b> intent, and it's
-          off for this one. Transcripts still record who took part and when,
-          plus the intake answers and the close reason, but not the
-          conversation itself.
-        </div>
-
-        <h2 style="margin-top:20px"><span class="step-num">+</span> Anti-spam limits</h2>
-        <div class="row2">
-          <div>
-            <label class="lbl" for="maxOpen">Max open tickets per member</label>
-            <input id="maxOpen" type="number" min="0" max="50" value="1" />
-            <div class="hint">0 = unlimited. Closed tickets kept by “Lock &amp; keep” don't count.</div>
+        <summary>More options <span class="sub">intake form, names, closing, limits</span></summary>
+        <div class="details-body">
+          <div class="sub-h">Intake form <span class="count" id="intakeCount"></span></div>
+          <div class="hint">
+            Ask up to 5 questions in a pop-up <b>before</b> the ticket opens — answers are posted at
+            the top of the ticket. Leave empty to open instantly.
           </div>
-          <div>
-            <label class="lbl" for="cooldown">Cooldown between opens (seconds)</label>
-            <input id="cooldown" type="number" min="0" max="86400" value="30" />
-            <div class="hint">0 = none.</div>
-          </div>
-        </div>
+          <div id="intake" class="editor"></div>
+          <button type="button" id="addField" class="add">+ Add question</button>
 
-        <h2 style="margin-top:20px"><span class="step-num">+</span> Reply to the opener</h2>
-        <div class="seg" id="replySeg">
-          <button type="button" data-rmode="summary" class="sel">Automatic</button>
-          <button type="button" data-rmode="custom">Custom message</button>
+          <div class="sub-h">Names &amp; pings</div>
+          <label class="lbl">Ticket name</label>
+          <div class="seg" id="namingSeg">
+            <button type="button" data-naming="number" class="sel">Numbered · ticket-0001</button>
+            <button type="button" data-naming="username">Username · ticket-name</button>
+          </div>
+          <label class="check"><input type="checkbox" id="pingOpener" checked />
+            <span><span class="t">Ping the opener</span><span class="d">Mention them in the welcome so they get a notification.</span></span></label>
+          <label class="check"><input type="checkbox" id="pingStaff" />
+            <span><span class="t" id="pingStaffT">Ping staff roles</span><span class="d" id="pingStaffD">Notify your staff roles when a ticket opens (roles must be mentionable).</span></span></label>
+
+          <div class="sub-h">Closing</div>
+          <label class="lbl">When a ticket is closed</label>
+          <div class="seg" id="closeSeg">
+            <button type="button" data-close="delete" class="sel" id="closeDeleteBtn">Delete the channel</button>
+            <button type="button" data-close="lock" id="closeLockBtn">Lock &amp; keep it</button>
+          </div>
+          <div class="hint" id="closeHint"></div>
+          <label class="check"><input type="checkbox" id="closeConfirm" checked />
+            <span><span class="t">Ask for a reason on close</span><span class="d">A quick box that also guards against an accidental close.</span></span></label>
+          <label class="check"><input type="checkbox" id="openerClose" checked />
+            <span><span class="t">Let the opener close their own ticket</span><span class="d">Staff can always close.</span></span></label>
+          <label class="check"><input type="checkbox" id="claimEnabled" checked />
+            <span><span class="t">Show a Claim button</span><span class="d">Staff take ownership of a ticket so two people don't double up.</span></span></label>
+          <label class="check"><input type="checkbox" id="transcripts" />
+            <span><span class="t">Save a transcript on close</span><span class="d" id="transcriptsHint">Posted to the log channel above.</span></span></label>
+          <label class="check"><input type="checkbox" id="transcriptDm" />
+            <span><span class="t">Also DM the transcript to the opener</span><span class="d">Best-effort — members who don't accept DMs from server members won't get it.</span></span></label>
+          <div class="callout warn" id="contentNotice" style="display: none">
+            This bot can't read what members type — Discord only shares message text with apps
+            that have the <b>Message Content</b> intent, and it's off for this one. Transcripts still
+            record who took part and when, plus the intake answers and the close reason, but not
+            the conversation itself.
+          </div>
+
+          <div class="sub-h">Anti-spam limits</div>
+          <div class="row2">
+            <div>
+              <label class="lbl" for="maxOpen">Open tickets per member</label>
+              <input id="maxOpen" type="number" min="0" max="50" value="1" />
+              <div class="hint">0 = unlimited. Locked tickets don't count.</div>
+            </div>
+            <div>
+              <label class="lbl" for="cooldown">Cooldown between opens</label>
+              <input id="cooldown" type="number" min="0" max="86400" value="30" />
+              <div class="hint">In seconds · 0 = none.</div>
+            </div>
+          </div>
+
+          <div class="sub-h">Reply to the opener</div>
+          <div class="seg" id="replySeg">
+            <button type="button" data-rmode="summary" class="sel">Automatic</button>
+            <button type="button" data-rmode="custom">Custom message</button>
+          </div>
+          <div class="hint" id="summaryHint">A private “🎫 Opened your ticket: #channel” the moment they click.</div>
+          <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
+            placeholder="e.g. Thanks! We've opened {ticket} — we'll be with you shortly."></textarea>
         </div>
-        <div class="hint" id="summaryHint">A private “🎫 Opened your ticket: #channel” the moment they click.</div>
-        <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
-          placeholder="e.g. Thanks! We've opened {ticket} — we'll be with you shortly."></textarea>
       </details>
     </div>
 
-    <div class="err" id="error"></div>
-
     <div class="bar">
+      <div class="err" id="error" role="alert"></div>
       <button id="cancel" type="button">Cancel</button>
-      <span class="grow"></span>
       <button id="save" type="button" class="primary">Save</button>
     </div>
 
@@ -446,8 +1353,7 @@
       function renderBotIntro() {
         const intro = $("botIntro");
         if (!defaultBot) {
-          $("step1Title").textContent = "Bot";
-          intro.innerHTML = `<div class="callout bad">This deployment has no Tickets bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Channels</b> + <b>Manage Roles</b>) for Tickets to work.</div>`;
+          intro.innerHTML = `<div class="context bad"><span>This deployment has no Tickets bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Channels</b> + <b>Manage Roles</b>) for Tickets to work.</span></div>`;
           sendResize();
           return;
         }
@@ -457,21 +1363,21 @@
           if (autoState === "ok" && guildMismatch) {
             const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "a different server";
             const here = hostGuildName ? `<b>${escapeHtml(hostGuildName)}</b>` : "the server you're building for";
-            intro.innerHTML = `<div class="callout warn">⚠ This panel was set up for ${built}, but you're now building in ${here}. <a href="#" id="switchLink">switch it to ${here}</a> to rebuild it here, or reopen it with ${built} selected in DWEEB.</div>`;
+            intro.innerHTML = `<div class="context warn"><span>This panel was set up for ${built}, but you're now building in ${here}. <a href="#" id="switchLink">Switch it to ${here}</a> to rebuild it here, or reopen it with ${built} selected in DWEEB.</span></div>`;
             const sw = $("switchLink");
             if (sw) sw.onclick = (e) => { e.preventDefault(); switchToHostGuild(); };
           } else if (autoState === "ok") {
             const pre = preflightHtml();
-            intro.innerHTML = `<div class="callout good">✓ Using the <b>DWEEB bot</b> in ${where}.</div>${pre}`;
+            intro.innerHTML = `<div class="context"><span>Tickets in ${where}</span><span class="sep">·</span><span>run by the DWEEB bot</span></div>${pre}`;
           } else if (autoState === "error") {
             const lead = autoError ? escapeHtml(autoError) : `The <b>DWEEB bot</b> isn't in ${where} yet.`;
             const invite = botInviteUrl();
             const add = invite ? ` <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a> ·` : "";
-            intro.innerHTML = `<div class="callout bad">${lead}${add} <a href="#" id="retryLink">Try again</a></div>`;
+            intro.innerHTML = `<div class="context bad"><span>${lead}${add} <a href="#" id="retryLink">Try again</a></span></div>`;
             const retry = $("retryLink");
             if (retry) retry.onclick = (e) => { e.preventDefault(); connect(); };
           } else {
-            intro.innerHTML = `<div class="callout">Connecting to ${where} with the <b>DWEEB bot</b>…</div>`;
+            intro.innerHTML = `<div class="context"><span>Loading ${where}…</span></div>`;
           }
           sendResize();
           return;
@@ -481,9 +1387,9 @@
         const addBot = invite ? ` Haven't added the bot? <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a>.` : "";
         if (instanceId) {
           const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "another server";
-          intro.innerHTML = `<div class="callout warn">⚠ This panel runs in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this panel to edit it.${addBot}</div>`;
+          intro.innerHTML = `<div class="context warn"><span>This panel runs in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this panel to edit it.${addBot}</span></div>`;
         } else {
-          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — pick the server you're building this message for, then reopen this panel. It'll use that exact server automatically.${addBot}</div>`;
+          intro.innerHTML = `<div class="context warn"><span>Connect your server in DWEEB first — pick the server you're building this message for, then reopen this panel. It'll use that exact server automatically.${addBot}</span></div>`;
         }
         sendResize();
       }
@@ -759,7 +1665,7 @@
         sendResize();
       }
       function updateStaffCount() {
-        $("staffCount").textContent = staffSelected.size ? `(${staffSelected.size} selected)` : "(optional)";
+        $("staffCount").textContent = staffSelected.size ? `${staffSelected.size} selected` : "optional";
       }
 
       // A category option, marked when the bot can't create tickets in it.
@@ -874,7 +1780,9 @@
           const del = document.createElement("button");
           del.type = "button";
           del.textContent = "✕";
-          del.title = "Remove";
+          del.className = "icon del";
+          del.title = "Remove topic";
+          del.setAttribute("aria-label", "Remove topic");
           del.addEventListener("click", () => { topics.splice(i, 1); renderTopics(); });
           head.append(label, del);
           const sub = document.createElement("div");
@@ -896,7 +1804,7 @@
           item.append(head, sub, renderRouting(t));
           wrap.appendChild(item);
         });
-        $("topicCount").textContent = topics.length ? `(${topics.length})` : "";
+        $("topicCount").textContent = topics.length ? `${topics.length}/25` : "";
         sendResize();
       }
 
@@ -1017,6 +1925,9 @@
           const del = document.createElement("button");
           del.type = "button";
           del.textContent = "✕";
+          del.className = "icon del";
+          del.title = "Remove question";
+          del.setAttribute("aria-label", "Remove question");
           del.addEventListener("click", () => { intake.splice(i, 1); renderIntake(); });
           head.append(label, del);
           const sub = document.createElement("div");
@@ -1052,7 +1963,7 @@
           item.append(head, sub, req);
           wrap.appendChild(item);
         });
-        $("intakeCount").textContent = intake.length ? `(${intake.length}/5)` : "";
+        $("intakeCount").textContent = intake.length ? `${intake.length}/5` : "";
         sendResize();
       }
 
@@ -1285,8 +2196,9 @@
       // Topics step appears for a select; renumber the later steps accordingly.
       function applyTargetVisibility() {
         $("topicsWrap").style.display = isSelect() ? "" : "none";
-        $("staffStepNum").textContent = isSelect() ? "3" : "2";
-        $("welcomeStepNum").textContent = isSelect() ? "4" : "3";
+        $("topicsTitle").style.display = isSelect() ? "" : "none";
+        $("staffStepNum").textContent = isSelect() ? "2" : "1";
+        $("welcomeStepNum").textContent = isSelect() ? "3" : "2";
       }
 
       const pendingReqs = new Map();

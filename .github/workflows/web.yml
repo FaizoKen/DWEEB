@@ -36,6 +36,10 @@ on:
       # a server-only commit touching it must run them here, not fail a later,
       # unrelated frontend push.
       - "server/src/mcp/**"
+      # The plugin config pages carry a synced copy of plugins/_shared/plugin-ui.css,
+      # and Vitest's pluginUi.test.ts is what catches a page that drifted from it.
+      - "plugins/_shared/**"
+      - "plugins/*/static/config.html"
       - ".github/workflows/web.yml"
   pull_request:
     branches: [main]
