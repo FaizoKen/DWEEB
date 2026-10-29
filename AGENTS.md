@@ -1886,6 +1886,27 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   import side effect; it once rode the vendor chunk and hit every visitor on every page
   view). Cheap availability checks live in `src/core/plan/stripeConfig.ts`, never
   `stripeApi.ts`, and vite.config.ts's manualChunks keeps `@stripe` in its own lazy chunk.
+- **The boot path carries only what the first screen renders** (2026-10-30; critical bundle
+  588,815 raw / 181,014 gzip → 477,114 / 150,427, budget lowered to 500k / 160k in
+  `scripts/seo/audit.ts`). Two rules keep it there. (1) **Row editors are one lazy chunk.**
+  Every inspector, the plugin panel, the markdown toolbar and its pickers only render under a
+  *selected* row, and nothing is selected at boot, so `ComponentTree` renders them through
+  `LazyInspector` (`inspectorPanels.ts` is the chunk's entry), warmed by an idle callback once
+  the tree mounts and wrapped in a `ChunkErrorBoundary` whose "Not now" deselects the row.
+  Never import `Inspector`, `GalleryItemInspector` or an `inspectors/*` file statically from
+  the tree or anything else on the boot path — it pulls the whole chunk back. (2) **Rollup puts
+  a module in one chunk whole**, so a boot module must not share a file with code only a lazy
+  surface runs: one boot-side import carries every export along. Hence the seams — keep new
+  code on the right side of each: `webhook/webhookUrl.ts` (parser, boot) vs `webhook/send.ts`
+  (requests, Share dialog), and boot code imports the named webhook modules, never the
+  `@/core/webhook` barrel; `guild/dialogApi.ts` (slots, webhook writes, threads, invites) vs
+  `guild/api.ts` (which re-exports the types); `ai/aiPanelStore.ts` (the panel's open flag)
+  vs `ai/aiStore.ts`; `ui/formatIcons.tsx` (toolbar glyphs) vs `ui/Icon.tsx`;
+  `addPreviewKind.ts` vs the add menu's `AddMenuPreview` sketches (fetched when the menu
+  opens, as background work, holding an empty `previewSlot` until then); and the avatar
+  resizer (`avatar/image.ts`), imported by `uploadAvatarImage` on the first pick. To find the
+  next one, dump each chunk's modules from a build (`generateBundle` → `chunk.modules`) and
+  look for boot modules whose exports only lazy chunks import.
 - **Upgrade prompts live at limit moments, never as banners** (maintainer, 2026-10-28 — no
   subscriptions since launch, so the plans are now surfaced where a limit actually bites; the
   "never third-party ads" half of this rule was reversed the next day, see the ads entry
@@ -2583,8 +2604,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   plus a post title left in the draft answered Discord's 400 code 220002 ("Webhooks posted to
   forum channels cannot have both a thread_name and thread_id"). Whenever a `thread_id` goes
   out, `thread_name` and `applied_tags` are left out — `forThreadTarget`
-  (`core/webhook/threadTarget.ts`, deliberately *not* in `send.ts`/the barrel: that module is on
-  the boot path, which has ~230 B gzip of budget left) for web sends and new schedules, and
+  (`core/webhook/threadTarget.ts`, deliberately *not* in `send.ts`/the barrel: that module was
+  on the boot path then, with ~230 B gzip of budget left — it no longer is, see "The boot
+  path carries only what the first screen renders") for web sends and new schedules, and
   `discord::for_thread_target` in the proxy for the scheduled-post worker (which also fixes
   schedules stored before) and MCP's `send_message` (whose destination check no longer flags a
   title beside a thread). The draft keeps its title; the thread card says it isn't used, and a
