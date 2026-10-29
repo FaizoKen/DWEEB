@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { fetchChannelThreadsMock } = vi.hoisted(() => ({ fetchChannelThreadsMock: vi.fn() }));
 
 vi.mock("@/core/guild/api", () => ({
-  fetchChannelThreads: fetchChannelThreadsMock,
   isAuthError: (e: unknown) => e instanceof Error && (e as { status?: number }).status === 401,
+}));
+vi.mock("@/core/guild/dialogApi", () => ({
+  fetchChannelThreads: fetchChannelThreadsMock,
 }));
 
 import { threadsKey, useChannelThreadsStore } from "./channelThreads";

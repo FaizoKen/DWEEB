@@ -1,8 +1,9 @@
 /**
  * AI assistant store.
  *
- * Owns the chat panel's open state, the persisted provider settings, the in
- * memory transcript, and the send orchestration. Edits the model proposes are
+ * Owns the persisted provider settings, the in memory transcript, and the
+ * send orchestration (the panel's open flag is `aiPanelStore`, which the boot
+ * path reads without loading any of this). Edits the model proposes are
  * funneled through the same import path as everything else
  * (`attachEditorFields` → validate → `replaceMessage`) so a generated message
  * is indistinguishable from a pasted one.
@@ -45,17 +46,12 @@ function loadEngine() {
 }
 
 interface AiState {
-  open: boolean;
   settings: AiSettings;
   messages: ChatMessage[];
   /** True while a provider request is in flight. */
   thinking: boolean;
   /** Last error surfaced to the user (cleared on the next send). */
   error: string | null;
-
-  openPanel(): void;
-  closePanel(): void;
-  togglePanel(): void;
 
   setSettings(next: AiSettings): void;
   /** Delete the API key saved in this browser, keeping the rest of the settings. */
@@ -89,21 +85,10 @@ function appendMessage(messages: ChatMessage[], msg: ChatMessage): ChatMessage[]
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
-  open: false,
   settings: loadAiSettings(),
   messages: [],
   thinking: false,
   error: null,
-
-  openPanel() {
-    set({ open: true });
-  },
-  closePanel() {
-    set({ open: false });
-  },
-  togglePanel() {
-    set((s) => ({ open: !s.open }));
-  },
 
   setSettings(next) {
     // The built-in relay has no key of its own. A BYOK key saved beside it would

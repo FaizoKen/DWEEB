@@ -17,6 +17,7 @@ import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { undoAiEdit, undoClearChat, useAiEditIsCurrent, useAiStore } from "@/core/ai/aiStore";
+import { useAiPanelStore } from "@/core/ai/aiPanelStore";
 import { PROVIDERS } from "@/core/ai/providerMeta";
 import { useAiUsageStore } from "@/core/ai/usageStore";
 import type { ChatMessage } from "@/core/ai/types";
@@ -35,8 +36,8 @@ const SUGGESTIONS = [
 
 export function AiChatPanel() {
   const titleId = useUniqueId("ai-title");
-  const open = useAiStore((s) => s.open);
-  const closePanel = useAiStore((s) => s.closePanel);
+  const open = useAiPanelStore((s) => s.open);
+  const closePanel = useAiPanelStore((s) => s.closePanel);
   const messages = useAiStore((s) => s.messages);
   const thinking = useAiStore((s) => s.thinking);
   const error = useAiStore((s) => s.error);

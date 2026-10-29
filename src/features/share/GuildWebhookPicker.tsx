@@ -24,15 +24,17 @@ import {
   webhookAvatarUrl,
 } from "@/core/webhook";
 import {
-  createCustomBotWebhook,
-  createGuildWebhook,
-  deleteGuildWebhook,
   isAuthError,
-  modifyGuildWebhook,
   type CustomBotItem,
   type GuildWebhook,
   type WebhookEdit,
 } from "@/core/guild/api";
+import {
+  createCustomBotWebhook,
+  createGuildWebhook,
+  deleteGuildWebhook,
+  modifyGuildWebhook,
+} from "@/core/guild/dialogApi";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { compareSnowflakes } from "@/core/webhook/snowflakeOrder";
 import { botInviteUrl } from "@/core/guild/config";

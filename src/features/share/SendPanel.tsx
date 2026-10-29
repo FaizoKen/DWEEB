@@ -130,15 +130,17 @@ import {
 } from "@/core/plugins/placeholders";
 import { getPluginBindingGuild } from "@/core/state/pluginSummaryCache";
 import {
-  addPermanentMessage,
-  createCustomBotWebhook,
   fetchCustomBots,
-  fetchPermanentSlots,
   isAuthError,
-  removePermanentMessage,
   type GuildWebhook,
   type PermanentSlots,
 } from "@/core/guild/api";
+import {
+  addPermanentMessage,
+  createCustomBotWebhook,
+  fetchPermanentSlots,
+  removePermanentMessage,
+} from "@/core/guild/dialogApi";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";

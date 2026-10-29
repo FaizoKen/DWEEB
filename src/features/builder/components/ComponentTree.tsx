@@ -95,8 +95,7 @@ import {
 } from "@/features/builder/useValidation";
 import { useFileDrop } from "./useFileDrop";
 import { addFilesToGallery, replaceGalleryItemFiles } from "./galleryUpload";
-import { Inspector } from "./Inspector";
-import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
+import { LazyGalleryItemInspector, LazyInspector, useWarmInspector } from "./LazyInspector";
 import { HeaderIssueChip } from "./HeaderIssueChip";
 import { IssueDot, IssueList } from "./ValidationIssues";
 import {
@@ -316,6 +315,7 @@ function computeAllowedPositions(source: DragSource, target: RowData): DropPosit
 }
 
 export function ComponentTree({ emptyHint }: { emptyHint?: ReactNode } = {}) {
+  useWarmInspector();
   const components = useMessageStore((s) => s.message.components);
   const addTopLevelComponent = useMessageStore((s) => s.addTopLevelComponent);
   const addTopLevelSection = useMessageStore((s) => s.addTopLevelSection);
@@ -1362,7 +1362,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
 
       {isSelected ? (
         <div id={editorPanelId} className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
-          <Inspector />
+          <LazyInspector />
         </div>
       ) : null}
 
@@ -1599,7 +1599,7 @@ function GalleryItemNode({
 
       {isSelected ? (
         <div id={editorPanelId} className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
-          <GalleryItemInspector galleryId={galleryId} item={item} />
+          <LazyGalleryItemInspector galleryId={galleryId} item={item} />
         </div>
       ) : null}
     </li>

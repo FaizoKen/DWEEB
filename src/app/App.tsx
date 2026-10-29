@@ -35,7 +35,7 @@ import {
   usePreviewSheetA11y,
   useIsMobileSheet,
 } from "@/features/preview/previewSheet";
-import { useAiStore } from "@/core/ai/aiStore";
+import { useAiPanelStore } from "@/core/ai/aiPanelStore";
 
 // Interaction-gated surfaces: none are needed for first paint, so they're code-
 // split out of the initial bundle and fetched the first time the user opens
@@ -213,9 +213,9 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
 
   // The AI assistant docks as a third column on desktop and a floating window
   // over the preview on mobile; `aiOpen` drives the app-shell grid switch.
-  const aiOpen = useAiStore((s) => s.open);
-  const openAi = useAiStore((s) => s.openPanel);
-  const closeAi = useAiStore((s) => s.closePanel);
+  const aiOpen = useAiPanelStore((s) => s.open);
+  const openAi = useAiPanelStore((s) => s.openPanel);
+  const closeAi = useAiPanelStore((s) => s.closePanel);
 
   // The full-screen Template Gallery. Auto-opens when useful — first visit, or a
   // fresh session where the user isn't mid-edit (see `shouldAutoOpenGallery`) —

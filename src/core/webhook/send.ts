@@ -19,30 +19,11 @@ import { type WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 import { collectSessionAttachments, type CollectedFile } from "@/core/serialization/attachments";
 
-/** Discord limits us to webhooks under one of these origins. */
-const WEBHOOK_HOST_RE =
-  /^https:\/\/(?:(?:canary|ptb)\.)?(?:discord(?:app)?)\.com\/api(?:\/v\d+)?\/webhooks\/(\d+)\/([\w-]+)\/?$/i;
-
-export interface ParsedWebhookUrl {
-  /** Webhook snowflake. Useful for de-duping history entries. */
-  id: string;
-  /**
-   * The canonical execute URL — origin + path with any trailing slash
-   * removed. Query/fragment from the user's paste are dropped so we don't
-   * accidentally inherit someone else's `?thread_id=` etc.
-   */
-  url: string;
-}
-
-export function parseWebhookUrl(input: string): ParsedWebhookUrl | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  // Strip any query/fragment the user may have pasted.
-  const noQuery = trimmed.split(/[?#]/, 1)[0]!;
-  const m = WEBHOOK_HOST_RE.exec(noQuery);
-  if (!m) return null;
-  return { id: m[1]!, url: noQuery.replace(/\/$/, "") };
-}
+// The URL parser is the one export the editor needs at boot, so it lives in
+// its own module; importing it from here would put this whole file — every
+// request below — back on the boot path. Re-exported for the Share dialog.
+export { parseWebhookUrl, type ParsedWebhookUrl } from "./webhookUrl";
+import type { ParsedWebhookUrl } from "./webhookUrl";
 
 /**
  * Extract a message snowflake from either:

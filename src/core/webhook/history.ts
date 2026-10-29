@@ -14,7 +14,8 @@
  */
 
 import { DISCORD_CLIENT_ID } from "@/core/guild/config";
-import { parseWebhookUrl, type WebhookOwnerKind } from "./send";
+import { parseWebhookUrl } from "./webhookUrl";
+import type { WebhookOwnerKind } from "./send";
 
 const STORAGE_KEY = "dweeb.webhook_history.v1";
 /** The most recent entries, kept whatever they are. */

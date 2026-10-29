@@ -23,7 +23,6 @@
 
 import { isProxyConfigured } from "@/core/guild/config";
 import { proxyFetch } from "@/core/net/proxyFetch";
-import { AVATAR_MAX_UPLOAD_BYTES, AvatarImageError, prepareAvatarImage } from "@/core/avatar/image";
 
 export type AvatarUploadResult = { ok: true; url: string } | { ok: false; error: string };
 
@@ -41,6 +40,16 @@ export async function uploadAvatarImage(
   if (!isProxyConfigured()) {
     return { ok: false, error: "Image uploads aren't available in this build." };
   }
+
+  // The canvas pipeline is fetched on the first pick: the avatar field sits
+  // on the boot path, while resizing an image is something few visits do.
+  let image: typeof import("@/core/avatar/image");
+  try {
+    image = await import("@/core/avatar/image");
+  } catch {
+    return { ok: false, error: "Couldn't load the image tools. Refresh the page and try again." };
+  }
+  const { AVATAR_MAX_UPLOAD_BYTES, AvatarImageError, prepareAvatarImage } = image;
 
   let blob: Blob;
   try {

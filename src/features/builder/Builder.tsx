@@ -30,12 +30,12 @@ import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { usePlanStore } from "@/core/plan/planStore";
-import {
-  loadHistory,
-  parseWebhookUrl,
-  prefetchSendDestination,
-  useCanManageGuildWebhooks,
-} from "@/core/webhook";
+// Named modules, not the `@/core/webhook` barrel: the barrel re-exports the
+// send/verify/manage requests, which belong to the Share dialog's chunk.
+import { loadHistory } from "@/core/webhook/history";
+import { parseWebhookUrl } from "@/core/webhook/webhookUrl";
+import { prefetchSendDestination } from "@/core/webhook/prefetch";
+import { useCanManageGuildWebhooks } from "@/core/webhook/guildWebhooks";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";

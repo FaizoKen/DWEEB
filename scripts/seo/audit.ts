@@ -864,8 +864,13 @@ async function main(): Promise<void> {
   // 182k on 2026-10-19: the 10-16 ansi preview had left 84 bytes (179,916), and
   // the crash reporter's third-party attribution — it must judge a beacon on
   // the boot path, since it reports the very chunk loads that fail — took it to
-  // 180,113. ~1.9 KB of headroom still trips on anything library-sized.
-  if (criticalRawBytes > 590_000 || criticalGzipBytes > 182_000) {
+  // 180,113. Lowered to 500k / 160k on 2026-10-30, when the row editors became
+  // a lazy chunk (`LazyInspector`) and the Share dialog's requests, the AI
+  // store, the add menu's sketches and the avatar resizer left the boot graph:
+  // 588,815 raw / 181,014 gzip → 477,114 / 150,427. The new limits keep ~23 KB
+  // raw / ~9.5 KB gzip of headroom, so ordinary work fits and a library-sized
+  // regression still fails.
+  if (criticalRawBytes > 500_000 || criticalGzipBytes > 160_000) {
     errors.push(
       `/: critical JS/CSS budget exceeded (${criticalRawBytes} raw / ${criticalGzipBytes} gzip bytes)`,
     );

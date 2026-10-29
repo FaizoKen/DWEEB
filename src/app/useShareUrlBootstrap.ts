@@ -40,7 +40,7 @@ import {
   readShortLinkId,
   resolveShortLink,
 } from "@/core/serialization/shortlink";
-import { loadHistory } from "@/core/webhook";
+import { loadHistory } from "@/core/webhook/history";
 import { isProxyConfigured } from "@/core/guild/config";
 import { savePendingGuildId } from "@/core/guild/pendingGuild";
 import { useMessageStore } from "@/core/state/messageStore";

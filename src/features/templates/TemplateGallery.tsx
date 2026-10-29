@@ -46,13 +46,12 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { readSessionHint } from "@/core/auth/sessionHint";
 import { isProxyConfigured } from "@/core/guild/config";
+import { isUnlimitedCap, type PermanentSlots } from "@/core/guild/api";
 import {
   addPermanentMessage,
   fetchPermanentSlots,
-  isUnlimitedCap,
   removePermanentMessage,
-  type PermanentSlots,
-} from "@/core/guild/api";
+} from "@/core/guild/dialogApi";
 import { usePlanStore } from "@/core/plan/planStore";
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { nearCap, type UpgradePrompt } from "@/core/plan/upgradePrompt";

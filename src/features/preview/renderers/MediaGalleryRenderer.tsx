@@ -15,7 +15,7 @@ import { useState } from "react";
 import type { EditorId, MediaGalleryComponent, MediaGalleryItem } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
 import { defaultMediaPreviewUrl } from "@/core/media/defaultMedia";
-import { useAiStore } from "@/core/ai/aiStore";
+import { useAiPanelStore } from "@/core/ai/aiPanelStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { BrokenImageIcon } from "./BrokenImageIcon";
@@ -41,7 +41,7 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
     // Mirror ComponentRenderer: dismiss the mobile preview slide-over so the
     // editor becomes visible, but keep it open while the AI chat is active —
     // or while this tap is just revealing a spoiler the user wants to see.
-    if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
+    if (!revealingSpoiler && !useAiPanelStore.getState().open) closePreview?.();
     requestAnimationFrame(() => {
       const row = document.querySelector<HTMLElement>(
         `[data-tree-row="true"][data-row-id="${CSS.escape(itemId)}"]`,

@@ -34,8 +34,36 @@ import { COMPONENT_META, addMenuLabel } from "@/core/schema/metadata";
 import { ComponentType, type ComponentTypeValue } from "@/core/schema/types";
 import { ChevronDownIcon, ChevronRightIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
-import { AddMenuPreview, previewKindFor, type AddPreviewKind } from "./AddMenuPreview";
+import { reportBackgroundFailure } from "@/core/telemetry/reporter";
+import { previewKindFor, type AddPreviewKind } from "./addPreviewKind";
+import type { AddMenuPreview as AddMenuPreviewComponent } from "./AddMenuPreview";
 import styles from "./AddComponentMenu.module.css";
+
+let loadedSketch: typeof AddMenuPreviewComponent | null = null;
+
+/**
+ * The preview pane's sketch, fetched the first time the menu opens: the menu
+ * (and its trigger) sit on the boot path, the sketches and their stylesheet
+ * are only ever seen with it open. The pane is decorative (`aria-hidden`), so
+ * until the chunk lands — or if it never does — it holds an empty canvas of
+ * the same height, and a failed load reports as background work rather than
+ * interrupting anyone with a dialog over a sketch.
+ */
+function PreviewSketch({ kind }: { kind: AddPreviewKind }) {
+  const [Sketch, setSketch] = useState(() => loadedSketch);
+  useEffect(() => {
+    if (Sketch) return;
+    let live = true;
+    import("./AddMenuPreview").then((module) => {
+      loadedSketch = module.AddMenuPreview;
+      if (live) setSketch(() => module.AddMenuPreview);
+    }, reportBackgroundFailure);
+    return () => {
+      live = false;
+    };
+  }, [Sketch]);
+  return Sketch ? <Sketch kind={kind} /> : <div className={styles.previewSlot} />;
+}
 
 /**
  * One row of the add menu. A leaf (no `children`) runs `onPick` when clicked.
@@ -443,7 +471,7 @@ export function AddComponentMenu({
                 <div className={styles.previewPane} aria-hidden="true">
                   {active ? (
                     <>
-                      <AddMenuPreview kind={active.kind} />
+                      <PreviewSketch kind={active.kind} />
                       <div className={styles.previewTitle}>{active.title}</div>
                       <div className={styles.previewDesc}>{active.desc}</div>
                     </>

@@ -15,7 +15,7 @@ import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { isSelect } from "@/core/schema/guards";
 import { componentMeta } from "@/core/schema/metadata";
 import { useMessageStore } from "@/core/state/messageStore";
-import { useAiStore } from "@/core/ai/aiStore";
+import { useAiPanelStore } from "@/core/ai/aiPanelStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { ContainerRenderer } from "./ContainerRenderer";
@@ -53,7 +53,7 @@ export const ComponentRenderer = memo(function ComponentRenderer({ node }: Compo
     // On mobile this dismisses the preview slide-over so the editor (and its
     // now-revealed inspector) becomes visible. When AI is open, keep both up so
     // the user can continue chatting while picking nodes.
-    if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
+    if (!revealingSpoiler && !useAiPanelStore.getState().open) closePreview?.();
 
     // Defer until the selected row's inline inspector has mounted. Keyboard
     // activation also moves focus to that row's real selection button.

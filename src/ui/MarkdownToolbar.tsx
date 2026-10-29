@@ -2,24 +2,26 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
 import {
-  BoldIcon,
   ChevronDownIcon,
   ClockIcon,
-  CodeBlockIcon,
   CodeIcon,
   EmojiIcon,
   HashIcon,
+  LinkIcon,
+  MentionIcon,
+} from "@/ui/Icon";
+import {
+  BoldIcon,
+  CodeBlockIcon,
   HeadingIcon,
   ItalicIcon,
-  LinkIcon,
   ListBulletIcon,
   ListOrderedIcon,
-  MentionIcon,
   QuoteIcon,
   SpoilerIcon,
   StrikethroughIcon,
   UnderlineIcon,
-} from "@/ui/Icon";
+} from "@/ui/formatIcons";
 import {
   insertLink,
   insertSnippet,

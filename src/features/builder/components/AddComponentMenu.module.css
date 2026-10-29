@@ -181,6 +181,15 @@
   overflow: hidden;
 }
 
+/* Holds the sketch's place until its chunk loads — the same box as
+ * AddMenuPreview's `.canvas`, so the title below doesn't jump. */
+.previewSlot {
+  height: 132px;
+  background: var(--app-preview-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
 .previewTitle {
   font-size: 13px;
   font-weight: 600;

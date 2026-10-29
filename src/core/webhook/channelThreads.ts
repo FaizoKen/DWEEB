@@ -16,7 +16,8 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { registerAccountStateReset } from "@/core/auth/accountScopedState";
 import { useAuthStore } from "@/core/auth/authStore";
-import { fetchChannelThreads, isAuthError, type ChannelThread } from "@/core/guild/api";
+import { isAuthError, type ChannelThread } from "@/core/guild/api";
+import { fetchChannelThreads } from "@/core/guild/dialogApi";
 
 export type ChannelThreadsStatus = "idle" | "loading" | "ready" | "denied" | "error";
 
