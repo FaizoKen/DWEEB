@@ -65,7 +65,7 @@
         "@id": "https://dweeb.faizo.net/privacy#webpage",
         "name": "Privacy Policy — DWEEB",
         "url": "https://dweeb.faizo.net/privacy",
-        "dateModified": "2026-09-27",
+        "dateModified": "2026-10-29",
         "inLanguage": "en",
         "isPartOf": { "@id": "https://dweeb.faizo.net/#website" }
       }
@@ -188,7 +188,7 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 27 September 2026</p>
+      <p class="meta">Last updated: 29 October 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> The core editor is local by default and does not require
@@ -197,7 +197,8 @@
         you use a feature that needs it: sending to Discord, creating a short link or schedule,
         saving to a server library, joining a collaborative Activity, using AI or a plugin, sending
         feedback, signing in, or managing a paid plan. Those choices and their retention are
-        explained below. We do not sell your data.
+        explained below. After you send a message, the confirmation may show one non-personalized ad
+        from Google, unless the server is on a paid plan. We do not sell your data.
       </div>
 
       <p>
@@ -365,7 +366,7 @@
         whoever operates it.
       </p>
 
-      <h2>7. Analytics</h2>
+      <h2>7. Analytics and advertising</h2>
       <p>
         We use <strong>Google Analytics</strong> to understand how DWEEB is used (for example, how
         many people visit and which features are popular). Google Analytics may collect information
@@ -382,6 +383,28 @@
           >Google Analytics opt-out browser add-on</a
         >
         or a content blocker.
+      </p>
+      <p>
+        <strong>Advertising.</strong> After you send a message from the web app, the confirmation
+        that it was posted may show <strong>one advertisement</strong>, served by
+        <strong>Google AdSense</strong>. That is the only place DWEEB shows an ad: never in the
+        editor, the guides or templates, or the Discord Activity; never for a message sent to a
+        server on a paid plan (Plus or Pro); not on your first send; and not when your browser sends
+        Do Not Track or Global Privacy Control or asks to save data. DWEEB requests
+        <strong>non-personalized ads</strong> and tells Google's tags that consent to advertising
+        storage and ad personalization is denied, so the ad is chosen from the page's context, not
+        from a profile of you. To deliver and measure the ad and to prevent fraud, Google receives
+        the information any web request carries — such as your IP address, browser details and the
+        page address (<code>dweeb.faizo.net</code>) — and may use limited identifiers for frequency
+        capping and fraud prevention. DWEEB never gives the ad network your message content, webhook
+        URLs, Discord identifiers or server names, and it skips the ad whenever the address bar
+        still holds app state. See
+        <a
+          href="https://policies.google.com/technologies/partner-sites"
+          target="_blank"
+          rel="noopener noreferrer"
+          >how Google uses information from sites that use its services</a
+        >. A content blocker stops the ad from loading, and DWEEB works the same without it.
       </p>
 
       <h2>8. Crash reports (diagnostics)</h2>
@@ -415,8 +438,14 @@
           HttpOnly), plus a short-lived OAuth state cookie for security. Cleared on sign-out.
         </li>
         <li><strong>Analytics cookies</strong> — set by Google Analytics, as described above.</li>
+        <li>
+          <strong>Ad delivery</strong> — when an ad is shown after a send, Google AdSense may use
+          limited, non-personalizing storage for frequency capping and fraud prevention.
+        </li>
       </ul>
-      <p class="muted">We do not use advertising or cross-site tracking cookies.</p>
+      <p class="muted">
+        We do not use cookies for personalized advertising or cross-site tracking.
+      </p>
 
       <h2>11. Third-party services</h2>
       <p>DWEEB relies on these third parties, each with its own privacy policy:</p>
@@ -432,6 +461,15 @@
             >Google Analytics</a
           >
           — usage analytics.
+        </li>
+        <li>
+          <a
+            href="https://policies.google.com/technologies/ads"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Google AdSense</a
+          >
+          — the one non-personalized ad after a send.
         </li>
         <li>
           <a

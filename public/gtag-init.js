@@ -23,8 +23,10 @@
   window.gtag = function () {
     window.dataLayer.push(arguments);
   };
-  // The privacy policy allows analytics cookies and promises no advertising or
-  // cross-site tracking, so the tag starts from exactly that consent state.
+  // The privacy policy allows analytics cookies and promises no personalized
+  // advertising or cross-site tracking, so the tag starts from exactly that
+  // consent state. The send receipt's one ad (src/core/ads/) relies on it too:
+  // AdSense reads this state, so the ad it serves stays non-personalized.
   // This — not the property's Google-signals toggle (off) nor the config flags
   // below — is what stops gtag's per-page ngs=1 ping to stats.g.doubleclick.net
   // (verified 2026-09-23: with the flags alone it still fired and the generated

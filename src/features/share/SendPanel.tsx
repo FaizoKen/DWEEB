@@ -191,6 +191,8 @@ import { useOptionsRevealStore } from "@/features/builder/optionsReveal";
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
+import { SendAd } from "@/features/ads/SendAd";
+import { takeSendAdTicket } from "@/core/ads/sendAd";
 import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
@@ -243,6 +245,8 @@ interface SendSuccessInfo {
   /** Read-only component-expiry receipt for the success dialog — how the
    *  confirm dialog's permanence decision ended up. Undefined hides it. */
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
+  /** This receipt may try to show an ad (`core/ads/sendAd.ts`). */
+  adTicket: boolean;
 }
 
 interface ScheduleRecovery {
@@ -1890,6 +1894,7 @@ export function SendPanel({
           editOnResend: postedMessageId != null,
           messageId: postedMessageId,
           permanentStatus,
+          adTicket: takeSendAdTicket(),
         });
         trackAnalytics("message_posted", { mode });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
@@ -3296,6 +3301,7 @@ export function SendPanel({
         editOnResend={success?.editOnResend ?? false}
         messageId={success?.messageId}
         permanentStatus={success?.permanentStatus}
+        ad={success?.adTicket ? <SendAd guildId={success.guildId} /> : undefined}
         onClose={(reason) => {
           setSuccess(null);
           // Armed as the receipt is dismissed, not as it opens: the prompt is a

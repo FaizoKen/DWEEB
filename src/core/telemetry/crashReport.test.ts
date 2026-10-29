@@ -74,11 +74,12 @@ function isWellFormed(text: string): boolean {
 /** An http(s) location, read as a whole scheme run the way `frameOrigin`
  *  reads one. */
 const WEB_LOCATION = /(?:^|[^A-Za-z0-9+.-])https?:\/\//;
-/** An http(s) location of ours: any but an `https` one on gtag's host. Written
- *  out rather than built from `THIRD_PARTY_SCRIPT_HOSTS`, so the property test
- *  checks the implementation against an independent reading of the rule. */
+/** An http(s) location of ours: any but an `https` one on gtag's host or the
+ *  AdSense tag's. Written out rather than built from `THIRD_PARTY_SCRIPT_HOSTS`,
+ *  so the property test checks the implementation against an independent
+ *  reading of the rule. */
 const OUR_WEB_LOCATION =
-  /(?:^|[^A-Za-z0-9+.-])(?:http:\/\/|https:\/\/(?!www\.googletagmanager\.com\/))/i;
+  /(?:^|[^A-Za-z0-9+.-])(?:http:\/\/|https:\/\/(?!www\.googletagmanager\.com\/|pagead2\.googlesyndication\.com\/))/i;
 
 /** The 2026-09-14 page's one frame, and one of ours. */
 const METAMASK_FRAME =
@@ -1029,6 +1030,8 @@ describe("wireStack", () => {
       "at WnrW (chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js:1:3061)",
       "at window.gtag (https://dweeb.faizo.net/gtag-init.js:23:22)",
       "at n (http://www.googletagmanager.com/gtag/js:1:1)",
+      "at Ws (https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000:2:3)",
+      "at Ws (https://pagead2.googlesyndication.com.evil.example/pagead/js/adsbygoogle.js:2:3)",
       // A host cut off before its "/" — and, adjacent to the next piece, a
       // host whose "/" sits on the following line.
       "at c (https://www.googletagmanager.com",

@@ -82,9 +82,10 @@ describe("analytics page-location privacy", () => {
   });
 
   it("starts from analytics-only consent, before the tag is configured", () => {
-    // The privacy policy allows analytics cookies and promises no advertising
-    // or cross-site tracking. The denied ad defaults are what stop gtag's
-    // stats.g.doubleclick.net ping; they must precede `js` and `config`.
+    // The privacy policy allows analytics cookies and promises no personalized
+    // advertising or cross-site tracking. The denied ad defaults are what stop
+    // gtag's stats.g.doubleclick.net ping — and what keep the send receipt's
+    // AdSense ad non-personalized; they must precede `js` and `config`.
     const { calls } = runLoader("https://dweeb.faizo.net/guides/discord-components-v2/");
     const consentIndex = calls.findIndex((args) => args[0] === "consent" && args[1] === "default");
     expect(calls[consentIndex]?.[2]).toEqual({

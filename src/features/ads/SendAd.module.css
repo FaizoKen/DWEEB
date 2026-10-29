@@ -1,0 +1,62 @@
+/* The receipt's ad strip, under the footer. A recessed surface and its own
+   label keep it plainly apart from DWEEB's UI — an ad must never read as one of
+   the receipt's own controls, and the gap above keeps it clear of the buttons. */
+.region {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--app-text-subtle);
+}
+
+.remove {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  color: var(--app-accent-text);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.remove:hover {
+  text-decoration: underline;
+}
+.remove:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+/* Fixed height from the first frame it renders, so the unit never resizes the
+   strip; centred, since the unit is narrower than the dialog on wide screens. */
+.slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  border-radius: var(--app-radius-sm);
+}
+
+/* A quiet placeholder while Google fills the unit — it is the strip's only
+   state between "nothing" and an ad, and it lasts a moment. */
+.region[data-phase="placing"] .slot {
+  background: var(--app-bg-hover);
+}

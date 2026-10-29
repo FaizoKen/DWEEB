@@ -14,6 +14,8 @@ describe("upgrade prompts", () => {
     expect(promptLimit("plan_badge")).toBeNull();
     expect(promptLimit("account_menu")).toBeNull();
     expect(promptLimit("activity")).toBeNull();
+    // Ads aren't a quota: the modal opens on its ad-free note instead.
+    expect(promptLimit("send_ad")).toBeNull();
     expect(promptLimit(null)).toBeNull();
   });
 

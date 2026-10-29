@@ -342,10 +342,17 @@ const GECKO_MAIN_WORLD: &str = "<anonymous code>";
 /// failed hits leak nothing. Any frame of ours still makes a stack ours,
 /// `gtag-init.js` included — it is served from our origin.
 ///
+/// `pagead2.googlesyndication.com` serves the AdSense tag the web app's send
+/// receipt loads. It joined without a beacon, the one exception to the rule
+/// below: the tag throws `TagError`s from its own queue as a matter of course,
+/// and those arrive with only its frames — each would otherwise page as ours.
+/// A throw from our own push carries our frame and still pages.
+///
 /// Mirrors `THIRD_PARTY_SCRIPT_HOSTS` in `src/core/telemetry/crashReport.ts`;
 /// both are pinned by `foreign-code-vectors.json`. Add a host only on evidence
 /// (a beacon naming it), only for code we load but never ship, and lowercase.
-const THIRD_PARTY_SCRIPT_HOSTS: [&str; 1] = ["www.googletagmanager.com"];
+const THIRD_PARTY_SCRIPT_HOSTS: [&str; 2] =
+    ["pagead2.googlesyndication.com", "www.googletagmanager.com"];
 
 /// Whose code a stack names, from every location in it (see [`frame_origin`]).
 /// Logged as `frames=` on both the demoted and the paging crash line, so a page

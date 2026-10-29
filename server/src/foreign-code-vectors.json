@@ -8,7 +8,7 @@
     "webkit-masked-url"
   ],
   "geckoMainWorld": "<anonymous code>",
-  "thirdPartyScriptHosts": ["www.googletagmanager.com"],
+  "thirdPartyScriptHosts": ["pagead2.googlesyndication.com", "www.googletagmanager.com"],
   "cases": [
     {
       "name": "2026-09-14 page: MetaMask's rejection exactly as build e699a38eec sent it",
@@ -201,6 +201,30 @@
       "frames": "third-party",
       "error": true,
       "unhandledrejection": true
+    },
+    {
+      "name": "the AdSense tag failing in its own code (a TagError it throws from its own queue): Google's, and nothing on screen waits on it",
+      "message": "adsbygoogle.push() error: No slot size for availableWidth=0",
+      "stack": "TagError: adsbygoogle.push() error: No slot size for availableWidth=0\nat Ws (https://pagead2.googlesyndication.com/pagead/managed/js/adsense/m202610200101/show_ads_impl_fy2021.js:1:2)\nat https://pagead2.googlesyndication.com/pagead/managed/js/adsense/m202610200101/show_ads_impl_fy2021.js:3:4",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a push of ours under the AdSense tag's frames: the receipt asked, so the stack is ours",
+      "message": "adsbygoogle.push() error: All 'ins' elements in the DOM with class=adsbygoogle already have ads in them.",
+      "stack": "TagError: adsbygoogle.push() error: All 'ins' elements in the DOM with class=adsbygoogle already have ads in them.\nat Ws (https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000:2:3)\nat Array.push (https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000:2:9)\nat requestAd (https://dweeb.faizo.net/assets/SendPanel-Bq4tH2ZQ.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: only pagead2 serves the tag — the ad hosts beside it in the CSP aren't listed",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://tpc.googlesyndication.com/sodar/sodar2.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
     },
     {
       "name": "hosts compare ASCII-case-insensitively too (RFC 3986)",

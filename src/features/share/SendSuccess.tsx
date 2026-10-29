@@ -17,6 +17,8 @@
  * above the Share dialog's own modal is fine.
  */
 
+import type { ReactNode } from "react";
+import { adsConfigured } from "@/core/ads/config";
 import { webhookAvatarUrl } from "@/core/webhook";
 import { openDiscordLink } from "@/lib/discordDeepLink";
 import { Modal } from "@/ui/Modal";
@@ -65,6 +67,12 @@ export interface SendSuccessProps {
    */
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
   /**
+   * The receipt's ad (`features/ads/SendAd`), when this send may carry one.
+   * Rendered under the footer so it can arrive or collapse without moving the
+   * buttons.
+   */
+  ad?: ReactNode;
+  /**
    * Closes the receipt. The reason separates a plain dismissal (Done, the
    * close button, Escape, the backdrop) from "Open in Discord", which also
    * closes it but hands off to another app — the host reads it to decide
@@ -90,6 +98,7 @@ export function SendSuccess({
   editOnResend,
   messageId,
   permanentStatus,
+  ad,
   onClose,
 }: SendSuccessProps) {
   const name = webhookName?.trim() || "this webhook";
@@ -113,6 +122,12 @@ export function SendSuccess({
       open={open}
       onClose={() => onClose("dismiss")}
       size="sm"
+      // Wherever an ad may appear the receipt is top-anchored: its strip can
+      // arrive a moment after the dialog opens, and a centred dialog would slide
+      // the buttons up under the cursor by half its height. A build without
+      // ads keeps the centred receipt it always had.
+      anchor={adsConfigured() ? "top" : "center"}
+      below={ad}
       title={mode === "update" ? "Message updated" : "Message posted"}
       footer={
         discordUrl ? (

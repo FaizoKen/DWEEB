@@ -11,7 +11,8 @@ export type AnalyticsEvent =
   | "code_exported"
   | "pricing_opened"
   | "checkout_started"
-  | "checkout_completed";
+  | "checkout_completed"
+  | "ad_slot";
 
 export type AnalyticsParams = Record<string, string | number | boolean>;
 
@@ -48,6 +49,11 @@ const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   pricing_opened: new Set(["opened_from"]),
   checkout_started: new Set(["opened_from", "tier", "interval"]),
   checkout_completed: new Set(["opened_from", "tier", "interval"]),
+  // How the send receipt's one ad attempt ended (`features/ads/SendAd.tsx`):
+  // filled / unfilled / blocked / timeout / no_room / ad_free — an enum, so the
+  // fill rate and the ad-blocked share can be read without anything about the
+  // ad, the message or the server leaving the page.
+  ad_slot: new Set(["result"]),
 };
 
 /** Exposed for the test that keeps every allowlist clear of the reserved names. */

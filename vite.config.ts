@@ -7,6 +7,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { SPA_NAVIGATION_ALLOWLIST } from "./src/core/seo/navigationRoutes";
+import {
+  ADSENSE_CSP,
+  adsTxt,
+  parseAdsenseClient,
+  parseAdsenseSlot,
+} from "./src/core/ads/adsenseIds";
 import { HOME_LASTMOD } from "./scripts/seo/constants";
 
 // Build version, read from package.json and injected as `__APP_VERSION__` so the
@@ -125,13 +131,16 @@ function registryConfigOrigins(): string[] {
   return [...origins].sort();
 }
 
-function buildCsp(inlineScriptHashes: readonly string[]): string {
+function buildCsp(inlineScriptHashes: readonly string[], ads: boolean): string {
   return [
     "default-src 'self'",
     // `js.stripe.com` is the embedded Checkout / Elements library (loaded by
-    // @stripe/stripe-js in the pricing modal).
+    // @stripe/stripe-js in the pricing modal). The AdSense hosts join only in a
+    // build that shows ads (`src/core/ads/adsenseIds.ts` says which and why);
+    // the tag itself is loaded on demand, after a send.
     [
       "script-src 'self' https://www.googletagmanager.com https://js.stripe.com",
+      ...(ads ? ADSENSE_CSP.script : []),
       ...inlineScriptHashes,
     ].join(" "),
     "style-src 'self' 'unsafe-inline'",
@@ -152,6 +161,7 @@ function buildCsp(inlineScriptHashes: readonly string[]): string {
       "frame-src 'self' https://*.dweeb.faizo.net",
       ...registryConfigOrigins(),
       "https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com",
+      ...(ads ? ADSENSE_CSP.frame : []),
     ].join(" "),
     "base-uri 'self'",
     "form-action 'self'",
@@ -183,10 +193,27 @@ function inlineScriptHashes(html: string): string[] {
   return hashes;
 }
 
+/**
+ * The AdSense ids as this build resolved them — read from Vite's own env (the
+ * .env files plus the CI environment) through the same strict parser the app
+ * uses, so the build output and the bundle can't disagree about whether this
+ * build shows ads. `client` alone is enough to connect the site to AdSense;
+ * showing ads needs the ad unit's slot too.
+ */
+function adsenseEnv(env: Record<string, unknown>): { client: string; showsAds: boolean } {
+  const client = parseAdsenseClient(env.VITE_ADSENSE_CLIENT as string | undefined);
+  const slot = parseAdsenseSlot(env.VITE_ADSENSE_SLOT as string | undefined);
+  return { client, showsAds: client !== "" && slot !== "" };
+}
+
 function injectSecurityMeta(): Plugin {
+  let ads = false;
   return {
     name: "inject-security-meta",
     apply: "build",
+    configResolved(config) {
+      ads = adsenseEnv(config.env).showsAds;
+    },
     transformIndexHtml: {
       // 'post' so Vite's built-in `%VITE_*%` env substitution (registered as a
       // 'pre' hook) has already run — we hash the exact bytes the browser will
@@ -201,11 +228,50 @@ function injectSecurityMeta(): Plugin {
         // pushed charset beyond byte 1024, where the HTML encoding declaration
         // is no longer guaranteed to be honoured on a header-less static host.
         const security = [
-          `<meta http-equiv="Content-Security-Policy" content="${buildCsp(inlineScriptHashes(html))}" />`,
+          `<meta http-equiv="Content-Security-Policy" content="${buildCsp(inlineScriptHashes(html), ads)}" />`,
           '<meta name="referrer" content="strict-origin-when-cross-origin" />',
         ].join("\n    ");
         return html.replace(charset, (match) => `${match}\n    ${security}`);
       },
+    },
+  };
+}
+
+/**
+ * What AdSense needs on the site itself, emitted only when a publisher id is
+ * configured (`VITE_ADSENSE_CLIENT`): `/ads.txt`, which authorises Google to sell
+ * the inventory (without it AdSense withholds most demand), and the
+ * `google-adsense-account` meta tag, which is how AdSense verifies the site.
+ * The verification has to be in the shell's static HTML because the ad tag
+ * itself never loads until someone sends a message — a crawler never sees it.
+ * Both need only the client id, so the site can be connected and approved
+ * before its ad unit exists.
+ */
+function adsenseSiteFiles(): Plugin {
+  let client = "";
+  return {
+    name: "adsense-site-files",
+    apply: "build",
+    configResolved(config) {
+      client = adsenseEnv(config.env).client;
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        if (!client) return html;
+        const charset = /<meta charset="UTF-8" \/>/;
+        if (!charset.test(html)) {
+          throw new Error("adsenseSiteFiles: could not find the UTF-8 charset declaration");
+        }
+        return html.replace(
+          charset,
+          (match) => `${match}\n    <meta name="google-adsense-account" content="${client}" />`,
+        );
+      },
+    },
+    generateBundle() {
+      const source = adsTxt(client);
+      if (source) this.emitFile({ type: "asset", fileName: "ads.txt", source });
     },
   };
 }
@@ -281,6 +347,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     stampBuildMeta(),
     injectSecurityMeta(),
+    adsenseSiteFiles(),
     // Service worker: precache the hashed app shell so repeat visits load from
     // disk with no network round trip (GitHub Pages caps Cache-Control at ~10
     // min and can't be customized, so without this every return visit

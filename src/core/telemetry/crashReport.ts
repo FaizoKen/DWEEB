@@ -588,15 +588,27 @@ export const GECKO_MAIN_WORLD = "<anonymous code>";
  * hits leak nothing (verified in headless Chrome 155). Our code never holds a
  * promise of gtag's: the `gtag()` stub only pushes onto `dataLayer`.
  *
+ * `pagead2.googlesyndication.com` serves the AdSense tag the send receipt loads
+ * (`core/ads/adsense.ts`). It joined without a beacon, the one exception to the
+ * rule below: the tag throws `TagError`s from its own queue as a matter of
+ * course (a slot it measured at zero width, a page it thinks has no free slot),
+ * and those reach `window.onerror` with only its frames — every one would page
+ * as ours, over an ad. Our own `requestAd()` push is wrapped, and a throw from
+ * it carries our frame, so it would still page.
+ *
  * Any frame of ours still makes the stack ours, `gtag-init.js` included — it is
  * served from our origin and sits under gtag's frames whenever our own `gtag()`
  * call is the one that fails. Mirrored as `THIRD_PARTY_SCRIPT_HOSTS` in
  * `telemetry.rs` and pinned by `server/src/foreign-code-vectors.json`. Add a
  * host only on evidence (a beacon naming it), only for code we load but never
  * ship, and lowercase. The production CSP's `script-src` bounds the candidates:
- * the other one, `js.stripe.com`, has not been seen in a beacon.
+ * `js.stripe.com` and the AdSense tag's helper hosts have not been seen in a
+ * beacon.
  */
-export const THIRD_PARTY_SCRIPT_HOSTS: readonly string[] = ["www.googletagmanager.com"];
+export const THIRD_PARTY_SCRIPT_HOSTS: readonly string[] = [
+  "pagead2.googlesyndication.com",
+  "www.googletagmanager.com",
+];
 
 /** Whose code a stack names — see [`frameOrigin`]. Also logged by the proxy
  *  (`frames=`) on the two crash lines that turn on it: the foreign-code line it

@@ -13,6 +13,11 @@ interface ModalProps {
   ariaLabel?: string;
   /** Optional footer area (typically holds buttons). */
   footer?: ReactNode;
+  /** Rendered under the footer, outside the scrolling body — for content that
+   *  may appear or collapse while the dialog is open (the send receipt's ad)
+   *  without moving the actions above it. Pair it with `anchor="top"`, or a
+   *  centred dialog still shifts by half of every change. */
+  below?: ReactNode;
   /** "sm" renders a compact centered dialog that stays small on mobile. */
   size?: "sm" | "md";
   /** "top" pins the dialog's top edge instead of centring it — for dialogs
@@ -148,6 +153,7 @@ export function Modal({
   title,
   ariaLabel,
   footer,
+  below,
   size = "md",
   anchor = "center",
   backdropStyle,
@@ -303,6 +309,7 @@ export function Modal({
           </header>
           <div className={styles.body}>{children}</div>
           {footer ? <footer className={styles.footer}>{footer}</footer> : null}
+          {below}
         </div>
       )}
     </div>,

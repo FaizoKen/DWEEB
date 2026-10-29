@@ -126,6 +126,11 @@ jobs:
           # expiry figure shown to signed-out users pre-send. Unset → code
           # default 7 (the dispatcher's own default).
           VITE_COMPONENT_TTL_DAYS: ${{ vars.VITE_COMPONENT_TTL_DAYS }}
+          # Google AdSense: the client alone ships ads.txt + the verification
+          # meta; adding the slot turns on the send receipt's ad. Unset → no
+          # ads, and the CSP carries no ad hosts. See src/core/ads/.
+          VITE_ADSENSE_CLIENT: ${{ vars.VITE_ADSENSE_CLIENT }}
+          VITE_ADSENSE_SLOT: ${{ vars.VITE_ADSENSE_SLOT }}
 
       # Three medianed lab runs on both search entry points catch LCP, layout,
       # main-thread, accessibility and SEO regressions that byte budgets alone

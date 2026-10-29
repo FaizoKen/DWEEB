@@ -49,6 +49,8 @@ import {
   type QuotaRow,
 } from "./pricingView";
 import { trackAnalytics } from "@/core/telemetry/analytics";
+import { adsConfigured } from "@/core/ads/config";
+import { forgetAdFreeDestinations } from "@/core/ads/adFree";
 import styles from "./PricingModal.module.css";
 
 interface TierDef {
@@ -159,6 +161,9 @@ export function PricingModal() {
   // what each higher plan gives — and marks its row on every card, so nobody
   // has to find their problem in a price list.
   const focus = limitFocus(openedFrom, currentTier);
+  // Paid servers are ad-free — a row on every card, but only in a build that
+  // shows ads at all (a self-hosted one has nothing to remove).
+  const showsAds = adsConfigured();
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
   const canUpgradeHere = billing && !!guildId;
 
@@ -290,6 +295,8 @@ export function PricingModal() {
 
   const onComplete = () => {
     setDone(true);
+    // The server just became ad-free; a remembered "free" must not outlive that.
+    forgetAdFreeDestinations();
     const bought = purchaseRef.current;
     if (bought) {
       trackAnalytics("checkout_completed", {
@@ -393,6 +400,15 @@ export function PricingModal() {
                 delay={280 + i * 90}
               />
             ))}
+            {showsAds && fromTier === "free" ? (
+              <PerkRow
+                label="Ads after sending"
+                from="Shown"
+                to="None"
+                animate={animate}
+                delay={280 + ROWS.length * 90}
+              />
+            ) : null}
           </ul>
 
           <p className={styles.successFoot}>
@@ -552,6 +568,11 @@ export function PricingModal() {
       ) : null}
 
       {focus ? <LimitFocusNote focus={focus} /> : null}
+      {openedFrom === "send_ad" && showsAds && currentTier === "free" ? (
+        <p className={styles.focusNote}>
+          <strong>Ads after sending:</strong> shown on Free · <strong>none</strong> on Plus and Pro
+        </p>
+      ) : null}
 
       {coveredByOther ? (
         <p className={styles.coveredNote}>
@@ -646,6 +667,7 @@ export function PricingModal() {
               starting={starting === t.id}
               disabled={starting !== null}
               focusKey={focus?.key ?? null}
+              adRow={showsAds ? { focused: openedFrom === "send_ad" } : null}
               onBuy={() => void startCheckout(t.id as PaidTier)}
             />
           );
@@ -690,6 +712,7 @@ function PlanCard({
   starting,
   disabled,
   focusKey,
+  adRow,
   onBuy,
 }: {
   tier: TierDef;
@@ -705,6 +728,9 @@ function PlanCard({
   disabled: boolean;
   /** The limit the modal opened on, marked on this card's list. */
   focusKey: QuotaRow["key"] | null;
+  /** The "ads after sending" row — null in a build that shows no ads; marked
+   *  when the modal was opened from the receipt's "Remove ads". */
+  adRow: { focused: boolean } | null;
   onBuy: () => void;
 }) {
   const listPrice = formatUsd(period === "year" ? tier.yearly : tier.monthly);
@@ -767,6 +793,12 @@ function PlanCard({
             </li>
           );
         })}
+        {adRow ? (
+          <li className={cn(styles.quota, adRow.focused && styles.quotaFocus)}>
+            <span className={styles.quotaVal}>{tier.id === "free" ? "Ads" : "No ads"}</span>
+            <span className={styles.quotaLabel}>after sending</span>
+          </li>
+        ) : null}
       </ul>
     </div>
   );

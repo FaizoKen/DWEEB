@@ -29,6 +29,11 @@ interface ImportMetaEnv {
   readonly VITE_STRIPE_PUBLISHABLE_KEY?: string;
   /** Interactive-component lifetime; blank uses the dispatcher default. */
   readonly VITE_COMPONENT_TTL_DAYS?: string;
+  /** AdSense publisher id (`ca-pub-` + 16 digits). Alone it connects the site
+   *  (`ads.txt` + verification meta); with a slot it turns the receipt ad on. */
+  readonly VITE_ADSENSE_CLIENT?: string;
+  /** AdSense ad unit slot id for the send receipt's ad. */
+  readonly VITE_ADSENSE_SLOT?: string;
   /** Dev only: local origin for the modal-form plugin's config UI (default `http://localhost:8090`). */
   readonly VITE_DEV_MODAL_FORM_ORIGIN?: string;
   /** Dev only: local origin for the ping-pong plugin's config UI (default `http://localhost:8091`). */
