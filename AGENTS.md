@@ -202,8 +202,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   name for every page-world extension script and for nothing else (without it the Gecko rendering of
   the same MetaMask rejection names no location and pages); location-less frames (`<anonymous>`,
   `[native code]`, `async Promise.all (index 0)`) are ignored. An `https` location is a
-  **third-party script's** only when a host in `THIRD_PARTY_SCRIPT_HOSTS` (today just
-  `www.googletagmanager.com`) follows its `://` directly *and then* `/`, host ASCII-case-insensitive
+  **third-party script's** only when a host in `THIRD_PARTY_SCRIPT_HOSTS` (today
+  `www.googletagmanager.com` and, since 2026-10-29, the AdSense tag's
+  `pagead2.googlesyndication.com` — see the ads entry) follows its `://` directly *and then* `/`, host ASCII-case-insensitive
   — how every engine prints a loaded script's URL — so a longer host, userinfo, a port, plain http,
   the host in a path, or a URL clamped before its `/` all read as ours. Foreign = (1) **every**
   location someone else's: an extension's — `chrome-extension` (every Chromium browser, Edge
@@ -1885,9 +1886,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   import side effect; it once rode the vendor chunk and hit every visitor on every page
   view). Cheap availability checks live in `src/core/plan/stripeConfig.ts`, never
   `stripeApi.ts`, and vite.config.ts's manualChunks keeps `@stripe` in its own lazy chunk.
-- **Upgrade prompts live at limit moments, never as banners or third-party ads** (maintainer,
-  2026-10-28 — no subscriptions since launch, so the plans are now surfaced where a limit
-  actually bites). Every `openPricing(guild, from)` names an `UpgradePrompt`
+- **Upgrade prompts live at limit moments, never as banners** (maintainer, 2026-10-28 — no
+  subscriptions since launch, so the plans are now surfaced where a limit actually bites; the
+  "never third-party ads" half of this rule was reversed the next day, see the ads entry
+  below). Every `openPricing(guild, from)` names an `UpgradePrompt`
   (`core/plan/upgradePrompt.ts`); the modal opens on that limit (`limitFocus` in
   `pricingView.ts`: "Saved messages: 10 on Free · 100 on Plus · Unlimited on Pro" + the row
   marked on every card), and the funnel `pricing_opened` → `checkout_started` →
@@ -1911,6 +1913,57 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   589,881 raw / 181,086 gzip to 588,538 / 180,872 with the prompts in. Never put an upgrade
   prompt inside a posted message, a plugin reply, the editor canvas, or the static SEO pages
   (their visitors have no server to upgrade yet).
+- **DWEEB shows exactly one ad: under the send receipt, after the work is done — and never to
+  a paid server** (maintainer, 2026-10-29: "put ads… less affected user experience… after send
+  message"; "if user paid the ads is removed"). Google AdSense, `src/core/ads/` +
+  `features/ads/SendAd`. **Off unless configured**: `VITE_ADSENSE_CLIENT` (`ca-pub-` + 16
+  digits) alone ships `/ads.txt` and the `google-adsense-account` verification meta (the site
+  can be approved before an ad unit exists); adding `VITE_ADSENSE_SLOT` turns the ad on and
+  widens the production CSP by `ADSENSE_CSP` (`adsenseIds.ts`, the one parser both
+  `vite.config.ts` and the app use, so the build output and the bundle can't disagree). Both are
+  repository variables in `web.yml`; malformed ⇒ off. The rules, each load-bearing: (1) **one
+  placement** — `Modal`'s `below` slot, under the receipt's footer, with the receipt
+  top-anchored whenever ads are configured, so the strip's arrival or collapse never moves Done
+  / Open in Discord (a centred dialog would shift them by half its height); never in the
+  editor, a toast, the Activity (its CSP blocks third parties and it's Discord's client), the
+  static SEO pages (Lighthouse/CWV gates, and their CSP has no ad hosts), a posted message or a
+  plugin reply; (2) **paid servers are ad-free** — the send's destination guild, not the person
+  (`adFree.ts`: the plan store's tier for the connected server, else one
+  `GET /api/guilds/:g/plan` per page, remembered); **a failed lookup reads as ad-free** (an ad
+  on a paid server is a broken promise, a missed impression costs nothing — no answer, a 429 or a
+  5xx), while having nothing to ask with shows the ad: no server, signed out, or a plan the proxy
+  won't show this person (403/404, a server they don't manage); the receipt's "Remove ads" opens that server's plans
+  (`UpgradePrompt` `send_ad`) and the cards carry an "Ads / No ads after sending" row only in a
+  build that shows ads; (3) **`takeSendAdTicket`** (`sendAd.ts` → pure `sendAdAllowed`) skips
+  the first successful send in a browser, keeps a 3-minute cooldown between ad-bearing receipts
+  (counted from a *filled* ad), and skips GPC/DNT (same test as `gtag-init.js`), Save-Data, a
+  viewport under 560px tall, a tag that already failed on the page, and **any query or hash
+  left in the address bar** — the ad request carries the page URL and a share link's `#s=` is
+  the message itself (boot strips it; this is the guard); one throw-safe localStorage record,
+  read-modify-write; (4) **nothing renders until there's an ad** — the paid check and the tag
+  load happen first, and blocked / unfilled (`data-ad-status`) / no answer in 10 s / under
+  250px of room each *unmount* the strip (never hide a requested slot: a late fill would be a
+  hidden ad), no ad-blocker nag; (5) **the tag loads on demand** (`adsense.ts`), never at boot:
+  no visitor who doesn't send, no crawler and no Lighthouse run downloads it, and the boot
+  bundle grew only by the crash-reporter host and the analytics enum (181,014 gzip / 182,000);
+  (6) **non-personalized** — `requestNonPersonalizedAds = 1`, and `gtag-init.js`'s consent
+  defaults (ad storage/personalization denied) are what AdSense reads, so the privacy policy's
+  "no personalized advertising or cross-site tracking" holds; personalized ads would need a
+  certified CMP, a consent banner and a policy rewrite — a decision, not a tweak; (7) the
+  tag's own `TagError`s reach `window.onerror` with only its frames, so
+  `pagead2.googlesyndication.com` is in `THIRD_PARTY_SCRIPT_HOSTS` (client + proxy + vector
+  file) — added without a beacon, the one exception to that list's evidence rule; our own push
+  is try/caught and a throw from it carries our frame, so it still pages; (8) `ad_slot
+  { result }` (filled / unfilled / blocked / timeout / no_room / ad_free) measures fill rate and
+  ad-blocked share without anything about the ad, message or server. **AdSense dashboard
+  settings this code relies on**: keep **Auto ads OFF** for dweeb.faizo.net — the tag is loaded
+  with `?client=`, and it already appends its own page-level `ins.adsbygoogle-noablate` to
+  `<body>` (seen in a local run); with Auto ads on, Google would place anchor/vignette ads over
+  the editor the moment a receipt loads the tag. The unit must be a plain **display** ad;
+  the code sizes it as an exact 320×100 box (narrowed to the room, ≥250px). Verified
+  2026-10-29 against a local `vite preview` of an ad-enabled build under the production CSP
+  (tag + implementation loaded, no CSP violation, unfilled answer collapsed the strip, a
+  stand-in fill laid out correctly at 1280 and 390px).
 - **Feedback webhook credentials are server-only.** Both web and Activity forms submit the
   closed report schema to the proxy (`/api/feedback` anonymous + strict per-IP limit;
   `/api/activity/feedback` bearer-gated). Only `FEEDBACK_WEBHOOK_URL` may hold the destination;
