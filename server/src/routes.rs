@@ -1135,11 +1135,46 @@ pub async fn permanent_reenable(
     Ok((StatusCode::ACCEPTED, Json(json!({ "status": "accepted" }))).into_response())
 }
 
+/// Discord's epoch, in Unix milliseconds: the zero point of a snowflake.
+const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
+
+/// Could the expiry gate have disabled anything on this message yet?
+///
+/// A click only dies once the message's send time *and* its last use are both
+/// older than the TTL (see the dispatcher), so nothing younger than the TTL has
+/// been touched by it — and with a TTL of 0 nothing ever is. A `disabled` on such
+/// a message arrived in what was posted, and [`clear_disabled`] can't tell it
+/// from one the gate set. Never Expire is the default on every send, so this used
+/// to run seconds after each post and clear whatever it found (17 messages in
+/// October, all under an hour old): an author's disabled button came back on.
+/// The other way that flag gets posted is an expired message restored and sent
+/// again, which the editor now offers to fix on load (`core/guild/expiredComponents`).
+///
+/// An id that can't be read as a snowflake says nothing about age, so it keeps
+/// the old behaviour.
+fn could_have_expired(message_id: &str, now_ms: u64, ttl_days: u64) -> bool {
+    if ttl_days == 0 {
+        return false;
+    }
+    let Ok(snowflake) = message_id.parse::<u64>() else {
+        return true;
+    };
+    let sent_ms = (snowflake >> 22).saturating_add(DISCORD_EPOCH_MS);
+    now_ms.saturating_sub(sent_ms) >= ttl_days.saturating_mul(86_400_000)
+}
+
 /// Run [`revive_message_components`] off the request path, logging the outcome.
 /// Shared by every never-expire entry point (dashboard, Discord button, and the
 /// embedded Activity's gallery); a few Discord round-trips must never make a
-/// Discord interaction handler (or the dashboard click) wait.
+/// Discord interaction handler (or the dashboard click) wait. A message too
+/// young to have expired needs none of it: see [`could_have_expired`].
 pub(crate) fn spawn_revive(st: &AppState, guild: String, channel_id: String, message_id: String) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    if !could_have_expired(&message_id, now_ms, st.config.component_ttl_days) {
+        return;
+    }
     let st = st.clone();
     tokio::spawn(async move {
         match revive_message_components(&st, &guild, &channel_id, &message_id).await {
@@ -1311,6 +1346,10 @@ fn sanitize_echoed_media(node: &mut Value) {
 /// walks the same Components-V2 nesting: children under `components`, a section's
 /// button under `accessory`. Link/premium buttons (no `custom_id`) are left
 /// alone — only what could have been TTL-disabled is touched.
+///
+/// The flag doesn't record who set it, so this also clears a button its author
+/// disabled. [`could_have_expired`] keeps it away from messages where that is
+/// the only explanation; past the TTL the two can't be told apart.
 fn clear_disabled(node: &mut Value) -> bool {
     match node {
         Value::Array(items) => items.iter_mut().fold(false, |c, i| clear_disabled(i) | c),
@@ -1943,9 +1982,10 @@ pub(crate) async fn authorize_webhooks_session(
     }
 }
 
-/// Which per-user guild list a read wants. The two lenses share one Discord
-/// route and one code path but stay under separate cache keys, so the web app's
+/// Which per-user guild list a read wants. The two lenses are views of **one**
+/// Discord response and stay under separate cache keys, so the web app's
 /// filtered picker list never mixes with the Activity's full-membership list.
+/// They are fetched together: see [`guilds_gate_key`].
 #[derive(Clone, Copy)]
 enum GuildLens {
     /// Guilds the user may *use* in the web app: owner or `MANAGE_GUILD`,
@@ -1969,6 +2009,18 @@ impl GuildLens {
             GuildLens::Member => format!("mguilds:{uid}"),
         }
     }
+}
+
+/// The single-flight key for a user's guild list. Per **user**, not per lens:
+/// both lenses are `GET /users/@me/guilds` under the same token, and Discord
+/// holds that route to about one call a second per token. A key per lens let a
+/// web boot race itself — `/library/origin` gates through [`GuildLens::Member`]
+/// while `/plan`, `/permanent` and `/api/guilds` gate through
+/// [`GuildLens::Usable`] — so one of the two calls took a 429 and sat out
+/// `Retry-After`. That was ~38 stalls of a second or more a day, on the routes a
+/// page load waits for.
+fn guilds_gate_key(uid: &str) -> String {
+    format!("guilds:{uid}")
 }
 
 /// The user's guilds through `lens`, cached per-user so repeat reads don't
@@ -1995,7 +2047,7 @@ async fn guild_list(
     // every guild read's authorization. Coalesce concurrent misses (a reload
     // firing bootstrap + webhooks + the picker at once) so one call serves them
     // all, re-checking the cache once the gate is held.
-    let _gate = st.flight.acquire(&key).await;
+    let _gate = st.flight.acquire(&guilds_gate_key(&session.uid)).await;
     if !fresh {
         if let Some(v) = st.cache.get(&key).await {
             if let Ok(list) = Vec::<UsableGuild>::deserialize(v.as_ref()) {
@@ -2006,20 +2058,47 @@ async fn guild_list(
     fetch_guilds(st, session, lens).await
 }
 
-/// One `/users/@me/guilds` round-trip mapped through `lens`, cached
-/// best-effort under the lens's key. Both callers ([`guild_list`] and
-/// [`find_guild`]) reach this holding the key's single-flight gate, so a
-/// cold-cache burst still costs one Discord call.
+/// One `/users/@me/guilds` round-trip, cached under both lenses, answered
+/// through `lens`. Both callers ([`guild_list`] and [`find_guild`]) reach this
+/// holding the user's single-flight gate, so a cold-cache burst costs one
+/// Discord call whichever mix of lenses it asks for.
 async fn fetch_guilds(
     st: &AppState,
     session: &Session,
     lens: GuildLens,
 ) -> Result<Vec<UsableGuild>, AppError> {
     let raw = st.discord.current_user_guilds(&session.token).await?;
-    let require = matches!(lens, GuildLens::Usable) && st.config.require_manage_guild;
-    let list: Vec<UsableGuild> = raw
+    let (usable, member) = cache_user_guilds(st, &session.uid, raw).await;
+    Ok(match lens {
+        GuildLens::Usable => usable,
+        GuildLens::Member => member,
+    })
+}
+
+/// Fill both lenses' cache entries from one Discord response, best-effort, and
+/// hand both back as `(usable, member)`. The login callback calls this too, so
+/// the first reads after sign-in hit the cache whichever lens they use.
+pub(crate) async fn cache_user_guilds(
+    st: &AppState,
+    uid: &str,
+    raw: Vec<crate::discord::UserGuild>,
+) -> (Vec<UsableGuild>, Vec<UsableGuild>) {
+    let (usable, member) = guild_lenses(raw, st.config.require_manage_guild);
+    for (lens, list) in [(GuildLens::Usable, &usable), (GuildLens::Member, &member)] {
+        if let Ok(val) = serde_json::to_value(list) {
+            st.cache.put(lens.key(uid), Arc::new(val)).await;
+        }
+    }
+    (usable, member)
+}
+
+/// Split one guild list into the `(usable, member)` lenses.
+fn guild_lenses(
+    raw: Vec<crate::discord::UserGuild>,
+    require_manage_guild: bool,
+) -> (Vec<UsableGuild>, Vec<UsableGuild>) {
+    let member: Vec<UsableGuild> = raw
         .into_iter()
-        .filter(|g| !require || g.can_manage())
         .map(|g| UsableGuild {
             can_manage_webhooks: g.can_manage_webhooks(),
             can_manage: g.can_manage(),
@@ -2028,10 +2107,12 @@ async fn fetch_guilds(
             icon: g.icon,
         })
         .collect();
-    if let Ok(val) = serde_json::to_value(&list) {
-        st.cache.put(lens.key(&session.uid), Arc::new(val)).await;
-    }
-    Ok(list)
+    let usable = member
+        .iter()
+        .filter(|g| !require_manage_guild || g.can_manage)
+        .cloned()
+        .collect();
+    (usable, member)
 }
 
 /// The user's usable guilds (see [`GuildLens::Usable`]) as a full list — for
@@ -2074,7 +2155,7 @@ async fn find_guild(
     }
     // Cache miss (or an unusable entry): same single-flight coalescing as
     // `guild_list`, then one Discord fetch fills the cache for both paths.
-    let _gate = st.flight.acquire(&key).await;
+    let _gate = st.flight.acquire(&guilds_gate_key(&session.uid)).await;
     if let Some(v) = st.cache.get(&key).await {
         if let Some(found) = scan_cached_guilds(&v, guild) {
             return Ok(found);
@@ -2376,6 +2457,98 @@ mod tests {
             tree[0]["components"][3]["components"][0]["disabled"],
             json!(true)
         );
+    }
+
+    // ── guild lenses ──────────────────────────────────────────────────────────
+
+    fn user_guild(id: &str, owner: bool, permissions: &str) -> crate::discord::UserGuild {
+        crate::discord::UserGuild {
+            id: id.into(),
+            name: format!("g{id}"),
+            icon: None,
+            owner,
+            permissions: permissions.into(),
+        }
+    }
+
+    fn guild_ids(list: &[UsableGuild]) -> Vec<&str> {
+        list.iter().map(|g| g.id.as_str()).collect()
+    }
+
+    /// The race this exists to end: a web boot mixes reads of both lenses, and a
+    /// gate per lens sent two concurrent `/users/@me/guilds` under one token, so
+    /// Discord 429'd whichever arrived second.
+    #[test]
+    fn both_lenses_of_a_user_share_one_gate() {
+        assert_eq!(guilds_gate_key("42"), guilds_gate_key("42"));
+        assert_ne!(guilds_gate_key("42"), guilds_gate_key("43"));
+        // Under a key neither lens's cache entry uses, and which a guild-scoped
+        // read's gate can't collide with.
+        assert_ne!(guilds_gate_key("42"), GuildLens::Usable.key("42"));
+        assert_ne!(guilds_gate_key("42"), GuildLens::Member.key("42"));
+    }
+
+    #[test]
+    fn one_response_fills_both_lenses() {
+        // 32 = Manage Server. Member keeps everything; Usable keeps what the
+        // user may manage, while the read gate is on.
+        let raw = vec![
+            user_guild("1", true, "0"),
+            user_guild("2", false, "32"),
+            user_guild("3", false, "0"),
+        ];
+        let (usable, member) = guild_lenses(raw, true);
+        assert_eq!(guild_ids(&usable), ["1", "2"]);
+        assert_eq!(guild_ids(&member), ["1", "2", "3"]);
+    }
+
+    #[test]
+    fn with_the_read_gate_off_the_lenses_are_the_same_list() {
+        let raw = vec![user_guild("1", false, "0"), user_guild("2", true, "0")];
+        let (usable, member) = guild_lenses(raw, false);
+        assert_eq!(guild_ids(&usable), guild_ids(&member));
+    }
+
+    // ── could_have_expired (component revival gate) ──────────────────────────
+
+    const DAY_MS: u64 = 86_400_000;
+
+    /// A message id minted at `sent_ms` (Unix milliseconds).
+    fn id_sent_at(sent_ms: u64) -> String {
+        ((sent_ms - DISCORD_EPOCH_MS) << 22).to_string()
+    }
+
+    #[test]
+    fn a_fresh_post_cannot_have_expired() {
+        let now = 1_793_000_000_000;
+        // The real case: Never Expire claimed seconds after the send, on a
+        // message whose author disabled a button.
+        assert!(!could_have_expired(&id_sent_at(now - 3_000), now, 7));
+        assert!(!could_have_expired(
+            &id_sent_at(now - 7 * DAY_MS + 1),
+            now,
+            7
+        ));
+    }
+
+    #[test]
+    fn a_message_past_the_ttl_may_have_expired() {
+        let now = 1_793_000_000_000;
+        assert!(could_have_expired(&id_sent_at(now - 7 * DAY_MS), now, 7));
+        assert!(could_have_expired(&id_sent_at(now - 30 * DAY_MS), now, 7));
+        // The window follows the deployment's TTL, not a constant.
+        assert!(could_have_expired(&id_sent_at(now - 2 * DAY_MS), now, 1));
+    }
+
+    #[test]
+    fn nothing_expires_on_a_deployment_with_no_ttl() {
+        let now = 1_793_000_000_000;
+        assert!(!could_have_expired(&id_sent_at(now - 400 * DAY_MS), now, 0));
+    }
+
+    #[test]
+    fn an_unreadable_id_keeps_the_revive() {
+        assert!(could_have_expired("not-a-snowflake", 1_793_000_000_000, 7));
     }
 
     // ── clear_disabled (component revival) ───────────────────────────────────

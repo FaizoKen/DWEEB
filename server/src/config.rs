@@ -142,6 +142,11 @@ pub struct Config {
     /// `MANAGE_GUILD` — appropriate for a webhook-builder tool. When false, any
     /// server they're a member of is allowed.
     pub require_manage_guild: bool,
+    /// Days a component stays clickable with no use (`COMPONENT_TTL_DAYS`). The
+    /// dispatcher enforces it; the proxy only needs to know that a younger
+    /// message can't have been expired. Compose's `env_file` gives both services
+    /// the same value. 0 = components never expire.
+    pub component_ttl_days: u64,
 
     // ── Abuse controls ─────────────────────────────────────────────────────
     /// Sustained per-IP request rate (requests per minute) for `/api` + `/auth`.
@@ -447,6 +452,7 @@ impl Config {
         }
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true)?;
+        let component_ttl_days = parse_or("COMPONENT_TTL_DAYS", 7)?;
 
         let rate_limit_per_min = parse_or("RATE_LIMIT_PER_MIN", 60)?;
         let rate_limit_burst = parse_or("RATE_LIMIT_BURST", 20)?;
@@ -651,6 +657,7 @@ impl Config {
             cookie_samesite,
             cookie_domain,
             require_manage_guild,
+            component_ttl_days,
             rate_limit_per_min,
             rate_limit_burst,
             discord_max_concurrency,

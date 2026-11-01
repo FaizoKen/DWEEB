@@ -11,8 +11,6 @@
 //!   POST /auth/logout    → clear the session
 //!   GET  /auth/me        → who am I (for the FE to show signed-in state)
 
-use std::sync::Arc;
-
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
@@ -23,7 +21,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::discord::TokenResponse;
 use crate::error::AppError;
-use crate::routes::{current_session, AppState, UsableGuild};
+use crate::routes::{current_session, AppState};
 use crate::session::{
     build_custom_app_cookie, build_session_cookie, build_state_cookie, clear_custom_app_cookie,
     clear_session_cookie, clear_state_cookie, now, Session, CUSTOM_APP_COOKIE, STATE_COOKIE,
@@ -478,26 +476,17 @@ pub async fn callback(
         exp: now() + cfg.session_ttl.as_secs() as i64,
     };
 
-    // Warm the per-user guild cache so the FE picker is populated immediately.
+    // Warm both per-user guild lists so the FE picker is populated immediately
+    // and the first reads behind it don't spend a second call on Discord's
+    // per-token budget for the same response.
     if let Ok(raw) = guilds {
-        let require = cfg.require_manage_guild;
-        let list: Vec<UsableGuild> = raw
-            .into_iter()
-            .filter(|g| !require || g.can_manage())
-            .map(|g| UsableGuild {
-                can_manage_webhooks: g.can_manage_webhooks(),
-                can_manage: g.can_manage(),
-                id: g.id,
-                name: g.name,
-                icon: g.icon,
-            })
-            .collect();
-        if let Ok(val) = serde_json::to_value(&list) {
-            st.cache
-                .put(format!("uguilds:{}", user.id), Arc::new(val))
-                .await;
-        }
+        crate::routes::cache_user_guilds(&st, &user.id, raw).await;
     }
+
+    // The failure branches above log at info; this is their denominator, since
+    // a count of failed sign-ins says nothing without it. No id: the count is
+    // all this line is for.
+    tracing::info!(target: "auth", "sign-in callback succeeded");
 
     let jar = jar
         .add(clear_state_cookie(cfg))
