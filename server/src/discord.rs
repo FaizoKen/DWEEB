@@ -1361,25 +1361,15 @@ impl Discord {
         struct PartialGuild {
             id: String,
         }
-        let mut out = Vec::new();
-        let mut after: Option<String> = None;
-        // Hard cap the loop so a pathological response can't spin forever.
-        for _ in 0..50 {
-            let path = match &after {
+        collect_guild_ids(|after| async move {
+            let path = match after {
                 Some(a) => format!("/users/@me/guilds?limit=200&after={a}"),
                 None => "/users/@me/guilds?limit=200".to_string(),
             };
             let page: Vec<PartialGuild> = self.get_bot(&path).await?;
-            let len = page.len();
-            if let Some(last) = page.last() {
-                after = Some(last.id.clone());
-            }
-            out.extend(page.into_iter().map(|g| g.id));
-            if len < 200 {
-                break;
-            }
-        }
-        Ok(out)
+            Ok(page.into_iter().map(|g| g.id).collect())
+        })
+        .await
     }
 
     /// Authenticated bot GET, decoded as `T`, with the concurrency permit held
@@ -1707,6 +1697,66 @@ fn upload_bytes(files: &[UploadFile]) -> usize {
     files.iter().map(|f| f.bytes.len()).sum()
 }
 
+/// Walk the bot's guild list until Discord answers an **empty** page.
+///
+/// A short page is not the end of the list: `/users/@me/guilds?limit=200` can
+/// answer fewer than 200 while more remain. Stopping at a short page froze the
+/// logged server count at 198, then 199, for at least 18 days, with none of the
+/// daily churn it has shown since, until it went 199 → 344 in one 30-minute tick
+/// on 2026-10-21 with no deploy behind it. Until then about 145 servers read as
+/// not having the bot, and Top.gg published the short number. Costs one extra
+/// request per walk.
+async fn collect_guild_ids<F, Fut>(mut fetch_page: F) -> Result<Vec<String>, AppError>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<String>, AppError>>,
+{
+    let mut out = Vec::new();
+    let mut after: Option<String> = None;
+    // Hard cap the loop so a pathological response can't spin forever.
+    for _ in 0..50 {
+        let page = fetch_page(after.take()).await?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.clone());
+        out.extend(page);
+    }
+    Ok(out)
+}
+
+/// A Discord API URL as a route shape for a log line: `/webhooks/:id/:id/messages/:id`.
+///
+/// Allow-list, not deny-list: this URL can carry a webhook token, and every log
+/// line can end up in the alert channel. A segment survives only if it is a short
+/// lowercase word, which no id or token is, and the query never does.
+fn route_shape(url: &reqwest::Url) -> String {
+    let is_word = |seg: &str| {
+        seg.len() <= 24
+            && !seg.is_empty()
+            && seg
+                .trim_start_matches('@')
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'-')
+    };
+    url.path()
+        .strip_prefix("/api/v10")
+        .unwrap_or(url.path())
+        .split('/')
+        .filter(|seg| !seg.is_empty())
+        .fold(String::new(), |mut shape, seg| {
+            shape.push('/');
+            shape.push_str(if is_word(seg) { seg } else { ":id" });
+            shape
+        })
+}
+
+/// A rate-limit header as text, `-` when Discord didn't send it.
+fn rate_limit_header<'a>(resp: &'a reqwest::Response, name: &str) -> &'a str {
+    resp.headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+}
+
 /// Assemble Discord's multipart webhook body: `payload_json` + one part per
 /// uploaded file.
 fn multipart_form(payload: &Value, files: Vec<UploadFile>) -> reqwest::multipart::Form {
@@ -1744,9 +1794,15 @@ async fn send_with_retry(
         match retry_after(&resp) {
             Some(wait) if wait <= MAX_RETRY_WAIT => {
                 attempt += 1;
+                // The span names *our* route; these name Discord's, which is the
+                // one that was limited. `scope` says whose budget it was: `user`
+                // (this caller's), `global`, or `shared` (Discord's own resource).
                 tracing::warn!(
                     attempt,
                     wait_ms = wait.as_millis() as u64,
+                    route = %route_shape(resp.url()),
+                    scope = rate_limit_header(&resp, "x-ratelimit-scope"),
+                    bucket = rate_limit_header(&resp, "x-ratelimit-bucket"),
                     "Discord rate-limited the request; backing off and retrying"
                 );
                 tokio::time::sleep(wait).await;
@@ -2208,6 +2264,111 @@ mod tests {
         // the caller surfaces it instead (the `> MAX_RETRY_WAIT` branch).
         let d = parse_retry_after("30").expect("parses");
         assert!(d > MAX_RETRY_WAIT);
+    }
+}
+
+#[cfg(test)]
+mod guild_walk_tests {
+    use super::*;
+
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    fn ids(from: usize, count: usize) -> Vec<String> {
+        (from..from + count).map(|n| n.to_string()).collect()
+    }
+
+    /// Run the walk over canned pages; returns what it collected and the
+    /// `after` cursor of every request it made.
+    async fn walk(pages: Vec<Vec<String>>) -> (Vec<String>, Vec<Option<String>>) {
+        let pages = Mutex::new(VecDeque::from(pages));
+        let cursors = Mutex::new(Vec::new());
+        let collected = collect_guild_ids(|after| {
+            cursors.lock().unwrap().push(after);
+            let page = pages.lock().unwrap().pop_front().unwrap_or_default();
+            async move { Ok(page) }
+        })
+        .await;
+        let Ok(collected) = collected else {
+            panic!("no page failed");
+        };
+        (collected, cursors.into_inner().unwrap())
+    }
+
+    /// The production shape: Discord's first page came back at 199 with the
+    /// rest of the list still behind it.
+    #[tokio::test]
+    async fn a_short_page_does_not_end_the_list() {
+        let (collected, cursors) = walk(vec![ids(0, 199), ids(199, 150)]).await;
+        assert_eq!(collected.len(), 349);
+        assert_eq!(
+            cursors[1].as_deref(),
+            Some("198"),
+            "continues after the last id"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_walk_ends_on_an_empty_page() {
+        let (collected, cursors) = walk(vec![ids(0, 200), ids(200, 200), vec![]]).await;
+        assert_eq!(collected.len(), 400);
+        assert_eq!(cursors.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_bot_in_no_servers_costs_one_request() {
+        let (collected, cursors) = walk(vec![]).await;
+        assert!(collected.is_empty());
+        assert_eq!(cursors, [None]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_page_fails_the_walk_rather_than_returning_a_partial_list() {
+        // Callers publish this list's length, and read absence as "bot not here".
+        let mut calls = 0;
+        let result = collect_guild_ids(|_| {
+            calls += 1;
+            let failed = calls == 2;
+            async move {
+                if failed {
+                    Err(AppError::Internal("page 2".into()))
+                } else {
+                    Ok(ids(0, 200))
+                }
+            }
+        })
+        .await;
+        assert!(result.is_err());
+    }
+
+    fn shape(url: &str) -> String {
+        route_shape(&reqwest::Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn a_route_shape_names_the_route() {
+        assert_eq!(
+            shape("https://discord.com/api/v10/users/@me/guilds?limit=200&after=123"),
+            "/users/@me/guilds"
+        );
+        assert_eq!(
+            shape("https://discord.com/api/v10/guilds/1467220128176275519/audit-logs"),
+            "/guilds/:id/audit-logs"
+        );
+    }
+
+    /// Log lines reach the alert channel; a webhook URL's token is a credential.
+    #[test]
+    fn a_route_shape_never_carries_a_webhook_token() {
+        let token = "aB3_dE-fGhIjKlMnOpQrStUvWxYz0123456789aB3dEfGhIjKlMnOpQrStUvWxYz01";
+        // And the worst shape one could take: nothing but lowercase letters.
+        let lower = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl";
+        for t in [token, lower] {
+            let url = format!(
+                "https://discord.com/api/v10/webhooks/1511769679096447016/{t}/messages/1?wait=true&thread_id=9"
+            );
+            assert_eq!(shape(&url), "/webhooks/:id/:id/messages/:id");
+        }
     }
 }
 
