@@ -740,7 +740,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   while `MCP_ENABLED` is on** — with the feature off the endpoint answers 501 by design and it
   pages forever, so comment it out if MCP is ever switched off. Gatus's config is a hand-synced
   bind mount (copy in place, `docker compose restart gatus`).
-  **The feature is surfaced in the app** by "Connect an AI client" in the builder's More menu
+  **The feature is surfaced in the app** by "Connect an AI client" in the builder's Tools menu
   (`features/mcp/ConnectAiDialog`), which hands over the connector URL and the local setup
   command with copy buttons. The URL is **derived from `PROXY_BASE_URL`**, never hard-coded, so
   a self-hosted build advertises its own address; the entry is gated on the proxy reporting
@@ -1517,7 +1517,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   path filter, and treat local single runs as diagnostics rather than field Core Web Vitals.
   **The lazy intro film is not a root `VideoObject`** (2026-08-20). Google requires an indexed
   video to be embedded and prominent without a user action; DWEEB mounts the opt-in film only
-  after More → Watch intro, so root video schema claimed eligibility the page did not satisfy and
+  after Tools → Watch the intro, so root video schema claimed eligibility the page did not satisfy and
   was removed. Keep the film lazy. Add video schema only with a dedicated crawlable watch page
   whose visible primary content is the player. `DATETIME_PROPERTIES` in `audit.ts` remains the
   guard for any future datetime-typed schema: those values need a full ISO datetime + timezone;
@@ -1643,7 +1643,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `DEFAULT_PRESET` — offering the in-app Message directory (a button, not a `/templates/` link:
   the directory loads a template straight into this editor) and `/guides/` in a new tab. Still
   web-only: the Activity renders a bare `<ComponentTree />`. A visitor mid-draft reaches docs from
-  persistent chrome — the bar's Message directory icon reopens the gallery, More ▸ About opens the
+  persistent chrome — the bar's Message directory icon reopens the gallery, Tools ▸ About opens the
   About panel's `/about/`, `/privacy`, `/terms`. **Nothing gates a rendered anchor on `/`**: if the
   auto-open rule ever changes so a fresh profile renders the Builder instead, `/`'s rendered
   outbound link set drops to zero and no build gate will notice.
@@ -1756,7 +1756,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   28 days at position 8.8 with 2% CTR, nearly all behind queries too rare to be named (the long,
   specific searches of someone writing a bot). GA4 puts ChatGPT referrals (452 sessions) level with
   Google organic (554). The rival in that niche (discord.builders) exports library code; DWEEB
-  could only hand a developer JSON. Now More ▸ **Export as code** (Share dialog **Code** tab,
+  could only hand a developer JSON. Now Tools ▸ **Export as code** (Share dialog **Code** tab,
   `#intent=code`) renders the current message for five targets — discord.js 14.19+ builders,
   discord.py 2.6+ `LayoutView`, and cURL / `fetch` / Python `requests` webhook posts — from
   `src/core/codegen`, a pure function of the same wire payload the JSON tab exports
@@ -1990,7 +1990,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `/api/activity/feedback` bearer-gated). Only `FEEDBACK_WEBHOOK_URL` may hold the destination;
   never add a `VITE_*` feedback webhook variable or direct browser-to-Discord feedback post.
 - **The intro film is opt-in.** First-time visitors get one quiet pointer to
-  **More ▸ Watch intro**; never auto-open or autoplay the multi-megabyte film on page load.
+  **Tools ▸ Watch the intro**; never auto-open or autoplay the multi-megabyte film on page load.
   Keep it lazy-mounted and use `preload="metadata"`; an explicit Watch intro action may start
   playback (while respecting reduced-motion) because the user asked for it — and since
   2026-09-24 it first tries playback **with sound** (muted + a "Tap for sound" pill only when
@@ -2128,6 +2128,37 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   callback on connect + a pointer/focus touch of either action-bar cluster), so the dialog
   usually opens on a resolved destination instead of "Loading this server…"; both stores dedupe
   and cache, so the picker's own mount-time load lands as a cache hit.
+- **The bars' overflow is a named Tools menu, never a bare "…"** (maintainer, 2026-11-02: "user
+  dont know dweeb has more good feature and miss it"). Share link, Export as code, Connect an AI
+  client and the rest lived behind an unlabelled ellipsis, whose rows were a bare list of names.
+  `features/tools/ToolsButton` is the trigger on both bars; `ToolsMenu.tsx` is the web panel. Keep
+  all of this: (1) **the word stays as long as it can.** `toolsFoldSteps` (measureBarFit.ts) is the
+  order: 3/2/1/0 icons with the label, then 1 icon without it, then neither. The label outlasts the
+  icons because folding an icon moves that action into Tools, but it must not hold them folded once
+  it has gone too: the plain order lost the Save icon between ~470 and ~530px for a label that
+  still didn't fit, leaving the bar worse than the old one. Every rung is narrower than the last,
+  and the fit check relies on that. Folded, the button is pixel-identical to the icon button it
+  replaced (30px, 36px on touch), so no phone layout lost anything: signed in below ~560px it is
+  icon-only (the plan pill and chip take the room), which is accepted, and the dot and the tile
+  glyph carry it there. (2) **Features get a one-line description and housekeeping doesn't**;
+  keep each true to what the feature's own dialog promises, and short enough for one line, which
+  the 300px phone width sets (~36 characters). (3) **Two columns above 640px, on purpose.** One
+  column ran ~660px tall with every production row, past the fold of a 1366×768 laptop, and a
+  feature you must scroll a menu to find is half hidden again; two come to 369px. (4) **The dot
+  is the only nudge**: passive, gone on the first open, static (a pulse beside the editor would
+  never stop asking), and absent when storage can't be read, since nothing could ever clear it.
+  The interrupting slots are taken (Send coach-mark, intro offer, rating card). Bump
+  `TOOLS_REVISION` to relight it once for everyone when a tool worth a second look lands, not for
+  copy. (5) `tools_opened` / `tools_used { tool }` measure it; `tool` is a fixed slug, registered as the
+  GA custom dimension "Tool" (2026-11-02), so reports can split by row. (6) **`Menu` never uses
+  `visibility: hidden`** to hide its unplaced panel, which stays parked at -9999. Under
+  `prefers-reduced-motion` the blanket rule leaves `transition-property: all`, so `visibility`
+  transitions too: the panel was still hidden when `Menu` focused its first row, `focus()` silently
+  did nothing, and the keyboard could not enter **any** menu in the app (shipped that way until
+  2026-11-02; `rowVisibility: hidden, tookFocus: false` on a reduced-motion machine). `focus()` on
+  a just-revealed element has this hazard anywhere. (7) A panel too tall for the viewport gets a
+  `maxHeight` from `placeMenu` and scrolls; before that, rows past the edge could not be reached at
+  all.
 - **Built-in AI is a server-relayed Groq key with layered spend guards** (2026-07-19). The
   default AI provider is `dweeb`: `POST /api/ai/chat` on the proxy (`server/src/ai.rs`)
   relays a streamed completion under a server-held `GROQ_API_KEY` (unset ⇒ 501 and the FE
