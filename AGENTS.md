@@ -2753,6 +2753,63 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   Giveaway/Poll: the re-render binds by id, then by live position, never "first interactive";
   a select poll's options always come from its config; rerolls exclude everyone ever drawn
   (`drawn`). Modal Form's one-response limit is reserved atomically at submit.
+- **Production log audit 2026-11-01 — invariants it added; don't regress them.** All came out of
+  29 days of proxy journal plus 2.5 days of plugin logs; each fix's test was confirmed red with the
+  fix reverted.
+  (1) **A user's guild list is one fetch, whichever lens asks** (`guilds_gate_key`,
+  `cache_user_guilds`). `Usable` and `Member` are views of one `GET /users/@me/guilds`, and Discord
+  holds that route to about a call a second per token. The gate used to be per lens, and web sessions
+  reach both: `/library/*` and `/library/origin` go through `authorize_activity_webhooks` (Member)
+  while `/plan`, `/permanent`, `/api/guilds` go through Usable, so a page load raced itself and one
+  caller took a 429 and slept `Retry-After`. That was ~1,100 `Discord rate-limited` warns in 29 days
+  (`wait_ms=1050`, one route per burst), every one a stall on a load-path route. Don't re-key the gate
+  by lens or fill one lens's cache alone; the login callback warms both too. This was inferred from
+  code and the log's shape, not from Discord's headers; the warn now names Discord's `route`,
+  `scope` and `bucket` (`route_shape`, an allow-list, because a webhook URL's path holds its token),
+  so what remains is attributable.
+  (2) **A short page is not the last page** (`collect_guild_ids`). `/users/@me/guilds?limit=200` can
+  answer fewer than 200 with more behind it: stopping at `len < 200` froze the count at 198/199 for
+  weeks with none of the churn it has shown since, until it jumped 199 → 344 in one tick on 2026-10-21
+  with no deploy. About 145 servers read `bot_present: false` meanwhile and Top.gg published the short
+  number. Only an empty page ends the walk (one extra request). Tickets' `fetch_history` has the same
+  shape on a different endpoint, left alone for want of any evidence there.
+  (3) **Revive only what can have expired; the editor owns what a repost carries**
+  (`could_have_expired`, `core/guild/expiredComponents`). `clear_disabled` can't tell a TTL-disabled
+  component from one its author disabled, and `spawn_revive` runs on every never-expire claim, which
+  is the default on every send, so it cleared whatever it found seconds after posting (17 messages in
+  October) and wasted Discord reads on the rest (110 of 126 revive warns were messages under 10 s
+  old). Expiry needs send time *and* last use older than the TTL, so nothing younger has been touched.
+  The proxy now reads `COMPONENT_TTL_DAYS` too; compose's `env_file` gives it the dispatcher's value.
+  **That revive had a second, accidental job, and the logs can't say how many of the 17 were it:** an
+  expired message restored and sent as new carries its dead buttons, and revive quietly revived them.
+  Restore, the Activity's Restore and "Edit in DWEEB" now offer "Turn them on" in a toast
+  (`offerToEnableExpired`) for a message past the TTL. Don't clear the flags on load instead: a
+  deliberate "Sold out" on an old message would come back on at the next Update, and only the person
+  loading it can tell the two apart. Library loads need nothing: those payloads are stored at post
+  time and never held an expiry flag. Past the TTL, revive itself still can't tell (accepted).
+  (4) **A chat trims itself to the provider's request limit** (`fit_turns`, `AI_REQUEST_TOKEN_LIMIT`,
+  default 8000 = Groq free). Per-turn bounds say nothing about the sum, and every assistant turn
+  carries a message's JSON, so a long chat passed the limit and then 413'd on *every* send, each
+  retry adding a turn (one user: `Requested` 8,927 → 9,404). The oldest turns are dropped in bytes at
+  3.5 per token, leaving the newest always. An estimate only ever trims, never refuses: a `TooLarge`
+  now means the message itself is too big, and its copy says so. Raising `AI_MAX_TOKENS` shrinks the
+  prompt budget, so raise the limit with it.
+  (5) **A reply cut off at the output limit is not retried** (`AiCallResult.truncated`, `cutOff` in
+  aiStore). 17 of 160 built-in replies hit `max_tokens` mid-JSON. Nothing read `finish_reason`, so the
+  unclosed fence read as "no payload": the announced-edit nudge spent a second daily request on a
+  retry that meets the same limit, half a JSON block landed in the bubble, and it replayed into the
+  next request's history. Only a reply that had opened a fence counts; a long plain answer is left
+  alone, and a finished payload followed by cut-off prose still applies.
+  (6) **The Embedded App SDK rejects with a plain `{code, message}`** (`Discord.mjs`:
+  `reject(parsed.data)`), never an `Error`, so `String(err)` is `[object Object]`, which is what the
+  launch failure splash *and* the handshake beacon showed for 7 of 107 launches. Go through
+  `sdkFailure`; the code stays in the text because the beacon carries only the text.
+  (7) A failed scheduled post now logs (`scheduled post failed for good`, WARN, never ERROR: it's
+  usually a deleted webhook) and a sign-in success logs at info as the denominator for the failures.
+  The proxy, dispatcher and plugins log to journald (`x-durable-logs`), since json-file history ends
+  at the last deploy. `kind=stale-chunk` from the *live* build (`TemplateGallery`, `headline-*.css`)
+  is mislabelled, not broken: those chunks answer 200, and a boundary-handled failure isn't probed. It's
+  a fetch that lost (a visitor leaving mid-load, a dropped connection), at info, and needs nothing.
 
 ## CI
 
