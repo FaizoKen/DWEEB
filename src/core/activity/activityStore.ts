@@ -73,6 +73,7 @@ import {
 import { createConnectionNotifier } from "./connectionNotice";
 import { actorDisplayName, peerReplaceNotice } from "./roomReplace";
 import { setActivityToken } from "./runtime";
+import { sdkFailure } from "./sdkFailure";
 import { startHandshakeTrace } from "./telemetry";
 import { missingUploadCount, missingUploadsMessage } from "./uploads";
 import { shouldNoteTurnedAway, turnedAwayNotice } from "./turnedAway";
@@ -1333,7 +1334,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, stage: string): Promise<T> {
       },
       (err) => {
         clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        reject(sdkFailure(err, stage));
       },
     );
   });
