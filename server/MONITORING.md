@@ -94,16 +94,17 @@ Live, searchable, multi-container logs with no extra exposure. (If you'd rather
 have it on a subdomain, add a Caddy block with `basic_auth` and publish a real
 port — but keep it behind auth.)
 
-## 4. Durable proxy logs & telemetry (journald)
+## 4. Durable app logs & telemetry (journald)
 
-The **proxy** service alone logs to **journald** instead of the shared
-json-file driver (see its `logging:` block in `compose.yml`). json-file logs
-die with the container, and CD recreates the container on every deploy — which
-silently discarded the `activity_handshake` launch telemetry and `web_crash`
-reports between deploys. journald survives recreation, the host's journal is
-capped (`SystemMaxUse` in `/etc/systemd/journald.conf.d/` + the maintenance
-timer's `--vacuum-size`, both **1G** since 2026-09-09), and `docker logs` /
-Dozzle still work.
+The **proxy, dispatcher and every plugin** log to **journald** instead of the
+shared json-file driver (`x-durable-logs` in `compose.yml`). json-file logs die
+with the container, and CD recreates the containers on every deploy — which
+silently discarded the proxy's `activity_handshake` launch telemetry and
+`web_crash` reports between deploys, and left a plugin's history no older than
+the last deploy. journald survives recreation, the host's journal is capped
+(`SystemMaxUse` in `/etc/systemd/journald.conf.d/` + the maintenance timer's
+`--vacuum-size`, both **1G** since 2026-09-09), and `docker logs` / Dozzle
+still work. Query a service with `CONTAINER_NAME=dweeb-<service>-1`.
 
 **Retention is set by the sshd brute-force noise, not by the proxy.** The proxy
 writes ~25 KB/day; sshd logs ~38,000 failed-login entries/day, ~40 MB of journal
