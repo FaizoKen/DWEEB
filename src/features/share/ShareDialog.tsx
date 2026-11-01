@@ -57,6 +57,7 @@ import {
 import { linkThread, linkThreadId } from "@/core/webhook/restoreLink";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { offerToEnableExpired } from "@/core/guild/expiredComponents";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { SUPPORT_INVITE_URL, useFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
@@ -716,6 +717,7 @@ function RestorePanel({
     } else {
       pushToast("Restored. Edits will update the original by default.", "success");
     }
+    offerToEnableExpired(messageId);
     onDone();
   };
 

@@ -42,6 +42,7 @@ import {
 } from "@/core/serialization/shortlink";
 import { loadHistory } from "@/core/webhook/history";
 import { isProxyConfigured } from "@/core/guild/config";
+import { offerToEnableExpired } from "@/core/guild/expiredComponents";
 import { savePendingGuildId } from "@/core/guild/pendingGuild";
 import { useMessageStore } from "@/core/state/messageStore";
 import { type WebhookMessage } from "@/core/schema";
@@ -101,6 +102,7 @@ export function useShareUrlBootstrap(enabled = true, onSettled?: () => void): vo
             "info",
           );
         }
+        offerToEnableExpired(origin.messageId);
       } else {
         replaceMessage(message);
         pushToast("Loaded message from shared link.", "info");

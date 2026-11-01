@@ -19,6 +19,7 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { customBotConfigUrl } from "@/core/guild/customBotLink";
+import { offerToEnableExpired } from "@/core/guild/expiredComponents";
 import { useMessageStore } from "@/core/state/messageStore";
 import type { WebhookMessage } from "@/core/schema/types";
 import {
@@ -870,6 +871,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             }.`,
         validation.ok ? "success" : "info",
       );
+      offerToEnableExpired(result.message_id);
     } finally {
       set({ restoring: false });
     }

@@ -295,6 +295,8 @@ export interface MessageState {
 
   // Field ops -----------------------------------------------------------
   patchNode<T extends AnyComponent>(id: EditorId, patch: Partial<T>): void;
+  /** Turn these components back on, as one undo step. */
+  enableComponents(ids: readonly EditorId[]): void;
   /**
    * Replace a node wholesale, preserving its editor id. Use when a style
    * change (e.g. Button style) restructures which fields a node has.
@@ -1482,6 +1484,16 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((s) => ({
       ...pushHistory(s, `patch:${id}`),
       message: updateById(s.message, id, (n) => ({ ...n, ...patch }) as typeof n),
+    }));
+  },
+
+  enableComponents(ids) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: ids.reduce(
+        (message, id) => updateById(message, id, (n) => ({ ...n, disabled: false }) as typeof n),
+        s.message,
+      ),
     }));
   },
 
