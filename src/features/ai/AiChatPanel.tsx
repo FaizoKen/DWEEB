@@ -387,7 +387,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           // The reply promised an edit but nothing importable arrived — say so,
           // or prose like "Here's a streamlined version!" reads as applied.
           <div className={styles.notApplied}>
-            <span>Message not changed — try rephrasing or add detail</span>
+            <span>
+              {message.cutOff
+                ? "Message not changed — the reply was cut off. Try a smaller change"
+                : "Message not changed — try rephrasing or add detail"}
+            </span>
           </div>
         ) : null}
       </div>

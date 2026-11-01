@@ -6,10 +6,79 @@
  * the per-status advice was unreachable.
  */
 
-import { describe, expect, it } from "vitest";
-import { describeHttpError } from "./providers";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { callAI, describeHttpError, type AiPrompt } from "./providers";
+import type { AiProvider } from "./types";
 
 const body = (message: string) => ({ error: { message } });
+
+describe("callAI — a reply that stopped at the output limit", () => {
+  const prompt: AiPrompt = { system: "system", context: "{}" };
+  const settings = (provider: AiProvider) => ({
+    provider,
+    apiKey: "key",
+    model: "model",
+    baseUrl: "https://provider.test",
+  });
+
+  /** Answer the next fetch with these server-sent events. */
+  function streamEvents(events: unknown[]) {
+    const lines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(lines, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+  }
+
+  const send = (provider: AiProvider) =>
+    callAI(settings(provider), prompt, [{ role: "user", content: "hi" }], undefined, () => {});
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const openAiShaped = (finishReason: string) => [
+    { choices: [{ delta: { content: "half a" } }] },
+    { choices: [{ delta: {}, finish_reason: finishReason }] },
+  ];
+
+  it.each(["dweeb", "openai"] as const)("reads finish_reason on the %s path", async (provider) => {
+    streamEvents(openAiShaped("length"));
+    expect(await send(provider)).toMatchObject({ ok: true, text: "half a", truncated: true });
+
+    streamEvents(openAiShaped("stop"));
+    expect((await send(provider)).truncated).toBe(false);
+  });
+
+  it("reads Anthropic's stop_reason", async () => {
+    const reply = (stopReason: string) => [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "half a" } },
+      { type: "message_delta", delta: { stop_reason: stopReason } },
+    ];
+    streamEvents(reply("max_tokens"));
+    expect((await send("anthropic")).truncated).toBe(true);
+
+    streamEvents(reply("end_turn"));
+    expect((await send("anthropic")).truncated).toBe(false);
+  });
+
+  it("reads Gemini's finishReason", async () => {
+    const reply = (finishReason: string) => [
+      { candidates: [{ content: { parts: [{ text: "half a" }] }, finishReason }] },
+    ];
+    streamEvents(reply("MAX_TOKENS"));
+    expect(await send("gemini")).toMatchObject({ text: "half a", truncated: true });
+
+    streamEvents(reply("STOP"));
+    expect((await send("gemini")).truncated).toBe(false);
+  });
+});
 
 describe("describeHttpError", () => {
   it("puts the advice first and the provider's message after it", () => {

@@ -56,6 +56,14 @@ export interface AiCallResult {
   text?: string;
   /** User-facing error on failure. */
   error?: string;
+  /** The reply stopped at the provider's output limit, not because it was done. */
+  truncated?: boolean;
+}
+
+/** Did this OpenAI-shaped stream chunk end the reply at the output limit? */
+function stoppedAtLimit(chunk: unknown): boolean {
+  const choice = (chunk as { choices?: Array<{ finish_reason?: unknown }> })?.choices?.[0];
+  return choice?.finish_reason === "length";
 }
 
 /** Strip a trailing slash so we can append paths predictably. */
@@ -330,6 +338,7 @@ async function callOpenAiCompatible(
   // Streaming chunks: `data: {choices:[{delta:{content}}]}`, ending in `[DONE]`.
   if (onToken && isEventStream(res)) {
     let full = "";
+    let truncated = false;
     await readSse(res, (data) => {
       if (data === "[DONE]") return;
       let json: unknown;
@@ -338,6 +347,7 @@ async function callOpenAiCompatible(
       } catch {
         return;
       }
+      truncated ||= stoppedAtLimit(json);
       const delta = (json as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]
         ?.delta?.content;
       if (typeof delta === "string" && delta) {
@@ -346,7 +356,7 @@ async function callOpenAiCompatible(
       }
     });
     return full
-      ? { ok: true, text: full }
+      ? { ok: true, text: full, truncated }
       : { ok: false, error: "Provider returned an empty response." };
   }
 
@@ -394,6 +404,7 @@ async function callDweeb(
   // event stream and fail every one of those turns.
   if (isEventStream(res)) {
     let full = "";
+    let truncated = false;
     await readSse(res, (data) => {
       if (data === "[DONE]") return;
       let json: unknown;
@@ -402,6 +413,7 @@ async function callDweeb(
       } catch {
         return;
       }
+      truncated ||= stoppedAtLimit(json);
       const delta = (json as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]
         ?.delta?.content;
       if (typeof delta === "string" && delta) {
@@ -410,7 +422,7 @@ async function callDweeb(
       }
     });
     return full
-      ? { ok: true, text: full }
+      ? { ok: true, text: full, truncated }
       : { ok: false, error: "The assistant returned an empty response — try again." };
   }
 
@@ -496,6 +508,7 @@ async function callAnthropic(
   // `content_block_delta` with a `text_delta`. Errors come as `error` events.
   if (onToken && isEventStream(res)) {
     let full = "";
+    let truncated = false;
     let streamError: string | null = null;
     await readSse(res, (data) => {
       let json: unknown;
@@ -506,7 +519,7 @@ async function callAnthropic(
       }
       const evt = json as {
         type?: string;
-        delta?: { type?: string; text?: unknown };
+        delta?: { type?: string; text?: unknown; stop_reason?: unknown };
         error?: { message?: unknown };
       };
       if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
@@ -514,6 +527,8 @@ async function callAnthropic(
           full += evt.delta.text;
           onToken(evt.delta.text);
         }
+      } else if (evt.type === "message_delta") {
+        truncated ||= evt.delta?.stop_reason === "max_tokens";
       } else if (evt.type === "error") {
         streamError = typeof evt.error?.message === "string" ? evt.error.message : "";
       }
@@ -529,7 +544,7 @@ async function callAnthropic(
       };
     }
     return full
-      ? { ok: true, text: full }
+      ? { ok: true, text: full, truncated }
       : { ok: false, error: "Provider returned an empty response." };
   }
 
@@ -591,6 +606,7 @@ async function callGemini(
 
   if (onToken && isEventStream(res)) {
     let full = "";
+    let truncated = false;
     await readSse(res, (data) => {
       let json: unknown;
       try {
@@ -598,16 +614,18 @@ async function callGemini(
       } catch {
         return;
       }
-      const parts = (json as { candidates?: Array<{ content?: { parts?: unknown } }> })
-        ?.candidates?.[0]?.content?.parts;
-      const chunk = partsToText(parts);
+      const candidate = (
+        json as { candidates?: Array<{ content?: { parts?: unknown }; finishReason?: unknown }> }
+      )?.candidates?.[0];
+      truncated ||= candidate?.finishReason === "MAX_TOKENS";
+      const chunk = partsToText(candidate?.content?.parts);
       if (chunk) {
         full += chunk;
         onToken(chunk);
       }
     });
     return full
-      ? { ok: true, text: full }
+      ? { ok: true, text: full, truncated }
       : { ok: false, error: "Provider returned an empty response." };
   }
 

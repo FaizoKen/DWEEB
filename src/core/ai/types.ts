@@ -66,6 +66,8 @@ export interface ChatMessage {
    * masquerade as an applied edit.
    */
   failedEdit?: boolean;
+  /** That failed edit hit the provider's output limit partway through its JSON. */
+  cutOff?: boolean;
   /** Validation issue count when an edit was applied with warnings/errors. */
   issueCount?: number;
   /**

@@ -269,6 +269,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         streaming,
         settledRaw,
         failedEdit = false,
+        cutOff = false,
       }: {
         raw: string;
         partial: boolean;
@@ -277,17 +278,19 @@ export const useAiStore = create<AiState>((set, get) => ({
         settledRaw?: string;
         /** Turn intended an edit but nothing importable arrived (settle only). */
         failedEdit?: boolean;
+        /** That edit hit the provider's output limit (settle only). */
+        cutOff?: boolean;
       },
     ) => {
       const settled = !streaming;
       const appliedMessage = settled && analysis.message !== null;
       const proseText = analysis.hasPayload || !partial ? analysis.prose : streamingProse(raw);
-      const content = settled
-        ? proseText ||
-          (appliedMessage
-            ? "Done — I updated the message in the editor."
-            : "I wasn't sure how to change the message. Could you give me more detail?")
-        : proseText;
+      const fallback = appliedMessage
+        ? "Done — I updated the message in the editor."
+        : cutOff
+          ? "That edit was too long to fit in one reply."
+          : "I wasn't sure how to change the message. Could you give me more detail?";
+      const content = settled ? proseText || fallback : proseText;
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId
@@ -299,6 +302,7 @@ export const useAiStore = create<AiState>((set, get) => ({
                 raw: settled ? (settledRaw ?? m.raw) : m.raw,
                 appliedMessage,
                 failedEdit: settled ? failedEdit : undefined,
+                cutOff: settled && cutOff ? true : undefined,
                 issueCount: appliedMessage ? analysis.issueCount : undefined,
                 streaming,
               }
@@ -405,17 +409,21 @@ export const useAiStore = create<AiState>((set, get) => ({
     // reflects — it becomes the assistant turn's provider-facing history.
     let finalRaw = result.text ?? raw;
     let analysis = analyze(finalRaw);
+    // The reply hit the output limit partway through its JSON: 17 of 160 built-in
+    // replies in October. Asking again meets the same limit and costs another of
+    // the day's requests, so say what happened instead of recovering.
+    const cutOff = result.truncated === true && !analysis.hasPayload && finalRaw.includes("```");
     // Did this turn mean to change the message? True when a payload arrived or
     // the prose announced an edit; drives the honest "not changed" state if the
     // turn still settles without an importable message.
-    let editIntended = analysis.hasPayload;
+    let editIntended = analysis.hasPayload || cutOff;
 
     // Missing-payload recovery: the reply ANNOUNCED an edit ("Here's a
     // streamlined version!") but carried no JSON at all — the classic "the
     // assistant says it did something but nothing happened" failure. Send one
     // follow-up demanding the payload; NO_CHANGE lets the model decline, which
     // keeps a false-positive announcement detection harmless.
-    if (!analysis.hasPayload && announcesEdit(analysis.prose)) {
+    if (!cutOff && !analysis.hasPayload && announcesEdit(analysis.prose)) {
       editIntended = true;
       // Keep the caret alive (with the first pass's prose) while we recover.
       showBubble(analysis, { raw, partial: false, streaming: true });
@@ -484,10 +492,14 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (isLatestSend()) commitMessage(analysis);
     showBubble(analysis, {
       raw,
-      partial: false,
+      // A half-written fence stays out of the bubble, as for a stopped stream,
+      // and out of the history, where it would only spend the next request's
+      // budget on JSON that can't be parsed.
+      partial: cutOff,
       streaming: false,
-      settledRaw: finalRaw,
+      settledRaw: cutOff ? streamingProse(finalRaw) || undefined : finalRaw,
       failedEdit: editIntended && analysis.message === null,
+      cutOff,
     });
     if (isLatestSend()) set({ thinking: false });
     refreshUsage();

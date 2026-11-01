@@ -335,6 +335,11 @@ pub struct Config {
     pub ai_fallback_model: Option<String>,
     /// `max_tokens` pinned on every completion (bounds the cost of one reply).
     pub ai_max_tokens: u32,
+    /// The most tokens the provider accepts in one request, counting the
+    /// reserved `max_tokens`. Groq's per-minute limit caps a single request
+    /// too, so this is that limit (8,000 on its free tier). Old chat turns are
+    /// dropped to stay under it. 0 = no such limit.
+    pub ai_request_token_limit: u32,
     /// SQLite file the AI usage ledger lives in. Must sit on persistent
     /// storage — quotas that reset on every redeploy aren't quotas.
     pub ai_db_path: String,
@@ -607,6 +612,7 @@ impl Config {
         // an 8k reservation alone. 4k covers a full Components V2 message JSON
         // plus a short reasoning budget with room for the prompt underneath.
         let ai_max_tokens = parse_or("AI_MAX_TOKENS", 4_096)?;
+        let ai_request_token_limit = parse_or("AI_REQUEST_TOKEN_LIMIT", 8_000)?;
         let ai_db_path = opt_env("AI_DB_PATH").unwrap_or_else(|| "ai-usage.db".to_string());
         let ai_concurrency = parse_or("AI_CONCURRENCY", 4)?;
         if ai_concurrency == 0 {
@@ -706,6 +712,7 @@ impl Config {
             ai_model,
             ai_fallback_model,
             ai_max_tokens,
+            ai_request_token_limit,
             ai_db_path,
             ai_concurrency,
             ai_reserved_concurrency,

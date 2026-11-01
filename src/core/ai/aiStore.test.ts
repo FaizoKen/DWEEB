@@ -238,6 +238,69 @@ describe("aiStore.send — announced edit without a payload", () => {
     expect(bubble.failedEdit).toBe(true);
   });
 
+  describe("a reply cut off at the output limit", () => {
+    /** Half a JSON payload, with the fence never closed: what a capped reply is. */
+    const HALF_PAYLOAD = 'Here\'s the updated version:\n\n```json\n{"components":[{"type":10,"cont';
+
+    function queueCutOffReply(text: string) {
+      mockedCallAI.mockImplementationOnce(async (_settings, _system, _turns, _signal, onToken) => {
+        onToken?.(text);
+        return { ok: true, text, truncated: true };
+      });
+    }
+
+    it("spends no second request, since a retry meets the same limit", async () => {
+      const before = editorText();
+      queueCutOffReply(HALF_PAYLOAD);
+      await useAiStore.getState().send("rewrite the whole message");
+
+      expect(mockedCallAI).toHaveBeenCalledTimes(1);
+      expect(editorText()).toBe(before);
+      const bubble = lastAssistantBubble();
+      expect(bubble.failedEdit).toBe(true);
+      expect(bubble.cutOff).toBe(true);
+      expect(bubble.streaming).toBe(false);
+    });
+
+    it("keeps the half-written JSON out of the bubble and the history", async () => {
+      queueCutOffReply(HALF_PAYLOAD);
+      await useAiStore.getState().send("rewrite the whole message");
+
+      const bubble = lastAssistantBubble();
+      expect(bubble.content).toBe("Here's the updated version:");
+      expect(bubble.raw).toBe("Here's the updated version:");
+    });
+
+    it("still says something when the reply was nothing but JSON", async () => {
+      queueCutOffReply('```json\n{"components":[');
+      await useAiStore.getState().send("rewrite the whole message");
+
+      const bubble = lastAssistantBubble();
+      expect(bubble.content).toContain("too long");
+      expect(bubble.content).not.toContain("```");
+    });
+
+    it("leaves a long plain answer alone: it was never an edit", async () => {
+      queueCutOffReply("A container groups children behind a colored accent stripe, and");
+      await useAiStore.getState().send("what is a container?");
+
+      const bubble = lastAssistantBubble();
+      expect(bubble.failedEdit).toBeFalsy();
+      expect(bubble.cutOff).toBeFalsy();
+      expect(bubble.content).toContain("accent stripe");
+    });
+
+    it("applies a finished payload even if the prose after it ran out", async () => {
+      queueCutOffReply(FENCE(PAYLOAD("AI EDIT CUT")) + "\n\nI also changed the");
+      await useAiStore.getState().send("change it");
+
+      expect(editorText()).toContain("AI EDIT CUT");
+      const bubble = lastAssistantBubble();
+      expect(bubble.appliedMessage).toBe(true);
+      expect(bubble.cutOff).toBeFalsy();
+    });
+  });
+
   it("does not nudge plain Q&A replies", async () => {
     queueReply("A container groups children behind a colored accent stripe.");
     await useAiStore.getState().send("what is a container?");

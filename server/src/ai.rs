@@ -58,6 +58,49 @@ const MAX_CONTEXT_CHARS: usize = 24_000;
 const MAX_TURNS: usize = 12;
 const MAX_TURN_CHARS: usize = 8_000;
 
+/// The bytes of prompt one request may send, given the provider's limit on a
+/// whole request and the `max_tokens` reserved out of it. `None` = no such limit.
+///
+/// Groq judges a request before running it, so the count that matters is its
+/// estimate rather than what it later bills: a request billed 7,617 prompt tokens
+/// passed an 8,000 limit with 2,048 reserved. That estimate appears to run near 4
+/// characters a token, so 3.5 bytes a token leaves a margin. Bytes, because
+/// non-Latin text costs more tokens per character and more bytes with them.
+fn prompt_budget(request_token_limit: u32, max_tokens: u32) -> Option<usize> {
+    if request_token_limit == 0 {
+        return None;
+    }
+    let tokens = request_token_limit.saturating_sub(max_tokens) as usize;
+    Some(tokens * 7 / 2)
+}
+
+/// Drop the oldest turns until the prompt fits `budget` bytes. The turns above
+/// fit the per-turn bounds but say nothing about their sum, and an assistant
+/// turn carries a whole message's JSON, so a long chat outgrew the provider's
+/// limit and then failed on every send, each retry adding another turn. The live
+/// message is in the system prompt, so an old turn is the least a reply needs.
+/// The newest turn always stays: it is the request. An estimate never refuses
+/// anything; a prompt still too large is the provider's to reject.
+fn fit_turns(
+    mut turns: Vec<(String, String)>,
+    system_bytes: usize,
+    budget: Option<usize>,
+) -> Vec<(String, String)> {
+    let Some(budget) = budget else {
+        return turns;
+    };
+    let mut spent = system_bytes;
+    let mut keep_from = turns.len();
+    for (i, (_, content)) in turns.iter().enumerate().rev() {
+        spent += content.len();
+        if spent > budget && keep_from < turns.len() {
+            break;
+        }
+        keep_from = i;
+    }
+    turns.split_off(keep_from)
+}
+
 /// Hard wall-clock cap on one relayed stream. Groq completes in seconds; this
 /// exists so a wedged upstream can't pin a relay task (the global request
 /// timeout only bounds time-to-headers, not body streaming).
@@ -81,6 +124,8 @@ pub struct AiRuntime {
     model: String,
     fallback_model: Option<String>,
     max_tokens: u32,
+    /// See [`prompt_budget`].
+    prompt_budget: Option<usize>,
     monthly_token_budget: u64,
     /// Free-tier lane. Paid servers may spill into `reserved` when this is
     /// exhausted, so they keep working while a burst of free traffic queues.
@@ -117,6 +162,7 @@ impl AiRuntime {
             model: config.ai_model.clone(),
             fallback_model: config.ai_fallback_model.clone(),
             max_tokens: config.ai_max_tokens,
+            prompt_budget: prompt_budget(config.ai_request_token_limit, config.ai_max_tokens),
             monthly_token_budget: config.ai_monthly_token_budget,
             shared: Arc::new(Semaphore::new(config.ai_concurrency)),
             reserved: Arc::new(Semaphore::new(config.ai_reserved_concurrency)),
@@ -535,6 +581,16 @@ pub async fn ai_chat(
 
     // ── Build the provider request (server-owned prompt) ────────────────
     let system = build_system(&body.context);
+    let submitted = turns.len();
+    let turns = fit_turns(turns, system.len(), ai.prompt_budget);
+    if turns.len() < submitted {
+        tracing::info!(
+            target: "ai_usage",
+            dropped = submitted - turns.len(),
+            kept = turns.len(),
+            "trimmed a chat's oldest turns to fit the provider's request limit"
+        );
+    }
     let mut messages = Vec::with_capacity(turns.len() + 1);
     messages.push(json!({ "role": "system", "content": system }));
     let mut input_chars = system.chars().count();
@@ -661,7 +717,8 @@ enum UpstreamFailure {
     /// The provider answered **413** (`code: rate_limit_exceeded`,
     /// `type: tokens`): this one request's prompt **plus its reserved
     /// `max_tokens`** exceeds the model's per-minute token budget, so waiting
-    /// alone won't help unless the message shrinks.
+    /// won't help. [`fit_turns`] has already dropped what it could of the chat,
+    /// so what's left is the message being edited.
     TooLarge,
 }
 
@@ -735,8 +792,8 @@ fn terminal_error(failure: UpstreamFailure, retry_hint: Option<f64>) -> AppError
     match failure {
         UpstreamFailure::TooLarge => AppError::Status {
             status: StatusCode::TOO_MANY_REQUESTS,
-            message: "This request is too large for the AI service's current rate limit. Try a \
-                      shorter message, wait a minute, or use your own API key in AI settings."
+            message: "This message is too large for the built-in assistant. Shorten it, or use \
+                      your own API key in AI settings."
                 .into(),
             retry_after: Some(retry_hint.unwrap_or(30.0)),
         },
@@ -1143,6 +1200,91 @@ mod tests {
             AppError::Status { retry_after, .. } => *retry_after,
             _ => panic!("start_stream must return a Status error"),
         }
+    }
+
+    fn turn(role: &str, bytes: usize) -> (String, String) {
+        (role.to_string(), "x".repeat(bytes))
+    }
+
+    /// Production's settings: Groq's free tier with 2,048 reserved for the reply.
+    const BUDGET: Option<usize> = Some(20_832);
+
+    #[test]
+    fn the_budget_is_what_the_reply_leaves_of_the_request_limit() {
+        assert_eq!(prompt_budget(8_000, 2_048), BUDGET);
+        assert_eq!(prompt_budget(0, 2_048), None, "0 = no limit");
+        // A reservation at or past the limit leaves nothing, never a wrap-around.
+        assert_eq!(prompt_budget(4_000, 8_000), Some(0));
+    }
+
+    /// The failure this fixes: a chat long enough to pass the limit failed on
+    /// every send (`Requested` 8,927 → 9,189 → 9,284 → 9,404, one user retrying),
+    /// because each retry added a turn and nothing ever took one away.
+    #[test]
+    fn a_long_chat_drops_its_oldest_turns_instead_of_failing_forever() {
+        let turns = vec![
+            turn("user", 200),
+            turn("assistant", 8_000),
+            turn("user", 200),
+            turn("assistant", 8_000),
+            turn("user", 200),
+            turn("assistant", 8_000),
+            turn("user", 300),
+        ];
+        let kept = fit_turns(turns, 6_500, BUDGET);
+        // 6,500 + 300 + 8,000 fits; another 200 + 8,000 would not. The turns kept
+        // are the newest, still in order, so the last assistant reply survives.
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].0, "user");
+        assert_eq!(kept[0].1.len(), 200);
+        assert_eq!(kept[1].1.len(), 8_000);
+        assert_eq!(kept[2].1.len(), 300);
+    }
+
+    #[test]
+    fn a_chat_that_fits_is_left_alone() {
+        let turns = vec![
+            turn("user", 200),
+            turn("assistant", 3_000),
+            turn("user", 200),
+        ];
+        assert_eq!(fit_turns(turns.clone(), 6_500, BUDGET), turns);
+    }
+
+    /// The newest turn is the request itself, and an estimate is not a reason to
+    /// refuse it: only the provider knows whether a borderline prompt fits.
+    #[test]
+    fn the_newest_turn_always_stays() {
+        let kept = fit_turns(vec![turn("user", 8_000)], 24_000, BUDGET);
+        assert_eq!(kept.len(), 1);
+        let kept = fit_turns(
+            vec![turn("user", 100), turn("assistant", 100), turn("user", 50)],
+            24_000,
+            BUDGET,
+        );
+        assert_eq!(kept, [turn("user", 50)]);
+    }
+
+    #[test]
+    fn dropping_stops_at_the_first_turn_that_does_not_fit() {
+        // A small old turn must not survive past a large newer one: the kept
+        // transcript has to stay contiguous.
+        let kept = fit_turns(
+            vec![
+                turn("user", 10),
+                turn("assistant", 30_000),
+                turn("user", 10),
+            ],
+            1_000,
+            BUDGET,
+        );
+        assert_eq!(kept, [turn("user", 10)]);
+    }
+
+    #[test]
+    fn no_limit_means_nothing_is_dropped() {
+        let turns = vec![turn("user", 90_000), turn("assistant", 90_000)];
+        assert_eq!(fit_turns(turns.clone(), 90_000, None), turns);
     }
 
     /// 5xx is the paging channel (tower_http logs it at ERROR, `dweeb-alerts`
