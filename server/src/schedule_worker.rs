@@ -535,6 +535,13 @@ async fn transient(
         fail(store, &job.id, now, code, &msg).await;
         return;
     }
+    tracing::info!(
+        schedule = %job.id,
+        attempts,
+        code = code.unwrap_or_default(),
+        reason = ?reason,
+        "scheduled post will be retried"
+    );
     let s = Arc::clone(store);
     let (id, reason) = (job.id.clone(), reason.to_string());
     let res = tokio::task::spawn_blocking(move || {
@@ -545,6 +552,17 @@ async fn transient(
 }
 
 async fn fail(store: &Arc<ScheduleStore>, id: &str, now: i64, code: Option<i64>, reason: &str) {
+    // The row's `last_error` tells the server's members; this tells us. A post
+    // that didn't go out was otherwise invisible in the logs. WARN, never ERROR:
+    // most reasons are a deleted webhook or channel, which nobody here can fix.
+    // `reason` carries Discord's own words, so `?` keeps it to one log line, and
+    // it never holds a webhook URL (see `unreachable_reason`).
+    tracing::warn!(
+        schedule = %id,
+        code = code.unwrap_or_default(),
+        reason = ?reason,
+        "scheduled post failed for good"
+    );
     let s = Arc::clone(store);
     let (id, reason) = (id.to_string(), reason.to_string());
     let res =
