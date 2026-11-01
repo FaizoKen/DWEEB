@@ -342,9 +342,21 @@ To still iterate the **frontend** end-to-end, the app has a **dev-only bypass**
 (`devOverrideSession()` in `core/activity/activityStore.ts`): when a *development*
 build detects the faux ticket, it skips the proxy-bound handshake and seeds a stub
 session from the launch query params (`guild_id`/`channel_id`/`instance_id`), so
-the builder renders immediately. This never runs in a production build. Point the
-dev build at the deployed app/proxy so the rest matches the launching app — create
-a gitignored **`.env.activity.local`**:
+the builder renders immediately. This never runs in a production build.
+
+That bypass runs before any SDK call, so for UI work you don't need Discord at all.
+With `bun run dev:activity` running, open the same URL in a plain browser tab (add
+`&platform=mobile` for the phone layout, and drop `guild_id` for a DM launch):
+
+```text
+https://localhost:5173/?frame_id=dev&instance_id=dev-override&discord_proxy_ticket=faux-proxy-ticket&guild_id=100000000000000001&channel_id=200000000000000002&platform=desktop
+```
+
+That boots the real `ActivityApp`, which also makes it reachable from a headless
+browser for width and touch checks.
+
+Point the dev build at the deployed app/proxy so the rest matches the launching
+app — create a gitignored **`.env.activity.local`**:
 
 ```bash
 # .env.activity.local — local Activity dev against the deployed app + proxy

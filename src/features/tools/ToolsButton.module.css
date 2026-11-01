@@ -1,0 +1,52 @@
+/* Sits between quiet icons and the primary action: it reads as a named control
+   without competing with Send. */
+.tools {
+  position: relative;
+  flex: none;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.tools[aria-expanded="true"] {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+
+/* Folded, it is the icon button it replaced, to the pixel, including the touch
+   floor: the fit ladder's phone layouts were measured with that size. */
+.iconOnly {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--app-text-muted);
+}
+
+@media (pointer: coarse) {
+  .iconOnly {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* "Not opened yet" (`toolsSeen`). Static on purpose: this sits beside the
+   editor for as long as someone works, and a pulse would never stop asking.
+   The ring is the bar's own colour, so the dot reads as cut out of the corner
+   rather than stuck on it. */
+.tools[data-unseen]::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--app-accent);
+  box-shadow: 0 0 0 2px var(--app-bg-elevated);
+}
+
+.iconOnly[data-unseen]::after {
+  top: 1px;
+  right: 1px;
+}

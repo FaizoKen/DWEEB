@@ -29,6 +29,34 @@ export const LEFT_MAX_RESERVE = 150;
  *  of the cap as the bar narrows. */
 export const MAX_INLINE_UTILITIES = 3;
 
+/** One rung of the bars' collapse: how many utility icons stay inline, and
+ *  whether the Tools button keeps its label. */
+export interface ToolsFold {
+  inline: number;
+  labelled: boolean;
+}
+
+/**
+ * The order a bar gives up its utility icons and the Tools label, widest first.
+ *
+ * The label outlasts the icons: folding an icon moves that action *into* Tools,
+ * so a bar with fewer icons needs the name more, and a word says what an
+ * anonymous glyph can't. But once the label has to go as well, the room it frees
+ * (about 60px) brings one icon back, so the last rungs step from "no icons,
+ * label" to "one icon, no label" to "neither". Holding the icons folded through
+ * that step would give nothing back: a bar with room for the Save icon would
+ * lose it in exchange for a label it still can't show. "Two icons, no label" is
+ * left out because it would be wider than the rung before it, and the fit check
+ * relies on every rung being narrower than the last.
+ */
+export function toolsFoldSteps(inlineMax: number): readonly ToolsFold[] {
+  const steps: ToolsFold[] = [];
+  for (let inline = inlineMax; inline >= 0; inline--) steps.push({ inline, labelled: true });
+  if (inlineMax >= 1) steps.push({ inline: 1, labelled: false });
+  steps.push({ inline: 0, labelled: false });
+  return steps;
+}
+
 export function measureNeededWidth(
   bar: HTMLElement,
   left: HTMLElement,

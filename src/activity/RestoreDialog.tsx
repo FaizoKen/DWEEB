@@ -100,7 +100,7 @@ export function RestoreDialog({ open, onClose }: { open: boolean; onClose: () =>
       // The room is bound to the server it launched in — a message in another
       // server is the web app's job (it's bound to no server).
       setError(
-        "That message is in a different server. This room can only restore messages from the server it launched in — use More ▸ Open on web to work with another server.",
+        "That message is in a different server. This room can only restore messages from the server it launched in — use Tools ▸ Open on web to work with another server.",
       );
       return;
     }

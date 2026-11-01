@@ -7,7 +7,7 @@
  * the persistent record of whether the user has met it and the
  * decision each load makes from it:
  *
- *  1. **Any record at all ⇒ never prompt.** The More-menu "Watch the intro"
+ *  1. **Any record at all ⇒ never prompt.** The Tools-menu "Watch the intro"
  *     entry covers replays.
  *  2. **No record, but evidence of prior use ⇒ "announce".** Users from before
  *     the film existed already know the editor — they get the same one-time
@@ -93,7 +93,7 @@ export function welcomeAutoDecision(suppress = false): WelcomeAutoDecision {
   // receive the one-time orientation.
   if (suppress) return "no";
   // Storage we can't read is storage we can't write the record to either — the
-  // one-time offer would come back on every load. The More menu's "Watch the
+  // one-time offer would come back on every load. The Tools menu's "Watch the
   // intro" still reaches the film.
   if (readRaw() === undefined) return "no";
   if (readWelcomeRecord()) return "no";

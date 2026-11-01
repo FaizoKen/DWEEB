@@ -13,18 +13,8 @@
  * two stay in sync without prop drilling.
  */
 
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-} from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore, type RestoredOrigin } from "@/core/state/messageStore";
-import { toastWithUndo } from "@/features/builder/undoToast";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -41,27 +31,16 @@ import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import {
   BookmarkIcon,
-  BracesIcon,
-  CodeIcon,
   ExternalLinkIcon,
-  FilmIcon,
   HistoryIcon,
-  InfoIcon,
-  InstallIcon,
-  MoreHorizontalIcon,
   RedoIcon,
   RefreshIcon,
   SaveIcon,
   SendIcon,
-  ShareIcon,
-  SparkleIcon,
-  SupportIcon,
-  TrashIcon,
   UndoIcon,
-  UsersIcon,
 } from "@/ui/Icon";
-import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
+import { ToolsMenu, type FoldedAction } from "./components/ToolsMenu";
 import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
@@ -69,16 +48,13 @@ import { PlanBadge, type PlanUsage } from "@/features/plan/PlanBadge";
 import { useLibraryStore } from "@/core/library/libraryStore";
 import { useGuildCustomBotsStore } from "@/core/guild/useGuildCustomBots";
 import { useAiUsageStore } from "@/core/ai/usageStore";
-import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
-import { useFeedbackConfigured } from "@/core/feedback/submit";
-import { useFeedbackStore } from "@/features/feedback/feedbackStore";
-import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
-import { useInstallStore } from "@/features/install/installStore";
-import { useMcpStore } from "@/features/mcp/mcpStore";
-import { useMcpConfigured } from "@/core/mcp/availability";
-import { useInstallState } from "@/features/install/useInstallState";
-import { useWelcomeStore } from "@/features/welcome/welcomeStore";
-import { LEFT_MAX_RESERVE, MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
+import { isProxyConfigured } from "@/core/guild/config";
+import {
+  LEFT_MAX_RESERVE,
+  MAX_INLINE_UTILITIES,
+  measureNeededWidth,
+  toolsFoldSteps,
+} from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
 import { openDiscordLink } from "@/lib/discordDeepLink";
 import styles from "./Builder.module.css";
@@ -93,15 +69,10 @@ import styles from "./Builder.module.css";
 const WEB_LEFT_MAX_RESERVE = 210;
 
 /** One utility action in the bar's right cluster: an inline icon button while
- *  the bar has room, a "More"-menu row once the fit check folds it away. */
-interface UtilityAction {
-  key: string;
-  icon: ComponentType<{ size?: number }>;
+ *  the bar has room, a Tools-menu row once the fit check folds it away. */
+interface UtilityAction extends FoldedAction {
   /** Tooltip / accessible name on the inline icon button. */
   label: string;
-  /** Row text once folded into the More menu. */
-  menuLabel: string;
-  run: () => void;
 }
 
 const SaveMessageDialog = lazy(() =>
@@ -111,6 +82,8 @@ const SaveMessageDialog = lazy(() =>
 interface BuilderProps {
   /** Opens the Share / Export dialog on the Share-link tab. */
   onShare: () => void;
+  /** Opens the Share / Export dialog on the Send panel, set to schedule. */
+  onSchedule: () => void;
   /** Opens the Share / Export dialog on the combined JSON import/export tab. */
   onJson: () => void;
   /** Opens the Share / Export dialog on the Code tab (discord.js, discord.py, cURL…). */
@@ -127,6 +100,7 @@ interface BuilderProps {
 
 export function Builder({
   onShare,
+  onSchedule,
   onJson,
   onCode,
   onSend,
@@ -148,6 +122,7 @@ export function Builder({
       <div className={styles.header}>
         <ActionBar
           onShare={onShare}
+          onSchedule={onSchedule}
           onJson={onJson}
           onCode={onCode}
           onSend={onSend}
@@ -198,6 +173,7 @@ export function Builder({
 
 function ActionBar({
   onShare,
+  onSchedule,
   onJson,
   onCode,
   onSend,
@@ -209,23 +185,7 @@ function ActionBar({
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
-  const clearAll = useMessageStore((s) => s.clearAll);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
-
-  const openFeedback = useFeedbackStore((s) => s.openFeedback);
-  const feedbackOn = useFeedbackConfigured();
-  const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
-  const openInstall = useInstallStore((s) => s.openInstall);
-  // The MCP connector is per-deployment (the endpoint is off by default), so the
-  // entry only appears once the proxy confirms it serves one — offering a URL
-  // that answers 501 would send someone through a setup that cannot work.
-  const mcpOn = useMcpConfigured();
-  const openMcp = useMcpStore((s) => s.openMcp);
-  // Hide the install entry once we're already running as the installed app —
-  // there's nothing left to install. Every browser (installable or not) still
-  // sees it otherwise: the dialog either replays the native prompt or shows
-  // per-platform steps.
-  const { installed } = useInstallState();
 
   // The full-screen gallery — posted history, scheduled posts, server drafts,
   // browser drafts, and templates behind one bookmark icon (the web's "Message
@@ -458,19 +418,13 @@ function ActionBar({
   // budget to spare (scripts/seo/audit.ts).
   const [saveOpen, setSaveOpen] = useState(false);
 
-  // Real-time co-editing lives only in the embedded Discord Activity; offer a
-  // hand-off to it when a backend + app id are configured (both are required for
-  // the Activity to function). Empty string ⇒ the entry point is hidden.
-  const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
-
   // Utility actions, most-reached-for first — inline icon buttons while the bar
-  // has room. The fit check below folds them into the "More" overflow one at a
-  // time from the END of this list, so the least-reached-for actions leave the
-  // row first and a near-fit never strands a wide empty gap where a whole
-  // cluster used to be. Deliberately short: only the everyday actions earn an
-  // inline icon, and MAX_INLINE_UTILITIES caps the run at three however wide the
-  // bar gets. Share, JSON, and Send feedback live permanently in the "More" menu
-  // below, keeping the header quiet.
+  // has room. The fit check below folds them into the Tools menu one at a time
+  // from the END of this list, so the least-reached-for actions leave the row
+  // first and a near-fit never strands a wide empty gap where a whole cluster
+  // used to be. Deliberately short: only the everyday actions earn an inline
+  // icon, and MAX_INLINE_UTILITIES caps the run at three however wide the bar
+  // gets. Everything else lives in Tools, which says what it is in a word.
   const utilities: UtilityAction[] = [
     {
       key: "save",
@@ -503,35 +457,35 @@ function ActionBar({
   // small step at a time rather than wrapping onto a second line, so every
   // width keeps as much inline as actually fits:
   //   step 1        — the row tightens: cluster dividers disappear, undo/redo
-  //                   and the overflow trigger drop to the small control size,
-  //                   and the secondary "New" collapses to its icon (all via
-  //                   the `data-compact` flag) — nothing is hidden yet
-  //   steps 2..N+1  — the N inline utility icons fold into the "More" overflow
-  //                   menu one at a time, from the end of the inline run
+  //                   drop to the small control size, and the secondary "New"
+  //                   collapses to its icon (all via the `data-compact` flag) —
+  //                   nothing is hidden yet
+  //   next steps    — the inline utility icons fold into the Tools menu one at
+  //                   a time, then Tools gives up its label (`toolsFoldSteps`
+  //                   has the order and why)
   //   signed out    — the account control's "Sign in" text drops to its icon
   //   final step    — the primary Send/Update button drops to its icon
   // We measure the real control widths instead of guessing a breakpoint, so the
   // full row survives on any width — viewport *or* pane — that has room for it.
   // Mirrors the Activity bar's own fit check (see ActivityBar).
   const [level, setLevel] = useState(0);
-  // N is the capped inline run, not the whole list: anything past the cap is
-  // already a "More" row and has no ladder step to fold on. Signed out, the
+  // The inline run is capped, not the whole list: anything past the cap is
+  // already a Tools row and has no ladder step to fold on. Signed out, the
   // "Sign in" label gets a step after the utility folds: first-timers — most
   // of them on phones — are who it's for, so it outlasts every utility icon
   // (holding down to ~300px) but still gives way before the primary action.
   // The ladder then ends with one extra step in the update state — folding the
-  // inline "View the posted message" button into the overflow menu — before
-  // the final drop-primary step, mirroring the Activity bar's `viewFolded`.
-  const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
-  const foldMax = inlineMax;
+  // inline "View the posted message" button into the Tools menu — before the
+  // final drop-primary step, mirroring the Activity bar's `viewFolded`.
+  const foldSteps = toolsFoldSteps(Math.min(utilities.length, MAX_INLINE_UTILITIES));
+  const foldMax = foldSteps.length - 1;
   const signInStep = signInShown ? 1 : 0;
   const foldViewStep = showView ? 1 : 0;
   const maxLevel = 1 + foldMax + signInStep + foldViewStep + 1;
   const tightened = level >= 1;
-  const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
-  const inlineCount = inlineMax - foldedCount;
-  const inlineUtilities = utilities.slice(0, inlineCount);
-  const foldedUtilities = utilities.slice(inlineCount);
+  const fold = foldSteps[Math.min(Math.max(level - 1, 0), foldMax)]!;
+  const inlineUtilities = utilities.slice(0, fold.inline);
+  const foldedUtilities = utilities.slice(fold.inline);
   const signInIconOnly = signInShown && level >= 1 + foldMax + 1;
   // "View" folds once every utility icon already has (it sits closest to the
   // primary action, so it's the last icon to leave the row).
@@ -595,8 +549,8 @@ function ActionBar({
     if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
   }, [level, maxLevel, barWidth, layoutKey]);
 
-  // Undo/redo (and the overflow trigger) tighten to the small control size once
-  // the row tightens; full size on wider bars.
+  // Undo/redo tighten to the small control size once the row tightens; full size
+  // on wider bars.
   const iconSize = tightened ? ("sm" as const) : ("md" as const);
 
   return (
@@ -652,180 +606,30 @@ function ActionBar({
 
           {/* Utility actions — saving a draft, the message directory (gallery),
               and restoring a posted message. Inline icons while the bar has
-              room; the fit check folds them into the "More" overflow below one
-              at a time as the row tightens. Share and feedback are menu-only
-              (see below) so the header stays minimal. */}
+              room; the fit check folds them into Tools below one at a time as
+              the row tightens. */}
           {inlineUtilities.map((action) => (
             <IconButton key={action.key} label={action.label} onClick={action.run}>
               <action.icon />
             </IconButton>
           ))}
 
-          {/* The overflow menu: the long tail of occasional actions — Share
-              and Send feedback live here permanently — plus any utility icons
-              the fit check folded in above them. Divided into groups: folded
-              icons · share & export · clear · help & the app itself. */}
-          <Menu
-            align="end"
-            trigger={
-              <IconButton label="More actions" size={iconSize}>
-                <MoreHorizontalIcon />
-              </IconButton>
+          <ToolsMenu
+            labelled={fold.labelled}
+            folded={foldedUtilities}
+            onViewPosted={
+              viewFolded
+                ? () => {
+                    if (messageUrl) openDiscordLink(messageUrl);
+                  }
+                : null
             }
-          >
-            {(close) => (
-              <>
-                {viewFolded || foldedUtilities.length > 0 ? (
-                  <>
-                    {/* The update state's "View" folds in here first, above the
-                        folded utility icons — the tightest bars keep only the
-                        destination, undo/redo, and the primary action inline. */}
-                    {viewFolded ? (
-                      <MenuItem
-                        icon={<ExternalLinkIcon />}
-                        onSelect={() => {
-                          close();
-                          if (messageUrl) openDiscordLink(messageUrl);
-                        }}
-                      >
-                        View posted message
-                      </MenuItem>
-                    ) : null}
-                    {foldedUtilities.map((action) => (
-                      <MenuItem
-                        key={action.key}
-                        icon={<action.icon />}
-                        onSelect={() => {
-                          close();
-                          action.run();
-                        }}
-                      >
-                        {action.menuLabel}
-                      </MenuItem>
-                    ))}
-                    <MenuDivider />
-                  </>
-                ) : null}
-                <MenuItem
-                  icon={<ShareIcon />}
-                  onSelect={() => {
-                    close();
-                    onShare();
-                  }}
-                >
-                  Share link
-                </MenuItem>
-                {collaborateUrl ? (
-                  <MenuItem
-                    icon={<UsersIcon />}
-                    onSelect={() => {
-                      close();
-                      // Opens the collaboration dialog, which mints a Discord
-                      // Activity invite for a channel so the whole group lands
-                      // in one shared instance and co-edits live. A bare launcher
-                      // link only ever opens a solo call (see CollaborateDialog).
-                      openCollaborate();
-                    }}
-                  >
-                    Collaborate in Discord
-                  </MenuItem>
-                ) : null}
-                <MenuItem
-                  icon={<BracesIcon />}
-                  onSelect={() => {
-                    close();
-                    onJson();
-                  }}
-                >
-                  Import / export JSON
-                </MenuItem>
-                <MenuItem
-                  icon={<CodeIcon />}
-                  onSelect={() => {
-                    close();
-                    onCode();
-                  }}
-                >
-                  Export as code
-                </MenuItem>
-                {/* The one destructive row sits in a group of its own, so it's
-                    never a slip away from an export or from "Send feedback". */}
-                <MenuDivider />
-                <MenuItem
-                  icon={<TrashIcon />}
-                  onSelect={() => {
-                    close();
-                    // One click wipes the draft and every message-level option;
-                    // the toast's Undo is the acknowledgement that it's recoverable.
-                    const before = useMessageStore.getState().message;
-                    clearAll();
-                    toastWithUndo("Message cleared", before);
-                  }}
-                >
-                  Clear current message
-                </MenuItem>
-                <MenuDivider />
-                {feedbackOn ? (
-                  <MenuItem
-                    icon={<SupportIcon />}
-                    onSelect={() => {
-                      close();
-                      openFeedback();
-                    }}
-                  >
-                    Send feedback
-                  </MenuItem>
-                ) : null}
-                {mcpOn ? (
-                  <MenuItem
-                    icon={<SparkleIcon />}
-                    onSelect={() => {
-                      close();
-                      // Hands over the hosted connector URL and the three steps
-                      // that add it to an AI client (see ConnectAiDialog).
-                      openMcp();
-                    }}
-                  >
-                    Connect an AI client
-                  </MenuItem>
-                ) : null}
-                <MenuItem
-                  icon={<FilmIcon />}
-                  onSelect={() => {
-                    close();
-                    // Replay the intro film on demand — always available, so
-                    // closing it on the first visit is never a one-way door.
-                    useWelcomeStore.getState().openWelcome();
-                  }}
-                >
-                  Watch the intro
-                </MenuItem>
-                {installed ? null : (
-                  <MenuItem
-                    icon={<InstallIcon />}
-                    onSelect={() => {
-                      close();
-                      // Opens the install dialog, which replays the captured
-                      // native PWA prompt on Chromium or shows per-platform steps
-                      // elsewhere (see InstallDialog).
-                      openInstall();
-                    }}
-                  >
-                    Install app
-                  </MenuItem>
-                )}
-                <MenuItem
-                  icon={<InfoIcon />}
-                  onSelect={() => {
-                    close();
-                    onAbout();
-                  }}
-                >
-                  About
-                </MenuItem>
-              </>
-            )}
-          </Menu>
+            onShare={onShare}
+            onSchedule={onSchedule}
+            onCode={onCode}
+            onJson={onJson}
+            onAbout={onAbout}
+          />
 
           <span className={styles.sep} aria-hidden="true" />
 

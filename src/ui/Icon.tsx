@@ -78,11 +78,13 @@ export const ShareIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
-export const MoreHorizontalIcon = ({ size = 16, ...rest }: IconProps) => (
-  <svg {...base(size)} fill="currentColor" stroke="none" {...rest}>
-    <circle cx="5" cy="12" r="1.6" />
-    <circle cx="12" cy="12" r="1.6" />
-    <circle cx="19" cy="12" r="1.6" />
+/** Four tiles — the Tools menu: a set of things to reach for, not "the rest". */
+export const ToolsIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
   </svg>
 );
 
@@ -469,7 +471,7 @@ export const BracesIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
-/** Film frame — the intro video ("Watch the intro" in the More menu). */
+/** Film frame — the intro video ("Watch the intro" in the Tools menu). */
 export const FilmIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <rect x="3" y="4" width="18" height="16" rx="2.5" />

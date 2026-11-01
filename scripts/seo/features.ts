@@ -834,7 +834,7 @@ export const FEATURES: FeatureSeo[] = [
       },
       {
         name: "Pick where it will run",
-        text: "Open More → Export as code. Choose a bot library — discord.js or discord.py — or a plain webhook request in cURL, JavaScript or Python.",
+        text: "Open Tools → Export as code. Choose a bot library — discord.js or discord.py — or a plain webhook request in cURL, JavaScript or Python.",
       },
       {
         name: "Copy it into your project",

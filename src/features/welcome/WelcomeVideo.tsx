@@ -1,7 +1,7 @@
 /**
  * The welcome overlay: DWEEB's intro film in a cinematic dialog.
  *
- * Opened explicitly from More ▸ "Watch the intro" (or the one-time offer
+ * Opened explicitly from Tools ▸ "Watch the intro" (or the one-time offer
  * toast's button). The film (rendered from `video/`, web cuts made by
  * `npm run deliver:web` into `public/media/`) tells the whole product story in
  * under a minute, with editorial captions burned in so it still lands silently.
@@ -213,7 +213,7 @@ export function WelcomeVideo() {
       <footer className={styles.footer}>
         {/* One slim row: title left, CTA right. The replay path lives on the
             title's hover tooltip instead of a second line of copy. */}
-        <h2 className={styles.title} title="Replay any time from More ▸ “Watch the intro”">
+        <h2 className={styles.title} title="Replay any time from Tools ▸ “Watch the intro”">
           DWEEB introduction
         </h2>
         <Button variant="primary" size="sm" onClick={close}>

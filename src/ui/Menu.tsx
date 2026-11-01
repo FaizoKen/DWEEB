@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/cn";
+import { placeMenu, type MenuAnchor, type MenuPlacement } from "./menuPlacement";
 import { typeaheadIndex } from "./menuTypeahead";
 import styles from "./Menu.module.css";
 
@@ -52,15 +54,12 @@ interface MenuProps {
   trigger: ReactElement<TriggerProps>;
   /** Which edge of the trigger the panel aligns to. */
   align?: "start" | "end";
+  /** Extra class on the panel, for a menu that needs its own width. */
+  className?: string;
+  /** Runs each time the menu opens, however it was opened (click or arrow key). */
+  onOpen?: () => void;
   /** Receives `close` so items can dismiss the menu after selection. */
   children: (close: () => void) => ReactNode;
-}
-
-interface Anchor {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
 }
 
 /**
@@ -68,14 +67,14 @@ interface Anchor {
  *
  * The panel is portalled to `<body>` with `position: fixed` so it floats above
  * whatever scroll container holds the trigger instead of being clipped by it
- * (the same strategy the tree's "Add component" popover uses). It opens below
- * the trigger, flipping above when there isn't room, and clamps horizontally to
- * the viewport. The trigger keeps its own onClick; the menu adds open/close.
+ * (the same strategy the tree's "Add component" popover uses). `placeMenu`
+ * decides where it goes. The trigger keeps its own onClick; the menu adds
+ * open/close.
  */
-export function Menu({ trigger, align = "end", children }: MenuProps) {
+export function Menu({ trigger, align = "end", className, onOpen, children }: MenuProps) {
   const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const [pos, setPos] = useState<MenuPlacement | null>(null);
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const initialFocusRef = useRef<"first" | "last">("first");
@@ -151,24 +150,16 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
   // Measure the panel and place it before paint so the user never sees it jump.
   useLayoutEffect(() => {
     if (!open || !anchor || !panelRef.current) return;
-    const margin = 8;
-    const gap = 6;
     const panel = panelRef.current;
-    const w = panel.offsetWidth;
-    const h = panel.offsetHeight;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    let left = align === "start" ? anchor.left : anchor.right - w;
-    if (left + w > vw - margin) left = vw - w - margin;
-    if (left < margin) left = margin;
-
-    const spaceBelow = vh - anchor.bottom - margin;
-    const spaceAbove = anchor.top - margin;
-    const openUp = h + gap > spaceBelow && spaceAbove > spaceBelow;
-    const top = openUp ? Math.max(margin, anchor.top - gap - h) : anchor.bottom + gap;
-
-    setPos({ left, top });
+    // Read the natural height, not the cap an earlier pass left on the panel,
+    // so a window that grew gets its whole list back.
+    const cap = panel.style.maxHeight;
+    panel.style.maxHeight = "none";
+    const size = { width: panel.offsetWidth, height: panel.offsetHeight };
+    panel.style.maxHeight = cap;
+    setPos(
+      placeMenu(anchor, size, { width: window.innerWidth, height: window.innerHeight }, align),
+    );
   }, [open, anchor, align]);
 
   // A menu opens with one item focused; its items then use arrow-key movement
@@ -188,6 +179,7 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
     measureAnchor();
     setPos(null);
     setOpen(true);
+    onOpen?.();
   };
 
   const triggerWithToggle = cloneElement(trigger, {
@@ -220,13 +212,20 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
             <div
               ref={panelRef}
               role="menu"
-              className={styles.panel}
+              className={cn(styles.panel, className)}
               style={{
                 position: "fixed",
+                // Rendered offscreen until measured so there's no positioning
+                // flash. Never `visibility: hidden` as well: reduced motion's
+                // blanket rule transitions every property for 0.01ms, so the
+                // panel is still hidden when the first row is focused, `focus()`
+                // silently does nothing, and the keyboard can't enter the menu.
                 left: pos?.left ?? -9999,
                 top: pos?.top ?? -9999,
-                // Rendered offscreen until measured so there's no positioning flash.
-                visibility: pos ? "visible" : "hidden",
+                // Only a panel too tall for the viewport scrolls; every other
+                // menu keeps its overflow, and anything that hangs out of it.
+                maxHeight: pos?.maxHeight ?? undefined,
+                overflowY: pos?.maxHeight != null ? "auto" : undefined,
               }}
               onKeyDown={(event) => {
                 // A form field inside the panel whose arrows mean something
@@ -310,22 +309,39 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
 interface MenuItemProps {
   icon?: ReactNode;
   children: ReactNode;
+  /** One line under the label saying what the row is for. It follows the label
+   *  in the row's text, so typeahead still matches on the label. */
+  description?: string;
+  /** Marker at the row's far edge, such as the glyph for "opens a new tab". */
+  trailing?: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
 }
 
-export function MenuItem({ icon, children, onSelect, disabled }: MenuItemProps) {
+export function MenuItem({
+  icon,
+  children,
+  description,
+  trailing,
+  onSelect,
+  disabled,
+}: MenuItemProps) {
   return (
     <button
       type="button"
       role="menuitem"
       tabIndex={-1}
       className={styles.item}
+      data-described={description ? "" : undefined}
       onClick={onSelect}
       disabled={disabled}
     >
       {icon ? <span className={styles.itemIcon}>{icon}</span> : null}
-      <span className={styles.itemLabel}>{children}</span>
+      <span className={styles.itemLabel}>
+        {children}
+        {description ? <span className={styles.itemDescription}>{description}</span> : null}
+      </span>
+      {trailing ? <span className={styles.itemTrailing}>{trailing}</span> : null}
     </button>
   );
 }

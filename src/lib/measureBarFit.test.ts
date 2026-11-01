@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LEFT_MAX_RESERVE, measureNeededWidth } from "./measureBarFit";
+import { LEFT_MAX_RESERVE, measureNeededWidth, toolsFoldSteps } from "./measureBarFit";
 
 /**
  * The fit check only reads widths and computed spacing, so plain objects stand in
@@ -51,5 +51,38 @@ describe("measureNeededWidth", () => {
     measureNeededWidth(bar, left, right);
     for (const el of [bar, left, right]) expect(el.style.transition).toBe("all 10us");
     expect(left.style.minWidth).toBe("0px");
+  });
+});
+
+describe("toolsFoldSteps", () => {
+  /** What a rung keeps inline, in measured px: an icon, and Tools either way. */
+  const width = ({ inline, labelled }: { inline: number; labelled: boolean }) =>
+    inline * 36 + (labelled ? 92 : 30);
+
+  it("gives up the icons first, then the label, then brings one icon back", () => {
+    expect(toolsFoldSteps(3)).toEqual([
+      { inline: 3, labelled: true },
+      { inline: 2, labelled: true },
+      { inline: 1, labelled: true },
+      { inline: 0, labelled: true },
+      { inline: 1, labelled: false },
+      { inline: 0, labelled: false },
+    ]);
+  });
+
+  it("only ever narrows the bar, so the fit check can stop at the first rung that fits", () => {
+    for (const inlineMax of [0, 1, 2, 3]) {
+      const widths = toolsFoldSteps(inlineMax).map(width);
+      expect(widths).toEqual([...widths].sort((a, b) => b - a));
+      expect(new Set(widths).size).toBe(widths.length);
+    }
+  });
+
+  it("starts from the full row and ends with neither icons nor label", () => {
+    for (const inlineMax of [0, 1, 2, 3]) {
+      const steps = toolsFoldSteps(inlineMax);
+      expect(steps[0]).toEqual({ inline: inlineMax, labelled: true });
+      expect(steps.at(-1)).toEqual({ inline: 0, labelled: false });
+    }
   });
 });

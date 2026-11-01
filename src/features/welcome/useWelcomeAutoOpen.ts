@@ -3,7 +3,7 @@
  *
  * New users already land in the Template Gallery, so interrupting them with a
  * second overlay and a multi-megabyte autoplay film is counterproductive. A
- * one-time toast points to More ▸ Watch the intro instead; the media is loaded
+ * one-time toast points to Tools ▸ Watch the intro instead; the media is loaded
  * only after the user explicitly asks for it.
  *
  * Stands down entirely on deep-linked loads (a share/short link being decoded,
@@ -11,7 +11,7 @@
  * the visitor
  * came for something specific, so nothing is recorded and a later organic
  * visit still gets the one prompt. Pre-film users (evidence of prior use)
- * get a single toast pointing at the More menu's "Watch the intro" instead.
+ * get a single toast pointing at the Tools menu's "Watch the intro" instead.
  *
  * The decision itself lives in `welcomeGate`; an "announced" record keeps the
  * prompt one-shot. Legacy "shown" records remain valid and suppress it too.
@@ -48,7 +48,7 @@ function isDeepLinkedLoad(): boolean {
  * @param suppress a deliberate handoff (SEO CTA) that must not be interrupted
  * @param ready whether the editor is on screen — the prompt waits while the
  *   landing gallery is up. It used to fire 1.5 s into a first visit, i.e. over
- *   the full-screen gallery, telling a newcomer to look under a More menu that
+ *   the full-screen gallery, telling a newcomer to look under a Tools menu that
  *   wasn't mounted yet, and stamped its one-shot record regardless.
  */
 export function useWelcomeAutoOpen(suppress = false, ready = true): void {
@@ -64,13 +64,13 @@ export function useWelcomeAutoOpen(suppress = false, ready = true): void {
     if (suppress || !ready || decision === "no") return;
 
     const t = setTimeout(() => {
-      // Written only now, with the editor (and its More menu) actually on
+      // Written only now, with the editor (and its Tools menu) actually on
       // screen — the record means "the offer was made", not "a timer fired".
       // A record that doesn't stick would bring the offer back on every load,
       // so no record, no offer.
       if (!writeWelcomeRecord("announced")) return;
       pushToast("New here? A one-minute intro shows how DWEEB works.", "info", {
-        // One tap plays it; the More menu's "Watch the intro" covers replays.
+        // One tap plays it; the Tools menu's "Watch the intro" covers replays.
         action: {
           label: "Watch the intro",
           onClick: () => useWelcomeStore.getState().openWelcome(),

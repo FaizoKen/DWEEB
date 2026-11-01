@@ -34,7 +34,6 @@ import {
   GlobeIcon,
   HistoryIcon,
   LockIcon,
-  MoreHorizontalIcon,
   PlusIcon,
   RedoIcon,
   RefreshIcon,
@@ -44,6 +43,8 @@ import {
   UndoIcon,
 } from "@/ui/Icon";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
+import { ToolsButton } from "@/features/tools/ToolsButton";
+import { useToolsUnseen } from "@/features/tools/toolsSeen";
 import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";
@@ -55,7 +56,7 @@ import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
 import { missingUploadsMessage, useMissingUploadCount } from "@/core/activity/uploads";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
-import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
+import { MAX_INLINE_UTILITIES, measureNeededWidth, toolsFoldSteps } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
 import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
@@ -71,14 +72,14 @@ const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
 
 /** Why an action can't run right now: the full sentence (hover title, the
  *  control's accessible description, and a toast on tap — touch has no hover)
- *  and a short form for its overflow-menu row. */
+ *  and a short form for its Tools-menu row. */
 interface Unavailable {
   reason: string;
   short: string;
 }
 
 /** One utility action in the bar's right cluster: an inline icon button while
- *  the bar has room, an overflow-menu row once the fit check folds it away. */
+ *  the bar has room, a Tools-menu row once the fit check folds it away. */
 interface UtilityAction {
   key: string;
   icon: ComponentType<{ size?: number }>;
@@ -86,8 +87,10 @@ interface UtilityAction {
    *  available. It stays the action's name when unavailable: the reason is the
    *  description, so every button doesn't read out the same paragraph. */
   label: string;
-  /** Row text once folded into the overflow menu. */
+  /** Row text once folded into the Tools menu. */
   menuLabel: string;
+  /** What the row is for, under its label in the Tools menu. */
+  description?: string;
   /** Set while the action can't run, saying why. */
   unavailable?: Unavailable | null;
   run: () => void;
@@ -403,10 +406,10 @@ export function ActivityBar() {
   // Utility actions, most-reached-for first. Only the first
   // MAX_INLINE_UTILITIES get an inline icon; the rest ("Open on web",
   // JSON, feedback — occasional, and hard to tell apart as bare glyphs) are
-  // overflow-menu rows at every width. The fit check below folds the inline
-  // few away too as the bar narrows, one at a time from the END of the inline
-  // run, so the least-reached-for icon leaves the row first and a near-fit
-  // never strands a wide empty gap where a whole cluster used to be.
+  // Tools rows at every width. The fit check below folds the inline few away
+  // too as the bar narrows, one at a time from the END of the inline run, so
+  // the least-reached-for icon leaves the row first and a near-fit never
+  // strands a wide empty gap where a whole cluster used to be.
   const utilities: UtilityAction[] = [
     {
       key: "save",
@@ -437,6 +440,7 @@ export function ActivityBar() {
       icon: GlobeIcon,
       label: "Open on web for full features",
       menuLabel: "Open on web",
+      description: "Keep going in the full web app",
       run: () => void openOnWeb(),
     },
     {
@@ -444,6 +448,7 @@ export function ActivityBar() {
       icon: BracesIcon,
       label: "Import or export the message as JSON",
       menuLabel: "Import / export JSON",
+      description: "Copy the payload, or paste one in",
       run: () => setJsonOpen(true),
     },
     ...(feedbackOn
@@ -459,20 +464,21 @@ export function ActivityBar() {
       : []),
   ];
 
-  // The collapse ladder: step 1 tightens the row (`data-compact`), steps
-  // 2..N+1 fold the N inline utility icons into the overflow menu one at a
-  // time, and — in the update state — a final step folds the inline "View"
-  // button too. N is the capped inline run, not the whole list: the tail past
-  // the cap is already in the menu and has no ladder step to fold on.
-  const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
-  const foldMax = inlineMax;
+  // The collapse ladder: step 1 tightens the row (`data-compact`), the next
+  // steps fold the inline utility icons into Tools one at a time and then drop
+  // its label (`toolsFoldSteps` has the order and why), and — in the update
+  // state — a final step folds the inline "View" button too. The inline run is
+  // capped, not the whole list: the tail past the cap is already in the menu
+  // and has no ladder step to fold on.
+  const foldSteps = toolsFoldSteps(Math.min(utilities.length, MAX_INLINE_UTILITIES));
+  const foldMax = foldSteps.length - 1;
   const maxLevel = 1 + foldMax + (showView ? 1 : 0);
   const tightened = level >= 1;
-  const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
-  const inlineCount = inlineMax - foldedCount;
-  const inlineUtilities = utilities.slice(0, inlineCount);
-  const foldedUtilities = utilities.slice(inlineCount);
+  const fold = foldSteps[Math.min(Math.max(level - 1, 0), foldMax)]!;
+  const inlineUtilities = utilities.slice(0, fold.inline);
+  const foldedUtilities = utilities.slice(fold.inline);
   const viewFolded = showView && level >= 1 + foldMax + 1;
+  const [toolsUnseen, markToolsSeen] = useToolsUnseen();
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Post↔Update revealing New/View, the plan pill appearing, the
@@ -520,8 +526,8 @@ export function ActivityBar() {
     if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
   }, [level, maxLevel, barWidth, layoutKey]);
 
-  // Undo/redo (and the overflow trigger) tighten to the small control size once
-  // the row tightens; full size on wider bars.
+  // Undo/redo tighten to the small control size once the row tightens; full size
+  // on wider bars.
   const iconSize = tightened ? ("sm" as const) : ("md" as const);
 
   // Run the confirmed post. `publish`/`update` resolve with the result on
@@ -661,9 +667,9 @@ export function ActivityBar() {
             is menu-only at every width — see the cap above the list.
 
             When the bar is too narrow to hold every control at full size, the
-            fit check folds even these into the overflow menu one at a time —
-            which can also absorb the update state's "View" — keeping the row
-            to the destination, undo/redo, and the primary action. */}
+            fit check folds even these into Tools one at a time — which can also
+            absorb the update state's "View" — keeping the row to the
+            destination, undo/redo, and the primary action. */}
         {inlineUtilities.map((action) => {
           const unavailable = action.unavailable;
           // An unavailable action stays focusable and tappable (aria-disabled,
@@ -686,10 +692,13 @@ export function ActivityBar() {
         {foldedUtilities.length > 0 || viewFolded ? (
           <Menu
             align="end"
+            onOpen={markToolsSeen}
             trigger={
-              <IconButton label="More actions" size={iconSize}>
-                <MoreHorizontalIcon />
-              </IconButton>
+              <ToolsButton
+                labelled={fold.labelled}
+                unseen={toolsUnseen}
+                hint="Tools: open on web, JSON and more"
+              />
             }
           >
             {(close) => (
@@ -724,6 +733,7 @@ export function ActivityBar() {
                     <MenuItem
                       key={action.key}
                       icon={<action.icon size={16} />}
+                      description={action.description}
                       onSelect={() => {
                         close();
                         action.run();

@@ -6,7 +6,7 @@ schema, validator, and templates.
 
 It is a **hosted connector**: you add one URL in Claude, sign in with Discord,
 and it works. Nothing to install, clone, or run. In the app it lives under
-**More ▸ Connect an AI client**, which hands over the address with a copy button.
+**Tools ▸ Connect an AI client**, which hands over the address with a copy button.
 
 ```
 https://api.dweeb.faizo.net/mcp

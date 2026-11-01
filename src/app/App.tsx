@@ -225,7 +225,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const backgroundSuppressed = bootstrapPending || deferEditorForInitialGallery;
   // The intro-film offer waits until the editor is actually on screen: behind
-  // the landing gallery there is no More menu for the toast to point at.
+  // the landing gallery there is no Tools menu for the toast to point at.
   useWelcomeAutoOpen(
     Boolean(seoEntry),
     !galleryOpen && !initialGalleryOpening && !backgroundSuppressed,
@@ -244,7 +244,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
     }
   }, [backgroundSuppressed]);
 
-  // The quick-feedback dialog, summoned from the Builder's "More" menu or the
+  // The quick-feedback dialog, summoned from the Builder's Tools menu or the
   // About panel. Mounted lazily only while open (its in-progress text resets on
   // close, which is fine for a one-off report).
   const feedbackOpen = useFeedbackStore((s) => s.open);
@@ -256,17 +256,17 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   const pricingOpen = usePlanStore((s) => s.open);
   const closePricing = usePlanStore((s) => s.closePricing);
 
-  // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
+  // The "Collaborate in Discord" dialog — summoned from the Builder's Tools
   // menu and the floating shortcut. Mints a voice-channel Activity invite so a group
   // co-edits in one shared instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
   const closeCollaborate = useCollaborateStore((s) => s.closeCollaborate);
   // Only offer the collaborate FAB where the invite can actually be minted (a
-  // configured proxy) — matches the Builder "More" menu's gate.
+  // configured proxy) — matches the Builder Tools menu's gate.
   const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
-  // The "Install app" dialog — summoned from the Builder's "More" menu. Replays
+  // The "Install app" dialog — summoned from the Builder's Tools menu. Replays
   // the captured native PWA prompt on Chromium, or shows per-platform manual
   // steps elsewhere. Mounted lazily only while open.
   const installOpen = useInstallStore((s) => s.open);
@@ -274,7 +274,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   const closeMcp = useMcpStore((s) => s.closeMcp);
   const closeInstall = useInstallStore((s) => s.closeInstall);
 
-  // The intro film — opt-in: opened from More ▸ "Watch the intro" or the
+  // The intro film — opt-in: opened from Tools ▸ "Watch the intro" or the
   // one-time offer toast (useWelcomeAutoOpen). Mounted lazily only while open
   // so the video modal never weighs on the initial bundle.
   const welcomeOpen = useWelcomeStore((s) => s.open);
@@ -461,6 +461,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
           ) : (
             <Builder
               onShare={() => openShareDialog("share")}
+              onSchedule={() => openShareDialog("send", "later")}
               onJson={() => openShareDialog("json")}
               onCode={() => openShareDialog("code")}
               onSend={() => openShareDialog("send")}

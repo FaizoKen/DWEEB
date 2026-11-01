@@ -152,7 +152,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Message directory**, or choose **Clear current message** under More to start fresh.",
+        "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Message directory**, or choose **Clear current message** under Tools to start fresh.",
     },
   ],
 };

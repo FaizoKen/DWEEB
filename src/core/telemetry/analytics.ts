@@ -9,6 +9,8 @@ export type AnalyticsEvent =
   | "message_posted"
   | "message_scheduled"
   | "code_exported"
+  | "tools_opened"
+  | "tools_used"
   | "pricing_opened"
   | "checkout_started"
   | "checkout_completed"
@@ -43,6 +45,10 @@ const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   message_posted: new Set(["mode"]),
   message_scheduled: new Set(["recurrence"]),
   code_exported: new Set(["language", "action"]),
+  // Whether people find the Tools menu, and which of its rows they came for.
+  // `tool` is a fixed slug from the menu (`ToolsMenu.tsx`), never free text.
+  tools_opened: new Set(),
+  tools_used: new Set(["tool"]),
   // The upgrade funnel. `opened_from` is the prompt that opened the plans
   // (`core/plan/upgradePrompt.ts`) and rides every step, so a purchase traces
   // back to the limit that sold it. `tier` and `interval` are enums.

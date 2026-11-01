@@ -82,7 +82,7 @@
   /* The bar always stays on a single row. Rather than wrap when space runs out,
      its controls collapse one small step at a time — measured against the bar's
      own width in Builder.tsx, which first sets `data-compact` (the tightened
-     look below), then folds the utility icons into the More menu one by one,
+     look below), then folds the utility icons into the Tools menu one by one,
      then hides the Send label. `nowrap` enforces the single row; `min-width: 0`
      lets the bar shrink inside the builder's grid column rather than forcing
      the whole pane (and the tree below it) wider than the viewport. */
@@ -130,7 +130,7 @@
    measurement in Builder.tsx). Nothing is hidden yet — "New" collapses to its
    icon (Button's `collapseLabel` keys off this flag) and here we drop the
    cluster dividers and tighten the spacing. Only if that still doesn't fit does
-   the TSX go on to fold the utility icons into the More menu one at a time. */
+   the TSX go on to fold the utility icons into the Tools menu one at a time. */
 .actionBar[data-compact] {
   gap: var(--app-space-2);
   padding-left: var(--app-space-2);

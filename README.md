@@ -402,7 +402,7 @@ list templates, build a message, validate it against Discord's rules, preview th
 layout, hand you a share link to review in the visual editor, and post it.
 
 It is a hosted connector: add one URL in Claude, sign in with Discord, done.
-In the app it lives under **More ▸ Connect an AI client**, which hands over the
+In the app it lives under **Tools ▸ Connect an AI client**, which hands over the
 address with a copy button.
 
 ```

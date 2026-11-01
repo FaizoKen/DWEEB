@@ -1,0 +1,33 @@
+/* `[role]` outweighs `Menu`'s own `.panel`, whose 320px cap is for a list of
+   names. Whichever stylesheet loads last must not decide this. */
+.panel[role="menu"] {
+  width: 584px;
+  max-width: calc(100vw - 16px);
+}
+
+.columns,
+.folded {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* One column on a phone, where `Menu` caps the height and the list scrolls. The
+   width holds each description to one line. */
+@media (max-width: 640px) {
+  .panel[role="menu"] {
+    width: 300px;
+  }
+
+  .columns,
+  .folded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

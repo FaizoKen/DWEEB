@@ -3,7 +3,7 @@
  *
  * Owns just the open/close state of the PWA-install dialog. Mirrors the
  * lightweight pattern of `collaborateStore` / `feedbackStore` so any control —
- * the Builder action bar's "More" menu, and anywhere else — can summon it
+ * the Builder action bar's Tools menu, and anywhere else — can summon it
  * without threading props through `App`.
  */
 

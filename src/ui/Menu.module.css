@@ -19,6 +19,12 @@
   animation: menuRise 100ms ease-out;
 }
 
+/* A panel capped to the viewport (`placeMenu`) must overflow and scroll: left to
+   flex, its rows would squash to fit and a divider would shrink to nothing. */
+.panel > * {
+  flex-shrink: 0;
+}
+
 .item {
   display: inline-flex;
   align-items: center;
@@ -72,6 +78,32 @@
 }
 .itemLabel {
   flex: 1;
+  min-width: 0;
+}
+
+/* A described row: the label stays the row's voice, and the line under it says
+   what the row is for. The icon holds to the label's line, not the row's centre. */
+.item[data-described] {
+  align-items: flex-start;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.item[data-described] .itemIcon {
+  margin-top: 2px;
+}
+.itemDescription {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--app-text-xs);
+  line-height: 1.35;
+  color: var(--app-text-muted);
+}
+.itemTrailing {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex: none;
+  color: var(--app-text-subtle);
 }
 
 .divider {
