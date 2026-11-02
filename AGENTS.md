@@ -606,6 +606,47 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      to fail). Guarded by `live_build.rs`'s parser tests (including a truncation sweep, since the
      bounded read can cut the last tag), the `pages_as_broken_deploy` tests in telemetry.rs, and
      `buildMetaFromHtml` in `crashReport.test.ts`.
+  9. **A chunk can arrive whole-looking and hollow — and the service worker keeps it that way**
+     (2026-11-03). Ten `kind=boot` pages in an hour from the live build `7772dbbaa3`, Firefox:
+     `can't access property "parse", t is undefined` at `m@popupFlow-*.js` (`relayPopupIfApplicable`)
+     ← `index-*.js`. The boot had read `webhookFlow` off the `flows-*.js` namespace and got
+     `undefined`: the file it ran had no exports. Serving an empty or no-op body for that one URL
+     reproduces the beacon **byte for byte** (headless Firefox 150, live build), and so does writing
+     an empty entry into the worker's precache — after which every reload, and the notice's in-place
+     "Reload", is answered from the same entry, which is the ~10-in-an-hour pattern. No filter list
+     in uBO's/AdGuard's defaults matches the URL; the precache is the likeliest home of the damage,
+     and *how* it got damaged is unknown (no UA or logs in a beacon). Two facts make it sticky:
+     Workbox's install **skips any URL already in the cache** (`PrecacheStrategy._handle` returns the
+     cache hit), so unregister + re-register puts the damaged copy back, and an unchanged chunk keeps
+     its hash across deploys. A *static* import of a hollow chunk fails at link time with the engine's
+     own words (Firefox `… doesn't provide an export named: 'u'`, absolute URL; Chromium `… does not
+     provide an export named 'p'`, `./x.js` specifier — both reproduced); a *dynamic* `import()` just
+     hands back the empty namespace. Hence: (a) every boot namespace in `main.tsx` goes through
+     `requireBootExports` (`core/pwa/bootModules.ts`), which throws `Boot chunk "<name>" loaded
+     without its export '<x>' (<url>)`, the URL found in Resource Timing (SW-served modules are listed
+     — checked in Firefox); `isHollowChunkMessage` matches that and the two engine wordings, nothing
+     else (Safari's URL-less wording stays a crash until a beacon shows it). Rollup checks every
+     import at build time and the types check the list, so it can't fire for a bug of ours. (b) The
+     recovery ladder takes the class, and **before each step and on the notice's button**
+     `repairDamagedChunk` deletes that URL from every Cache Storage cache (only Workbox's exist;
+     Workbox then serves it from the network, and its next install re-caches it) and refetches it
+     with `cache: "reload"` — measured: the damaged-precache tab heals in one automatic reload with no
+     beacon, in Firefox and Chromium, for `flows` and for a static dep of App. The notice reason is
+     `damaged` (it names a saved copy, an extension or security software; never "updated").
+     (c) Before a hollow `boot` failure is reported, the reporter fetches our host's copy
+     (`?dweeb-probe=` misses both SW routes, `no-store` the HTTP cache) and `declaresExport` reads
+     it — Rollup's `export{…}` clause, or the `{__proto__:null,App:…}` namespace object a merged
+     module (App, imported as `.then(e=>e.A)`) is read off. **Only a whole copy demotes**, to kind
+     `chunk-damaged` (info, `web app damaged chunk`, `is_damaged_chunk` in telemetry.rs); a hollow
+     copy on our host or an unanswered probe keeps `boot`, which pages — so a deploy serving a
+     hollow chunk still pages from every visitor. **Server-first deploy ordering**: an old proxy logs
+     the unknown kind at warn, i.e. pages exactly as today. Residue: bundles before this keep sending
+     the old `t.parse` line (paged; nothing server-side can tell it from a bug); a hollow *lazy*
+     chunk post-boot still reaches the top `ErrorBoundary` as a plain crash; something that rewrites
+     the probe too (security software) still pages. Guarded by `hollow chunks` in
+     `crashReport.test.ts`, `bootModules.test.ts`, the repair-order test in
+     `staleChunkRecovery.test.ts`, the hollow-chunk block in `reporter.test.ts`, and
+     `a_damaged_chunk_is_counted_never_paged` in telemetry.rs.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.
