@@ -40,10 +40,11 @@ pub struct CrashBody {
     /// Where the error surfaced: `error` (window.onerror), `unhandledrejection`,
     /// `boundary` (the React error boundary) or `boot` (the entry's boot promise
     /// — the app never mounted; the boot shell showed a notice), plus
-    /// `dom-desync` (a crash the client *prevented*) and the five chunk-load
+    /// `dom-desync` (a crash the client *prevented*), the five chunk-load
     /// refinements the client resolves for itself — `stale-chunk`,
     /// `chunk-unreachable`, `stale-shell`, `shell-unverified`,
-    /// `stale-chunk-fatal`. A short enum-like tag; see [`KIND_MAX`].
+    /// `stale-chunk-fatal` — and `chunk-damaged` (see [`is_damaged_chunk`]). A
+    /// short enum-like tag; see [`KIND_MAX`].
     #[serde(default)]
     kind: String,
     /// The error message. Not user content — an exception string like
@@ -293,6 +294,21 @@ async fn live_build(st: &AppState) -> Option<String> {
 /// guard is masking a bug of ours and wants a look.
 fn is_repaired_dom_desync(kind: &str) -> bool {
     kind == "dom-desync"
+}
+
+/// The kind a client sends when its boot died on a chunk that *loaded* but
+/// lacked its exports, after it fetched our host's copy and found it whole
+/// (`damagedChunkKind` in `src/core/telemetry/crashReport.ts`). So the copy the
+/// visitor's browser ran was damaged on their side: a cache entry, an extension
+/// or security software rewriting the response. The 2026-11-03 page was a
+/// Firefox visitor's empty precached `flows-*.js`, about ten reloads in an hour.
+///
+/// Logged at `info`: nothing we deploy could have prevented it, so it must
+/// never page, and the client's recovery has already tried to repair that
+/// copy. Still counted, so a spike shows. A copy that is hollow on our host
+/// too keeps the client's `boot` kind and pages.
+fn is_damaged_chunk(kind: &str) -> bool {
+    kind == "chunk-damaged"
 }
 
 /// URL schemes a browser gives only to code from an extension package — never
@@ -739,8 +755,9 @@ pub async fn crash_report(
 
 /// Log a beacon that got past the live-build check, at the level its shape
 /// earns — and the level is the paging decision: the log alerter pages on a
-/// `web_crash` warn and never on an info. Routine skew, a repaired desync,
-/// foreign code and an unhandled abort are info; everything else is a warn.
+/// `web_crash` warn and never on an info. Routine skew, a repaired desync, a
+/// damaged chunk, foreign code and an unhandled abort are info; everything else
+/// is a warn.
 /// Every argument is already clamped. Split from the handler so the tests can
 /// hear the line a beacon actually produces, not just the predicates behind it.
 fn log_crash(
@@ -795,6 +812,20 @@ fn log_crash(
             %message,
             %stack,
             "web app DOM desync (repaired)",
+        );
+    } else if is_damaged_chunk(kind) {
+        // A chunk the visitor's browser ran without its exports, while our host
+        // serves it whole. Counted, never paged. See [`is_damaged_chunk`].
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %surface,
+            %version,
+            %build,
+            %path,
+            %message,
+            %stack,
+            "web app damaged chunk (visitor's copy lacked its exports; our host serves it whole)",
         );
     } else if is_foreign_code_error(kind, message, stack) {
         // Someone else's code crashing in our visitors' pages — a browser
@@ -888,7 +919,7 @@ mod tests {
 
     /// Every kind the client can send. Mirrors CRASH_KINDS in the frontend's
     /// crashReport.ts.
-    const CLIENT_KINDS: [&str; 10] = [
+    const CLIENT_KINDS: [&str; 11] = [
         "error",
         "unhandledrejection",
         "boundary",
@@ -899,6 +930,7 @@ mod tests {
         "stale-shell",
         "shell-unverified",
         "stale-chunk-fatal",
+        "chunk-damaged",
     ];
 
     #[test]
@@ -1434,6 +1466,42 @@ mod tests {
         assert!(paged.contains(" WARN "), "{paged}");
         assert!(paged.contains("web app crash"), "{paged}");
         assert!(paged.contains("kind=error frames=mixed"), "{paged}");
+    }
+
+    #[test]
+    fn a_damaged_chunk_is_counted_never_paged() {
+        // The 2026-11-03 event as a current client reports it once it has found
+        // our host's copy of the chunk whole.
+        let message = "Boot chunk \"flows\" loaded without its export 'webhookFlow' \
+                       (https://dweeb.faizo.net/assets/flows-Cs_Dwe0Q.js)";
+        let stack = "requireBootExports@https://dweeb.faizo.net/assets/index-a.js:2:1 \
+                     @https://dweeb.faizo.net/assets/index-a.js:2:9";
+        let demoted = logged_line("chunk-damaged", message, stack);
+        assert!(demoted.contains(" INFO "), "{demoted}");
+        assert!(demoted.contains("web app damaged chunk"), "{demoted}");
+        // It is the client's verdict, so a kind, never a message match: the same
+        // words under `boot` mean our host serves the chunk hollow too, a broken
+        // deploy, and that pages.
+        let paged = logged_line("boot", message, stack);
+        assert!(paged.contains(" WARN "), "{paged}");
+        assert!(paged.contains("web app crash"), "{paged}");
+        for kind in CLIENT_KINDS {
+            assert_eq!(is_damaged_chunk(kind), kind == "chunk-damaged", "{kind}");
+        }
+    }
+
+    #[test]
+    fn the_2026_11_03_beacon_from_the_old_bundle_still_pages() {
+        // What build 7772dbbaa3 sent, which predates the boot guard. Nothing on
+        // this side can tell that line from a bug of ours, so it stays loud.
+        let line = logged_line(
+            "boot",
+            "can't access property \"parse\", t is undefined",
+            "m@https://dweeb.faizo.net/assets/popupFlow-DJYmbuLF.js:1:1705 \
+             @https://dweeb.faizo.net/assets/index-apw0fEe8.js:2:20841",
+        );
+        assert!(line.contains(" WARN "), "{line}");
+        assert!(line.contains("kind=boot frames=page"), "{line}");
     }
 
     /// The 2026-09-14 page, byte for byte as build `e699a38eec` sent it — a
