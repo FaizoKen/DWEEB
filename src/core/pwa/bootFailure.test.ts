@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bootNoticeCopy, bootShell, UPDATING_COPY } from "./bootFailure";
+import { bootNoticeCopy, bootShell, REPAIRING_COPY, UPDATING_COPY } from "./bootFailure";
 
 describe("bootNoticeCopy", () => {
   it("says 'probably' about an update — an offline tab produces the same chunk error", () => {
@@ -37,6 +37,21 @@ describe("bootNoticeCopy", () => {
 
   it("keeps the updating line honest about what is happening", () => {
     expect(UPDATING_COPY).toMatch(/Updating DWEEB/);
+    // Repairing a damaged copy updates nothing, and must not say it does.
+    expect(REPAIRING_COPY).not.toMatch(/updat/i);
+  });
+
+  it("says a damaged copy is the browser's, never that DWEEB was updated", () => {
+    const web = bootNoticeCopy("damaged", "web", 'Boot chunk "flows" loaded without its export');
+    expect(web.body).toMatch(/damaged/);
+    expect(web.body).not.toMatch(/updated/);
+    expect(web.body).toMatch(/saved on this device/);
+    expect(web.action).toBe("Refresh now");
+    expect(web.detail).toBeUndefined(); // the notice explains it; no raw wording
+    const activity = bootNoticeCopy("damaged", "activity");
+    expect(activity.body).toMatch(/damaged/);
+    expect(activity.body).not.toMatch(/this device/);
+    expect(activity.action).toBe("Try again");
   });
 });
 

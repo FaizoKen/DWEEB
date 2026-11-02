@@ -10,14 +10,20 @@ import {
   CRASH_KINDS,
   crashSignature,
   CrashThrottle,
+  damagedChunkKind,
+  declaresExport,
   describeError,
   domDesyncMessage,
   EXTENSION_SCHEMES,
   frameOrigin,
   GECKO_MAIN_WORLD,
+  hollowChunkMessage,
+  hollowChunkUrl,
   isForeignCodeError,
+  isHollowChunkMessage,
   isNonCrashMessage,
   isStaleChunkMessage,
+  missingExportName,
   isUnhandledAbort,
   isUnhandledNetworkFailure,
   KIND_MAX_LENGTH,
@@ -552,6 +558,116 @@ describe("chunkProbeUrl", () => {
   it("returns null when the message names no chunk", () => {
     expect(chunkProbeUrl("Importing a module script failed.", ORIGIN)).toBe(null);
     expect(chunkProbeUrl("", ORIGIN)).toBe(null);
+  });
+});
+
+describe("hollow chunks", () => {
+  const ORIGIN = "https://dweeb.faizo.net";
+  // What headless Firefox 150 and Chromium say on the live build when
+  // `guildWebhooks-*.js`, a static import of the App chunk, is served empty.
+  const FIREFOX =
+    "The requested module 'https://dweeb.faizo.net/assets/guildWebhooks-CY1UaqZE.js' doesn't provide an export named: 'u'";
+  const CHROMIUM =
+    "The requested module './guildWebhooks-CY1UaqZE.js' does not provide an export named 'p'";
+  const OURS = hollowChunkMessage(
+    "flows",
+    "webhookFlow",
+    "https://dweeb.faizo.net/assets/flows-Cs_Dwe0Q.js",
+  );
+  // The live build's `flows-*.js`, its import and export lines verbatim.
+  const FLOWS_CHUNK =
+    'import{openPopup as e,navigatePopup as r,watchPopup as o,redirectFullPage as n}from"./popupFlow-DJYmbuLF.js";' +
+    'import{c as s,l as i}from"./index-apw0fEe8.js";import"./vendor-DHzqH-X3.js";const t=/^\\d{15,25}$/,l={kind:"webhook"};' +
+    "export{c as botAddFlow,d as loginFlow,u as startBotAddPopup,a as startLoginPopup,l as webhookFlow};";
+  // The live App chunk: App is merged in, read off a namespace object (`.then(e=>e.A)`).
+  const APP_CHUNK =
+    "qa=Object.freeze(Object.defineProperty({__proto__:null,App:function({seoEntry:n=null}){return n}}," +
+    'Symbol.toStringTag,{value:"Module"}));export{qa as A,Zt as M,Yt as a,Bt as u};';
+
+  it("matches the two engine wordings reproduced on the live build, and ours", () => {
+    expect(isHollowChunkMessage(FIREFOX)).toBe(true);
+    expect(isHollowChunkMessage(CHROMIUM)).toBe(true);
+    expect(isHollowChunkMessage(OURS)).toBe(true);
+    expect(isHollowChunkMessage(`SyntaxError: ${CHROMIUM}`)).toBe(true);
+  });
+
+  it("never matches the crash it replaces, a failed load, or a plain bug", () => {
+    // The 2026-11-03 beacon from the bundle before the boot guard: nothing in
+    // it says why, so it stays a crash.
+    expect(isHollowChunkMessage(`can't access property "parse", t is undefined`)).toBe(false);
+    expect(isHollowChunkMessage("Cannot read properties of undefined (reading 'parse')")).toBe(
+      false,
+    );
+    expect(isHollowChunkMessage("error loading dynamically imported module: https://x/a.js")).toBe(
+      false,
+    );
+    expect(isStaleChunkMessage(FIREFOX)).toBe(false);
+    expect(isStaleChunkMessage(OURS)).toBe(false);
+    expect(isHollowChunkMessage("")).toBe(false);
+  });
+
+  it("reads the chunk URL each wording carries", () => {
+    expect(hollowChunkUrl(FIREFOX, ORIGIN)).toBe(
+      "https://dweeb.faizo.net/assets/guildWebhooks-CY1UaqZE.js",
+    );
+    // Chromium names the importer's specifier; every Vite chunk sits in assets/.
+    expect(hollowChunkUrl(CHROMIUM, ORIGIN)).toBe(
+      "https://dweeb.faizo.net/assets/guildWebhooks-CY1UaqZE.js",
+    );
+    expect(hollowChunkUrl(OURS, ORIGIN)).toBe("https://dweeb.faizo.net/assets/flows-Cs_Dwe0Q.js");
+  });
+
+  it("returns null for anything that is not a script of ours", () => {
+    expect(hollowChunkUrl(hollowChunkMessage("flows", "webhookFlow", null), ORIGIN)).toBe(null);
+    expect(
+      hollowChunkUrl(
+        "The requested module 'https://evil.example/assets/x.js' doesn't provide an export named: 'u'",
+        ORIGIN,
+      ),
+    ).toBe(null);
+    expect(
+      hollowChunkUrl(
+        "The requested module './../x.js' does not provide an export named 'p'",
+        ORIGIN,
+      ),
+    ).toBe(null);
+    expect(hollowChunkUrl(hollowChunkMessage("x", "y", `${ORIGIN}/`), ORIGIN)).toBe(null);
+  });
+
+  it("reads the export each wording says is missing", () => {
+    expect(missingExportName(FIREFOX)).toBe("u");
+    expect(missingExportName(CHROMIUM)).toBe("p");
+    expect(missingExportName(OURS)).toBe("webhookFlow");
+    expect(missingExportName('can\'t access property "parse", t is undefined')).toBe(null);
+  });
+
+  it("reads exports the way the live build writes them", () => {
+    expect(declaresExport(FLOWS_CHUNK, "webhookFlow")).toBe(true);
+    expect(declaresExport(FLOWS_CHUNK, "botAddFlow")).toBe(true);
+    // A local name is not an export.
+    expect(declaresExport(FLOWS_CHUNK, "l")).toBe(false);
+    expect(declaresExport(FLOWS_CHUNK, "relayPopupIfApplicable")).toBe(false);
+    expect(declaresExport(APP_CHUNK, "App")).toBe(true);
+    expect(declaresExport(APP_CHUNK, "A")).toBe(true);
+    expect(declaresExport(APP_CHUNK, "Builder")).toBe(false);
+    expect(declaresExport("export const ready = 1;", "ready")).toBe(true);
+    expect(declaresExport("export default 1;", "default")).toBe(true);
+  });
+
+  it("finds nothing in the copies that reproduce the page", () => {
+    // An empty body and uBlock Origin's no-op stub both reproduce the beacon.
+    for (const hollow of ["", '(function(){"use strict";})();']) {
+      expect(declaresExport(hollow, "webhookFlow")).toBe(false);
+      expect(declaresExport(hollow, "App")).toBe(false);
+    }
+    // A namespace-shaped key without an export clause is not a chunk of ours.
+    expect(declaresExport("const o={__proto__:null,App:1};", "App")).toBe(false);
+  });
+
+  it("demotes only on a whole copy from our host", () => {
+    expect(damagedChunkKind("whole")).toBe("chunk-damaged");
+    expect(damagedChunkKind("hollow")).toBe("boot");
+    expect(damagedChunkKind("unknown")).toBe("boot");
   });
 });
 

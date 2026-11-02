@@ -25,8 +25,10 @@
 /** Why the boot ended, which picks the copy. `stale-chunk` = a chunk failed to
  *  load (probably a shell older than the deploy — the notice says "probably",
  *  because an offline tab produces the same error); `offline` = the same, but
- *  the browser says it has no network; `error` = anything else. */
-export type BootNoticeReason = "stale-chunk" | "offline" | "error";
+ *  the browser says it has no network; `damaged` = a chunk loaded without its
+ *  exports, so the copy this browser holds is not the one we built (see
+ *  `isHollowChunkMessage`); `error` = anything else. */
+export type BootNoticeReason = "stale-chunk" | "offline" | "damaged" | "error";
 
 export interface BootNoticeCopy {
   lead: string;
@@ -57,6 +59,12 @@ export function bootNoticeCopy(
           body: "Discord appears to be offline. Reconnect, then try again.",
           action: "Try again",
         };
+      case "damaged":
+        return {
+          lead: "DWEEB couldn’t finish loading.",
+          body: "Part of it arrived damaged. Try again to fetch a fresh copy.",
+          action: "Try again",
+        };
       default:
         return {
           lead: "DWEEB couldn’t start inside Discord.",
@@ -79,6 +87,12 @@ export function bootNoticeCopy(
         body: "You appear to be offline. Reconnect, then reload the page.",
         action: "Reload",
       };
+    case "damaged":
+      return {
+        lead: "DWEEB couldn’t finish loading.",
+        body: "Part of it arrived damaged, usually from a copy your browser saved, sometimes from an extension or security software that filters pages. Refresh to fetch a fresh copy. A draft saved on this device, and this link, stay where they are.",
+        action: "Refresh now",
+      };
     default:
       return {
         lead: "DWEEB couldn’t start.",
@@ -92,6 +106,10 @@ export function bootNoticeCopy(
 /** What the loading line says while a recovery navigation is in flight. */
 export const UPDATING_COPY = "Updating DWEEB to the latest version…";
 
+/** The same, when the recovery is replacing a damaged copy rather than an old
+ *  one — nothing is being updated. */
+export const REPAIRING_COPY = "Fetching a fresh copy of DWEEB…";
+
 /**
  * The boot shell, but only while it is still parked inside `#root`. Once
  * `mount()` has re-parented it under `<body>` as the exiting overlay it belongs
@@ -103,12 +121,12 @@ export function bootShell(): HTMLElement | null {
 }
 
 /** Say that a recovery navigation is under way, instead of "Loading…". */
-export function markBootShellUpdating(): void {
+export function markBootShellUpdating(copy: string = UPDATING_COPY): void {
   const shell = bootShell();
   if (!shell) return;
   shell.dataset.seoBootState = "updating";
   const line = shell.querySelector<HTMLElement>(".seo-boot__card > p");
-  if (line) line.textContent = UPDATING_COPY;
+  if (line) line.textContent = copy;
 }
 
 /**

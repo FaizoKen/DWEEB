@@ -222,3 +222,71 @@ describe("the crash reporter's unhandled-network-failure gate", () => {
     expect(sent()[0]?.kind).toBe("boundary");
   });
 });
+
+describe("the crash reporter's hollow-chunk verification", () => {
+  const FLOWS = "https://dweeb.faizo.net/assets/flows-Cs_Dwe0Q.js";
+  const FLOWS_CHUNK =
+    'const l={kind:"webhook"};export{c as botAddFlow,d as loginFlow,l as webhookFlow};';
+  const hollow = () =>
+    new Error(`Boot chunk "flows" loaded without its export 'webhookFlow' (${FLOWS})`);
+  let probes: string[] = [];
+
+  /** Our host answers the probe with `body`. */
+  function hostServes(body: string, status = 200): void {
+    probes = [];
+    vi.stubGlobal("location", { origin: "https://dweeb.faizo.net", pathname: "/" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        probes.push(`${init.method} ${init.cache} ${url}`);
+        return new Response(body, { status });
+      }),
+    );
+  }
+
+  it("counts the 2026-11-03 visitor's damaged copy without paging, once our host's is whole", async () => {
+    hostServes(FLOWS_CHUNK);
+    const { reportBootFailure } = await import("./reporter");
+    reportBootFailure(hollow());
+    await vi.waitFor(() => expect(proxyFetch).toHaveBeenCalledTimes(1));
+    expect(sent()[0]?.kind).toBe("chunk-damaged");
+    // Past every local copy: an unknown query misses the worker's routes.
+    expect(probes).toHaveLength(1);
+    expect(probes[0]).toMatch(
+      /^GET no-store https:\/\/dweeb\.faizo\.net\/assets\/flows-Cs_Dwe0Q\.js\?dweeb-probe=\w+$/,
+    );
+  });
+
+  it("still pages when our host serves the chunk hollow too — a broken deploy", async () => {
+    hostServes("");
+    const { reportBootFailure } = await import("./reporter");
+    reportBootFailure(hollow());
+    await vi.waitFor(() => expect(proxyFetch).toHaveBeenCalledTimes(1));
+    expect(sent()[0]?.kind).toBe("boot");
+  });
+
+  it("still pages when the probe gets no usable answer", async () => {
+    hostServes(FLOWS_CHUNK, 503);
+    const { reportBootFailure } = await import("./reporter");
+    reportBootFailure(hollow());
+    await vi.waitFor(() => expect(proxyFetch).toHaveBeenCalledTimes(1));
+    expect(sent()[0]?.kind).toBe("boot");
+  });
+
+  it("still pages with nothing to ask, and asks nobody", async () => {
+    hostServes(FLOWS_CHUNK);
+    const { reportBootFailure } = await import("./reporter");
+    reportBootFailure(new Error(`Boot chunk "flows" loaded without its export 'webhookFlow'`));
+    await vi.waitFor(() => expect(proxyFetch).toHaveBeenCalledTimes(1));
+    expect(sent()[0]?.kind).toBe("boot");
+    expect(probes).toEqual([]);
+  });
+
+  it("never probes for a crash that is not a hollow chunk", async () => {
+    hostServes(FLOWS_CHUNK);
+    const { reportBootFailure } = await import("./reporter");
+    reportBootFailure(new Error(`can't access property "parse", t is undefined`));
+    expect(sent()[0]?.kind).toBe("boot");
+    expect(probes).toEqual([]);
+  });
+});

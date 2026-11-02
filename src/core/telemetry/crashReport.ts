@@ -38,7 +38,11 @@
  *  entry script) — also never paged, but sent as its own kind so a regression in
  *  that probe shows up as a count instead of as silence; `stale-chunk-fatal` =
  *  the chunk is gone AND the live shell is *this* build, so the deploy visitors
- *  receive right now references a chunk it doesn't serve — that one pages. */
+ *  receive right now references a chunk it doesn't serve — that one pages.
+ *  One more is not a failed load at all: `chunk-damaged` = the boot died on a
+ *  chunk that *did* load but lacked its exports (see [`isHollowChunkMessage`]),
+ *  and re-fetching our host's copy found it whole, so the copy this visitor's
+ *  browser ran was damaged on their side — counted, never paged. */
 export type CrashKind =
   | "error"
   | "unhandledrejection"
@@ -49,7 +53,8 @@ export type CrashKind =
   | "chunk-unreachable"
   | "stale-shell"
   | "shell-unverified"
-  | "stale-chunk-fatal";
+  | "stale-chunk-fatal"
+  | "chunk-damaged";
 
 /** Every kind the client can send — pinned against [`KIND_MAX_LENGTH`] in
  *  `crashReport.test.ts`. */
@@ -64,6 +69,7 @@ export const CRASH_KINDS: readonly CrashKind[] = [
   "stale-shell",
   "shell-unverified",
   "stale-chunk-fatal",
+  "chunk-damaged",
 ];
 
 /** The proxy clamps `kind` to this many characters (`KIND_MAX` in
@@ -492,6 +498,145 @@ export function chunkProbeUrl(message: string, origin: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * How each engine words a module that *loaded* but lacks a binding another
+ * module imports from it, plus our own wording for the same thing seen through
+ * a dynamic `import()` (see [`hollowChunkMessage`]). Matched case-insensitively
+ * on containment.
+ *
+ * In a Rollup build this can only mean the file the browser ran is not the file
+ * we built: Rollup checks every static import against its target's exports at
+ * build time, and a hashed chunk name pins its content, so deploy skew cannot
+ * produce it either. The 2026-11-03 page was one: a Firefox visitor whose
+ * service-worker precache held an empty copy of `flows-*.js`. The boot read
+ * `webhookFlow` off it, got `undefined`, and died on `t.parse`. Every reload was
+ * answered from the same precache, so it failed ~10 times in an hour. An empty
+ * or no-op body for that URL reproduces the beacon byte for byte (headless
+ * Firefox 150, live build `7772dbbaa3`).
+ *
+ * Only the two wordings reproduced there. Safari's (`Importing binding name 'x'
+ * is not found.`) carries no URL to repair or probe, and stays a plain crash
+ * until a beacon shows it.
+ */
+const HOLLOW_CHUNK_MESSAGES = [
+  "doesn't provide an export named", // Firefox, a static import's link step
+  "does not provide an export named", // Chromium, likewise
+  "loaded without its export", // ours — `hollowChunkMessage`
+];
+
+/** Whether `message` says a chunk arrived without its exports. Its repair is
+ *  in `core/pwa/staleChunkRecovery`, its verdict in [`damagedChunkKind`]. */
+export function isHollowChunkMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return HOLLOW_CHUNK_MESSAGES.some((known) => lower.includes(known));
+}
+
+/**
+ * The error a boot entry throws when a dynamically imported chunk resolved
+ * without an export it needs. Engines check a *static* import at link time (see
+ * [`HOLLOW_CHUNK_MESSAGES`]), but a dynamic `import()` just hands back whatever
+ * namespace it got, so without this the first use fails somewhere else with
+ * nothing to say why. `url` is the chunk as the browser fetched it, when it can
+ * be found; [`hollowChunkUrl`] reads it back.
+ */
+export function hollowChunkMessage(chunk: string, exportName: string, url: string | null): string {
+  const base = `Boot chunk "${chunk}" loaded without its export '${exportName}'`;
+  return url ? `${base} (${url})` : base;
+}
+
+/** Firefox and ours name the chunk by absolute URL; Chromium by the specifier
+ *  the importing chunk wrote, which for Vite's flat `assets/` output is
+ *  `./<file>.js`. */
+const HOLLOW_ABSOLUTE_URL = /\bhttps?:\/\/[^\s"'<>()]+/i;
+const HOLLOW_SIBLING_SPECIFIER = /'\.\/([A-Za-z0-9_.-]+\.m?js)'/;
+
+/**
+ * The same-origin URL of the chunk a hollow-chunk message names, or `null`.
+ * Used both to repair the visitor's copy and to ask our host for its own, so a
+ * URL that isn't ours must never come back: `null` means "repair nothing" and
+ * "keep paging", the two safe directions.
+ */
+export function hollowChunkUrl(message: string, origin: string): string | null {
+  let raw: string | null = null;
+  const absolute = HOLLOW_ABSOLUTE_URL.exec(message);
+  if (absolute) raw = absolute[0];
+  else {
+    const sibling = HOLLOW_SIBLING_SPECIFIER.exec(message);
+    if (sibling) raw = `/assets/${sibling[1]}`;
+  }
+  if (raw === null) return null;
+  try {
+    const url = new URL(raw, origin);
+    if (url.origin !== origin || !/\.m?js$/.test(url.pathname)) return null;
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/** The export a hollow-chunk message says was missing — Firefox's `export
+ *  named: 'u'`, Chromium's `export named 'p'`, our `export 'webhookFlow'` —
+ *  or `null`. */
+export function missingExportName(message: string): string | null {
+  const match = /\bexport(?: named)?:? '([^']+)'/.exec(message);
+  return match?.[1] ?? null;
+}
+
+const EXPORT_CLAUSE = /\bexport\s*\{([^}]*)\}/g;
+const EXPORT_SPECIFIER = /^\s*([\w$]+)(?:\s+as\s+([\w$]+))?\s*$/;
+const EXPORT_DECLARATION =
+  /\bexport\s+(?:const|let|var|class|(?:async\s+)?function\s*\*?)\s*([\w$]+)/g;
+/** Rollup's namespace object for a module merged into a larger chunk:
+ *  `Object.freeze(Object.defineProperty({__proto__:null,App:…},…))`. */
+const NAMESPACE_OBJECT = /\{__proto__:null,/;
+
+/**
+ * Whether module `source` provides `name`. Rollup ends every chunk with one
+ * `export{local as name,…}` clause, which is what this reads first;
+ * declaration forms and `export default` are accepted too. A module Vite merged
+ * into a larger chunk is instead read off a namespace object that chunk exports
+ * under a mangled name (the App chunk: `export{qa as A,…}` with
+ * `qa={__proto__:null,App:…}`, imported as `.then(e=>e.A)`), so a chunk that
+ * has an export clause and a namespace object keyed `name` counts too. A form
+ * this doesn't recognise reads as "not provided", which keeps a report paging,
+ * never the reverse.
+ */
+export function declaresExport(source: string, name: string): boolean {
+  let hasClause = false;
+  for (const clause of source.matchAll(EXPORT_CLAUSE)) {
+    hasClause = true;
+    for (const specifier of (clause[1] ?? "").split(",")) {
+      const match = EXPORT_SPECIFIER.exec(specifier);
+      if (match && (match[2] ?? match[1]) === name) return true;
+    }
+  }
+  for (const declaration of source.matchAll(EXPORT_DECLARATION)) {
+    if (declaration[1] === name) return true;
+  }
+  if (name === "default" && /\bexport\s+default\b/.test(source)) return true;
+  if (!hasClause || !/^[\w$]+$/.test(name) || !NAMESPACE_OBJECT.test(source)) return false;
+  return new RegExp(`[{,]${name.replace(/\$/g, "\\$")}:`).test(source);
+}
+
+/** What fetching our host's own copy of a hollow chunk found: `whole` = it
+ *  declares the missing export; `hollow` = it answered but lacks it too;
+ *  `unknown` = nothing to ask (no URL or name) or no usable answer. */
+export type ChunkCopyProbe = "whole" | "hollow" | "unknown";
+
+/**
+ * Final kind for a boot that died on a hollow chunk. **Only a whole copy on our
+ * host demotes it.** That proves the server is fine and the copy this browser
+ * ran was damaged on the visitor's side: a damaged cache entry, an extension or
+ * security software rewriting the response. A hollow copy on our host is a
+ * broken deploy, and an unanswered probe is no evidence either way, so both
+ * keep the `boot` kind, which pages.
+ */
+export function damagedChunkKind(probe: ChunkCopyProbe): CrashKind {
+  return probe === "whole" ? "chunk-damaged" : "boot";
 }
 
 /**

@@ -32,16 +32,22 @@ import {
   chunkProbeUrl,
   crashSignature,
   CrashThrottle,
+  damagedChunkKind,
+  declaresExport,
   describeError,
   domDesyncMessage,
+  hollowChunkUrl,
   isForeignCodeError,
+  isHollowChunkMessage,
   isNonCrashMessage,
   isUnhandledAbort,
   isUnhandledNetworkFailure,
+  missingExportName,
   moduleEntryFromHtml,
   resolveCrashKind,
   shellProbeVerdict,
   topFrames,
+  type ChunkCopyProbe,
   type ChunkProbe,
   type CrashKind,
   type CrashPayload,
@@ -251,9 +257,65 @@ function report(kind: CrashKind, error: unknown): void {
       void verifyChunkFailure(payload, describeError(error).message);
       return;
     }
+    if (resolvedKind === "boot" && isHollowChunkMessage(payload.message)) {
+      // The boot died on a chunk that loaded without its exports. Ours, only if
+      // our host serves it that way too — ask it before letting the page out.
+      void verifyHollowChunk(payload, describeError(error).message);
+      return;
+    }
     send(payload);
   } catch {
     // A reporter that throws is worse than one that misses a crash.
+  }
+}
+
+/**
+ * Fetch our host's own copy of the chunk a hollow-chunk boot failure names and
+ * send the beacon with the kind that justifies (see [`damagedChunkKind`]). A
+ * whole copy means the visitor's was damaged: counted, never paged. Anything
+ * else keeps `boot`, which pages. Never throws and never rejects, for the same
+ * reason as [`verifyChunkFailure`].
+ */
+async function verifyHollowChunk(payload: CrashPayload, rawMessage: string): Promise<void> {
+  let probe: ChunkCopyProbe = "unknown";
+  try {
+    const origin = typeof location !== "undefined" ? location.origin : "";
+    const url = origin ? hollowChunkUrl(rawMessage, origin) : null;
+    const name = missingExportName(rawMessage);
+    if (url !== null && name !== null) probe = await probeChunkCopy(url, name);
+  } catch {
+    probe = "unknown";
+  }
+  payload.kind = damagedChunkKind(probe);
+  send(payload);
+}
+
+/** Query parameter that keeps the chunk read off every local copy: a URL with an
+ *  unknown query matches neither the precache nor the lazy-asset route's
+ *  `\.js$` pattern, so the worker passes it to the network, and `no-store`
+ *  skips the HTTP cache. (The Pages CDN ignores the query, which is right: its
+ *  copy is the one visitors are served.) */
+const CHUNK_PROBE_PARAM = "dweeb-probe";
+
+/** Ask our own host whether its copy of `url` declares `exportName`. */
+async function probeChunkCopy(url: string, exportName: string): Promise<ChunkCopyProbe> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const res = await fetch(`${url}?${CHUNK_PROBE_PARAM}=${nonce}`, {
+      method: "GET",
+      cache: "no-store",
+      mode: "same-origin",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    if (!res.ok) return "unknown";
+    return declaresExport(await res.text(), exportName) ? "whole" : "hollow";
+  } catch {
+    return "unknown";
+  } finally {
+    globalThis.clearTimeout(timer);
   }
 }
 

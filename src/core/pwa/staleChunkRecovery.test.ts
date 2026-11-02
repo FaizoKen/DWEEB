@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { hollowChunkMessage } from "@/core/telemetry/crashReport";
 
 import {
+  damagedChunkUrl,
   MAX_AUTOMATIC_NAVIGATIONS,
   NAVIGATION_WINDOW_MS,
   hasRefreshParam,
@@ -22,7 +25,7 @@ const NOW = 1_800_000_000_000;
 function input(overrides: Partial<RecoveryPlanInput> = {}): RecoveryPlanInput {
   return {
     bootFinished: false,
-    staleChunk: true,
+    chunkFailure: true,
     buildKey: BUILD_A,
     record: null,
     arrivedViaRefresh: false,
@@ -71,9 +74,9 @@ describe("planStaleChunkRecovery", () => {
   });
 
   it("never navigates for a failure that is not a chunk load — a bug boots identically every time", () => {
-    expect(planStaleChunkRecovery(input({ staleChunk: false }))).toBe("none");
+    expect(planStaleChunkRecovery(input({ chunkFailure: false }))).toBe("none");
     expect(
-      planStaleChunkRecovery(input({ staleChunk: false, record: record(BUILD_A, "reload") })),
+      planStaleChunkRecovery(input({ chunkFailure: false, record: record(BUILD_A, "reload") })),
     ).toBe("none");
   });
 
@@ -240,5 +243,80 @@ describe("refresh nonce URL surgery", () => {
     expect(hasRefreshParam(`?a=1&${REFRESH_PARAM}=n1`)).toBe(true);
     expect(hasRefreshParam(`?${REFRESH_PARAM}`)).toBe(true);
     expect(hasRefreshParam(`?entry=${REFRESH_PARAM}`)).toBe(false);
+  });
+});
+
+describe("a boot that died on a hollow chunk", () => {
+  const ORIGIN = "https://dweeb.faizo.net";
+  const FLOWS = `${ORIGIN}/assets/flows-Cs_Dwe0Q.js`;
+  const hollow = () => new Error(hollowChunkMessage("flows", "webhookFlow", FLOWS));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("names the chunk to repair, and nothing for any other failure", () => {
+    vi.stubGlobal("location", { origin: ORIGIN });
+    expect(damagedChunkUrl(hollow())).toBe(FLOWS);
+    expect(
+      damagedChunkUrl(
+        new Error(
+          "The requested module './guildWebhooks-CY1UaqZE.js' does not provide an export named 'p'",
+        ),
+      ),
+    ).toBe(`${ORIGIN}/assets/guildWebhooks-CY1UaqZE.js`);
+    // A failed load has nothing damaged to delete; a bug has nothing at all.
+    expect(
+      damagedChunkUrl(new Error(`Failed to fetch dynamically imported module: ${FLOWS}`)),
+    ).toBe(null);
+    expect(damagedChunkUrl(new Error(`can't access property "parse", t is undefined`))).toBe(null);
+  });
+
+  it("deletes the damaged copy from every cache and refetches it before it reloads", async () => {
+    // The 2026-11-03 tab: controlled by a worker whose precache held an empty
+    // flows chunk, so a plain reload was answered with the same copy.
+    vi.resetModules();
+    vi.stubEnv("PROD", true);
+    const steps: string[] = [];
+    const caches = ["workbox-precache-v2-https://dweeb.faizo.net/", "dweeb-lazy-assets"];
+    vi.stubGlobal("caches", {
+      keys: async () => caches,
+      open: async (name: string) => ({
+        delete: async (url: string, options: CacheQueryOptions) => {
+          steps.push(`delete ${name} ${url} ${options.ignoreSearch === true}`);
+          return true;
+        },
+      }),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        steps.push(`fetch ${url} ${init.cache}`);
+        return new Response("export{l as webhookFlow};");
+      }),
+    );
+    const store = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+    });
+    vi.stubGlobal("navigator", { onLine: true, serviceWorker: { controller: {} } });
+    vi.stubGlobal("location", { origin: ORIGIN });
+    vi.stubGlobal("window", {
+      location: { reload: () => steps.push("reload") },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    const { recoverFromBootFailure } = await import("./staleChunkRecovery");
+
+    expect(recoverFromBootFailure(hollow(), () => steps.push("stuck"))).toBe("navigating");
+    await vi.waitFor(() => expect(steps).toContain("reload"));
+    expect(steps).toEqual([
+      `delete ${caches[0]} ${FLOWS} true`,
+      `delete ${caches[1]} ${FLOWS} true`,
+      `fetch ${FLOWS} reload`,
+      "reload",
+    ]);
   });
 });

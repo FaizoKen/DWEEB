@@ -8,9 +8,14 @@ import {
   reportBootFailure,
   reportDomDesync,
 } from "@/core/telemetry/reporter";
-import { describeError, isStaleChunkMessage } from "@/core/telemetry/crashReport";
+import {
+  describeError,
+  isHollowChunkMessage,
+  isStaleChunkMessage,
+} from "@/core/telemetry/crashReport";
 import { installDomDesyncGuard } from "@/core/dom/domGuard";
 import {
+  damagedChunkUrl,
   installStaleChunkRecovery,
   recoverFromBootFailure,
   refreshPastStaleShell,
@@ -19,8 +24,11 @@ import {
   bootNoticeCopy,
   markBootShellUpdating,
   renderBootNotice,
+  REPAIRING_COPY,
+  UPDATING_COPY,
   type BootNoticeReason,
 } from "@/core/pwa/bootFailure";
+import { requireBootExports } from "@/core/pwa/bootModules";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
 
@@ -79,7 +87,9 @@ function onBootFailure(error: unknown): void {
   const outcome = recoverFromBootFailure(error, () => showBootFailure(error));
   if (outcome === "in-flight") return;
   if (outcome === "navigating") {
-    markBootShellUpdating();
+    markBootShellUpdating(
+      isHollowChunkMessage(describeError(error).message) ? REPAIRING_COPY : UPDATING_COPY,
+    );
     return;
   }
   showBootFailure(error);
@@ -92,20 +102,27 @@ let bootFailureReported = false;
 function showBootFailure(error: unknown): void {
   const { message } = describeError(error);
   const stale = isStaleChunkMessage(message);
+  // A chunk that loaded hollow: the copy this browser holds is damaged. Its
+  // button repairs that copy and then bypasses, because a plain reload is
+  // answered from the same cache — the 2026-11-03 visitor pressed "Reload"
+  // about ten times in an hour against a damaged precache entry.
+  const damaged = !stale && isHollowChunkMessage(message);
   const reason: BootNoticeReason = stale
     ? navigator.onLine === false
       ? "offline"
       : "stale-chunk"
-    : "error";
+    : damaged
+      ? "damaged"
+      : "error";
   const copy = bootNoticeCopy(
     reason,
     isActivityMode() ? "activity" : "web",
-    stale ? undefined : message,
+    stale || damaged ? undefined : message,
   );
   const button = renderBootNotice(copy);
   if (button) {
     button.addEventListener("click", () => {
-      if (reason !== "stale-chunk") {
+      if (reason !== "stale-chunk" && reason !== "damaged") {
         window.location.reload();
         return;
       }
@@ -117,7 +134,7 @@ function showBootFailure(error: unknown): void {
         button.disabled = false;
         button.textContent = copy.action;
       };
-      if (!refreshPastStaleShell(restore)) restore();
+      if (!refreshPastStaleShell(restore, damagedChunkUrl(error))) restore();
     });
   }
   if (!bootFailureReported) {
@@ -190,8 +207,16 @@ function dismissBootShell(shell: HTMLElement): void {
   globalThis.setTimeout(() => shell.remove(), BOOT_SHELL_EXIT_MS + 300);
 }
 
+// Every boot namespace below goes through `requireBootExports` before use: a
+// chunk that arrives without its exports (a damaged cached copy) otherwise
+// fails later on a property of `undefined`, as the 2026-11-03 page did, and
+// can't be told apart from a bug. See core/pwa/bootModules.
 async function bootActivity(): Promise<void> {
-  const { ActivityApp } = await import("@/activity/ActivityApp");
+  const { ActivityApp } = requireBootExports(
+    await import("@/activity/ActivityApp"),
+    "ActivityApp",
+    ["ActivityApp"],
+  );
   mount(<ActivityApp />);
 }
 
@@ -219,9 +244,17 @@ async function bootWeb(): Promise<void> {
   // the result back to the window that opened us and close — never boot the full
   // app in the popup. These flows are web-only, so they're imported here rather
   // than in the always-run entry, keeping them out of the Activity's payload.
-  const [{ relayPopupIfApplicable }, { botAddFlow, loginFlow, webhookFlow }] = await Promise.all([
+  const [popupFlow, flows] = await Promise.all([
     import("@/core/oauth/popupFlow"),
     import("@/core/oauth/flows"),
+  ]);
+  const { relayPopupIfApplicable } = requireBootExports(popupFlow, "popupFlow", [
+    "relayPopupIfApplicable",
+  ]);
+  const { botAddFlow, loginFlow, webhookFlow } = requireBootExports(flows, "flows", [
+    "webhookFlow",
+    "loginFlow",
+    "botAddFlow",
   ]);
   if (
     relayPopupIfApplicable(webhookFlow) ||
@@ -237,10 +270,17 @@ async function bootWeb(): Promise<void> {
   // (which happens well after this runs), and capturing it lets the Builder's
   // "Install app" menu replay the real native dialog on demand (see
   // core/pwa/installPrompt). A no-op on browsers that never fire it.
-  const [{ App }, { captureInstallPrompt }, { captureSeoAcquisition }] = await Promise.all([
+  const [app, installPrompt, acquisition] = await Promise.all([
     appPromise,
     installPromptPromise,
     acquisitionPromise,
+  ]);
+  const { App } = requireBootExports(app, "App", ["App"]);
+  const { captureInstallPrompt } = requireBootExports(installPrompt, "installPrompt", [
+    "captureInstallPrompt",
+  ]);
+  const { captureSeoAcquisition } = requireBootExports(acquisition, "acquisition", [
+    "captureSeoAcquisition",
   ]);
   captureInstallPrompt();
   // Keep the validated discovery-page handoff through initial routing even

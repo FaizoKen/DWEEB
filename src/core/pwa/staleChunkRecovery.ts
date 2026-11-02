@@ -64,10 +64,25 @@
  * Post-boot chunks are covered by the SW precache and, where a tab is
  * uncontrolled anyway, by `ui/ChunkErrorBoundary`, which turns a failed lazy
  * surface into a "refresh to update" prompt instead of a top-boundary crash.
+ *
+ * **A chunk that loaded without its exports climbs the same ladder, after a
+ * repair** (2026-11-03, `isHollowChunkMessage`). The copy the browser ran was
+ * damaged, most plausibly in the service-worker precache. Navigating alone
+ * cannot fix that. The worker answers a reload from the same entry, and Workbox
+ * keeps any entry it already holds when it installs again, so even the
+ * bypass's unregister + re-register would put the damaged copy back in charge.
+ * Before each step, [`repairDamagedChunk`] deletes that one URL from every
+ * Cache Storage cache (Workbox then fetches it from the network, and its next
+ * install caches it afresh) and refetches it past the HTTP cache.
  */
 
 import { isActivityMode } from "@/core/activity/runtime";
-import { describeError, isStaleChunkMessage } from "@/core/telemetry/crashReport";
+import {
+  describeError,
+  hollowChunkUrl,
+  isHollowChunkMessage,
+  isStaleChunkMessage,
+} from "@/core/telemetry/crashReport";
 
 /** The automatic step already spent on a build, in ladder order. */
 export type RecoveryStep = "reload" | "bypass";
@@ -88,9 +103,10 @@ export interface RecoveryRecord {
 export interface RecoveryPlanInput {
   /** Has the app surface committed? (`dweeb:surface-ready` fired) */
   bootFinished: boolean;
-  /** Is the failure a chunk-load failure at all? Only that class has a shell to
-   *  reload past; a genuine bug in the entry boots identically every time. */
-  staleChunk: boolean;
+  /** Is the failure a chunk that failed to load, or loaded without its exports?
+   *  Only those have a fresh copy to reload onto; a genuine bug in the entry
+   *  boots identically every time. */
+  chunkFailure: boolean;
   /** Identifies the shell currently running — see [`buildKey`]. */
   buildKey: string;
   /** The recorded attempt, if any — `null` when storage is empty or unreadable. */
@@ -127,8 +143,9 @@ export function recentNavigations(record: RecoveryRecord | null, now: number): n
 export function planStaleChunkRecovery(input: RecoveryPlanInput): RecoveryPlan {
   // Past boot a navigation could destroy unsaved editor state — never automatic.
   if (input.bootFinished) return "none";
-  // Only a chunk that failed to load has a fresher shell to reload onto.
-  if (!input.staleChunk) return "none";
+  // Only a chunk that failed to load (or arrived hollow) has a fresh copy to
+  // reload onto.
+  if (!input.chunkFailure) return "none";
   if (recentNavigations(input.record, input.now).length >= MAX_AUTOMATIC_NAVIGATIONS) return "none";
   const spent = input.record?.build === input.buildKey ? input.record.step : null;
   if (spent === null) {
@@ -373,10 +390,70 @@ async function dropServiceWorkers(): Promise<void> {
   }
 }
 
-async function bypassStaleShell(onStuck: () => void): Promise<void> {
+/** How long the damaged-copy repair may hold a navigation back. */
+const REPAIR_TIMEOUT_MS = 4_000;
+
+/**
+ * Put a fresh copy of `url` where the next load will look for it. Deletes it
+ * from every Cache Storage cache on this origin, which today means only
+ * Workbox's: the precache, then serves it from the network until the worker's
+ * next install fetches and caches it again, and the lazy-asset cache. Then
+ * refetches it with `cache: "reload"`, which replaces the browser's HTTP cache
+ * entry too. Bounded, and never throws: the navigation goes ahead either way.
+ */
+async function repairDamagedChunk(url: string): Promise<void> {
+  const repair = (async () => {
+    try {
+      if (typeof caches !== "undefined") {
+        const names = await caches.keys();
+        await Promise.all(
+          names.map(async (name) => {
+            const cache = await caches.open(name);
+            await cache.delete(url, { ignoreSearch: true });
+          }),
+        );
+      }
+    } catch {
+      /* no Cache Storage here, or not allowed: the refetch below still helps */
+    }
+    try {
+      const res = await fetch(url, { cache: "reload", mode: "same-origin" });
+      await res.arrayBuffer();
+    } catch {
+      /* offline or refused: the navigation is still worth trying */
+    }
+  })();
+  const deadline = new Promise<void>((resolve) => {
+    setTimeout(resolve, REPAIR_TIMEOUT_MS);
+  });
+  await Promise.race([repair, deadline]);
+}
+
+/**
+ * The URL of the chunk a boot failure says arrived without its exports, when it
+ * names one of ours; `null` for every other failure, which has nothing to
+ * repair. The boot notice passes it back to [`refreshPastStaleShell`].
+ */
+export function damagedChunkUrl(error: unknown): string | null {
+  const { message } = describeError(error);
+  if (!isHollowChunkMessage(message) || typeof location === "undefined") return null;
+  return hollowChunkUrl(message, location.origin);
+}
+
+async function bypassStaleShell(onStuck: () => void, damaged: string | null): Promise<void> {
+  if (damaged !== null) await repairDamagedChunk(damaged);
   if (!isActivityMode()) await dropServiceWorkers();
   navigate(() => {
     window.location.replace(withRefreshParam(window.location, nonce()));
+  }, onStuck);
+}
+
+async function reloadInPlace(onStuck: () => void, damaged: string | null): Promise<void> {
+  if (damaged !== null) await repairDamagedChunk(damaged);
+  // Reload revalidates the top-level document even inside its HTTP freshness
+  // window. The URL — including the `#hash` share payload — is preserved.
+  navigate(() => {
+    window.location.reload();
   }, onStuck);
 }
 
@@ -399,9 +476,10 @@ export function recoverFromBootFailure(error: unknown, onStuck: () => void): Boo
   const key = buildKey();
   const record = readRecord();
   const now = Date.now();
+  const { message } = describeError(error);
   const plan = planStaleChunkRecovery({
     bootFinished,
-    staleChunk: isStaleChunkMessage(describeError(error).message),
+    chunkFailure: isStaleChunkMessage(message) || isHollowChunkMessage(message),
     buildKey: key,
     record,
     arrivedViaRefresh,
@@ -418,26 +496,21 @@ export function recoverFromBootFailure(error: unknown, onStuck: () => void): Boo
   if (!claimed) return "none";
   reloadInitiated = true;
   armWatchdog(onStuck);
-  if (plan === "reload") {
-    // Reload revalidates the top-level document even inside its HTTP freshness
-    // window. The URL — including the `#hash` share payload — is preserved.
-    navigate(() => {
-      window.location.reload();
-    }, onStuck);
-  } else {
-    void bypassStaleShell(onStuck);
-  }
+  const damaged = damagedChunkUrl(error);
+  if (plan === "reload") void reloadInPlace(onStuck, damaged);
+  else void bypassStaleShell(onStuck, damaged);
   return "navigating";
 }
 
 /**
- * The manual path behind the boot notice's button: the bypass step, on demand.
- * Storage-independent (a person pressing a button cannot loop) and idempotent —
- * returns false, and does nothing, while a navigation is already in flight.
- * Outside production it is a plain reload, since the nonce would never be
- * stripped there.
+ * The manual path behind the boot notice's button: the bypass step, on demand,
+ * after repairing `damaged` when the failure named one (see
+ * [`damagedChunkUrl`]). Storage-independent (a person pressing a button cannot
+ * loop) and idempotent — returns false, and does nothing, while a navigation is
+ * already in flight. Outside production it is a plain reload, since the nonce
+ * would never be stripped there.
  */
-export function refreshPastStaleShell(onStuck: () => void): boolean {
+export function refreshPastStaleShell(onStuck: () => void, damaged: string | null = null): boolean {
   if (reloadInitiated || typeof window === "undefined") return false;
   if (!import.meta.env.PROD) {
     window.location.reload();
@@ -445,7 +518,7 @@ export function refreshPastStaleShell(onStuck: () => void): boolean {
   }
   reloadInitiated = true;
   armWatchdog(onStuck);
-  void bypassStaleShell(onStuck);
+  void bypassStaleShell(onStuck, damaged);
   return true;
 }
 
