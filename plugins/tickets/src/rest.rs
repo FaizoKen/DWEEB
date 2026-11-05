@@ -375,6 +375,26 @@ pub struct Channel {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub permission_overwrites: Vec<RawOverwrite>,
+    /// Read for [`CHANNEL_OBFUSCATED`] only.
+    #[serde(default)]
+    pub flags: u64,
+}
+
+/// Channel flag `CHANNEL_OBFUSCATED` (2026-08-12): a channel the bot can't
+/// view, its name replaced by `___hidden___` and its overwrites by a single
+/// `@everyone` deny. Discord obfuscates over the Gateway and, from 2026-11-16,
+/// leaves such channels out of `GET /guilds/{id}/channels` altogether. One
+/// that arrives anyway is dropped (see [`visible`]), so the pickers and the
+/// placement check treat it exactly as they will once Discord omits it. The
+/// flag — never the name — is the documented test.
+pub const CHANNEL_OBFUSCATED: u64 = 1 << 17;
+
+/// The channels the bot can view.
+fn visible(channels: Vec<Channel>) -> Vec<Channel> {
+    channels
+        .into_iter()
+        .filter(|c| c.flags & CHANNEL_OBFUSCATED == 0)
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -645,15 +665,20 @@ impl Discord {
             guild.name,
             bot,
             roles,
-            channels,
+            visible(channels),
             &member.roles,
         ))
     }
 
-    /// A guild's channels, as the bot sees them (every channel, whatever its
-    /// permissions).
+    /// A guild's channels **the bot can view**. Until 2026-11-16 Discord
+    /// listed every channel whatever the bot's permissions; from then on it
+    /// omits the ones the bot can't see (and an obfuscated one is dropped
+    /// here), so a channel missing from this list may exist but be hidden
+    /// from the bot.
     pub async fn guild_channels(&self, guild_id: &str) -> Result<Vec<Channel>, ConnectError> {
-        self.get_json(&format!("/guilds/{guild_id}/channels")).await
+        self.get_json(&format!("/guilds/{guild_id}/channels"))
+            .await
+            .map(visible)
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T, ConnectError> {
@@ -1865,7 +1890,23 @@ mod tests {
             position,
             parent_id: parent.map(Into::into),
             permission_overwrites: ow,
+            flags: 0,
         }
+    }
+
+    #[test]
+    fn a_channel_the_bot_cannot_view_is_dropped_by_its_flag() {
+        let mut hidden = channel("5", 0, 0, None, vec![]);
+        hidden.name = "___hidden___".into();
+        hidden.flags = CHANNEL_OBFUSCATED;
+        let mut pinned_forum = channel("6", 15, 1, None, vec![]);
+        pinned_forum.flags = 1 << 4; // REQUIRE_TAG: any other flag keeps it
+        let kept: Vec<String> =
+            visible(vec![hidden, pinned_forum, channel("7", 0, 2, None, vec![])])
+                .into_iter()
+                .map(|c| c.id)
+                .collect();
+        assert_eq!(kept, vec!["6".to_string(), "7".to_string()]);
     }
 
     fn raw_ow(id: &str, allow: u64, deny: u64) -> RawOverwrite {

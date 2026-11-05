@@ -314,7 +314,9 @@ async fn verify_placement(state: &AppState, cfg: &InstanceConfig) -> Option<Resp
         let refusal = match channels.iter().find(|c| c.id == log) {
             Some(c) if rest::is_text_channel(c.kind) => None,
             Some(_) => Some("The log channel must be a text channel."),
-            None => Some("That log channel isn't in this server — pick one from the list."),
+            None => Some(
+                "That log channel isn't in this server, or the bot can't see it — pick one from the list.",
+            ),
         };
         if let Some(text) = refusal {
             return Some(bad_request(text.into()));
@@ -327,7 +329,7 @@ async fn verify_placement(state: &AppState, cfg: &InstanceConfig) -> Option<Resp
                 "Ticket threads need a plain text channel — Discord can't make private threads in announcement, forum or voice channels.",
             ),
             None => Some(
-                "A ticket channel isn't in this server any more — pick it again from the list.",
+                "A ticket channel isn't in this server any more, or the bot can't see it — pick it again from the list.",
             ),
         };
         if let Some(text) = refusal {
@@ -341,7 +343,7 @@ async fn verify_placement(state: &AppState, cfg: &InstanceConfig) -> Option<Resp
     });
     stray.then(|| {
         bad_request(
-            "A ticket category isn't in this server any more — pick it again from the list.".into(),
+            "A ticket category isn't in this server any more, or the bot can't see it — pick it again from the list.".into(),
         )
     })
 }
