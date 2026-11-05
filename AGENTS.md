@@ -798,7 +798,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `GET /guilds/{id}/members` is gated behind Discord's privileged **GUILD_MEMBERS (Server
   Members) intent**, and nothing ungated substitutes: `/members/search` requires a name prefix
   and cannot filter by role, and the role object carries no member count — verified against
-  Discord's docs, not assumed. It originally shipped as a graceful degradation (full roster +
+  Discord's docs, not assumed. (*How many* hold a role is a different question: Discord added
+  `GET /guilds/{id}/roles/member-counts` on 2025-12-09, a count per role with no intent, and
+  the roster's opt-in `show_role_counts` reads it — a number, never a name. It rides beside the
+  three structure reads and never fails them; a role it gives no count for shows none, never
+  `0`.) It originally shipped as a graceful degradation (full roster +
   one "Member lists aren't available right now." line, logged at info), which was correct
   engineering but wrong product: **prod has the intent off permanently by the maintainer's
   decision**, so the only thing that feature ever did in practice was put an apology in the
@@ -2892,6 +2896,72 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   at the last deploy. `kind=stale-chunk` from the *live* build (`TemplateGallery`, `headline-*.css`)
   is mislabelled, not broken: those chunks answer 200, and a boundary-handled failure isn't probed. It's
   a fetch that lost (a visitor leaving mid-load, a dropped connection), at info, and needs nothing.
+- **Discord API audit 2026-11-06 — what changed on Discord's side, and what DWEEB now relies on.**
+  Read off Discord's changelog (docs.discord.com/developers/change-log) back to the CV2 launch;
+  everything below is Discord-documented behaviour, each fix guarded by tests named after it.
+  (1) **Modal Form builds Label modals** (Discord deprecated the Action Row + labelled Text Input
+  modal on 2025-08-25, and every modal input added since exists only inside a Label). Each
+  question is a Label (`label` ≤45, `description` ≤100) around one input chosen by the field's
+  `kind`: `text` (Text Input, `style` short/paragraph), `select` (String Select, 1–25 options),
+  `radio` (Radio Group 21, 2–10), `checkboxes` (Checkbox Group 22, 1–10), `checkbox` (Checkbox
+  23 — Discord **can't make it required**, so validation refuses that and the builder never sends
+  it), `user`/`role`/`mentionable`/`channel` (selects 5–8). An optional `intro` Text Display takes
+  one of the modal's **five** top-level slots. A form saved before kinds existed has no `kind` and
+  reads as the text inputs it always was. The submit parser reads wrappers **by shape**
+  (`component` = Label, `components` = a legacy Action Row from a modal opened before a deploy),
+  never only by `type`, and words each answer for the forward: a choice by its label, a checkbox
+  Yes/No, a pick as a mention (snowflakes only — a forged value never becomes markup; a
+  mentionable is a user when Discord's `resolved.users` names it). `required` + `min_values: 0`
+  is refused (Discord: min must be omitted or ≥1 when required); a select can't ask for more
+  picks than it has options; modals refuse `disabled`, so it is never sent. **File Upload (19) is
+  deliberately not offered**: the uploads are ephemeral interaction attachments, so forwarding
+  them durably means downloading and re-uploading up to 10 × 20 MiB per submission on a small
+  host — a product decision, not a missing field. No deploy ordering (the config page ships
+  inside the service). (2) **Channel obfuscation**: from **2026-11-16** `GET
+  /guilds/{id}/channels` omits every channel the bot can't view (the Gateway already sends them as
+  `___hidden___` with flag `CHANNEL_OBFUSCATED`, `1 << 17`). The proxy (`visible_channels`),
+  Directory and Tickets drop any channel carrying that flag — **the flag, never the name**, as the
+  docs insist — and every "isn't in this server" refusal now also says "or the bot can't see it",
+  which after that date is the likelier cause. Interaction payloads are not obfuscated.
+  (3) **Creating or moving a webhook checks the member's permission *in that channel***
+  (`ensure_may_add_webhook_here`, routes.rs): Discord gates both on Manage Webhooks in the channel,
+  which an overwrite can deny to someone holding it server-wide, and DWEEB's bot makes those calls
+  with its own broader permissions — a confused deputy until Discord's 2026-10-30
+  `GET /channels/{c}/permissions/member/{u}` let the proxy ask (bot token; Discord computes roles,
+  `@everyone`, overwrites and implicit masking). Owners and Administrators skip the read
+  (`overrides_channel_overwrites`, nothing restricts them); Unknown Member → 403; a 403 from Discord
+  (the bot can't view the channel) or Unknown Channel → a 404 naming the fix, never a 5xx. Applied
+  on web create/move, the Activity's and MCP's mint path (`require_dweeb_webhook`). **Posting through
+  an existing webhook stays a server-wide decision**, like Discord's own server settings, which
+  show every webhook's URL to whoever manages webhooks; don't widen the per-channel read to every
+  post without that decision. (4) **Component embeds** (2026-10-05): a site's `<head>` can carry
+  `<script id="discord:component-embed" type="application/json">{"component": <Container>}</script>`
+  and its links unfurl in Discord as that layout. `core/linkPreview/componentEmbed.ts` holds the
+  rules (one Container, types 1/2/9/10/11/12/14 only, link buttons with only
+  `id/type/url/style/label/emoji/disabled` and a label or emoji, http(s) media ≤2048 chars in
+  .png/.gif/.jpg/.jpeg/.webp/.avif/.mp4/.webm/.mov, ≤10 gallery items embed-wide, ≤40 components,
+  **≤3,000 bytes with escapes counted**) and rebuilds every node from a per-type key allowlist,
+  because Discord documents that some violations show **no preview at all** instead of the og:
+  fallback. It powers the Code tab's **Website → Link preview** target and a card on every
+  generated page (`linkPreviewCard`, layout.ts; one switch `LINK_PREVIEW_CARDS` turns them all off;
+  `index.html`/`/` and `404.html` carry none yet). The SEO audit re-validates each page's payload
+  with `componentEmbedViolations`, which shares no code path with the builder. Unverified until
+  deployed — Discord's Embed Debugger (discord.com/developers/embeds) takes a public URL only:
+  after a deploy, run a template page through it, and share with `?v=2` to dodge the ~30-minute
+  preview cache. (5) **Discord's default upload limit is 20 MiB per file** since 2026-09-03 (was
+  10): `DISCORD_DEFAULT_UPLOAD_LIMIT_BYTES` (lib/fileUpload.ts) drives the picker's oversize
+  warning and the web 413 copy; webhooks get the *server's* limit (boosts raise it, the poster's
+  Nitro doesn't). The Activity's 32 MiB multipart bound stays — a memory bound, not Discord's.
+  (6) **RFC 9207 `iss`**: Discord's authorization responses carry `iss=https://discord.com` since
+  2026-10-14; `/auth/callback` refuses a present, different issuer (exact string compare) and
+  accepts an absent one (Discord is our only authorization server, so no mix-up is possible and
+  refusing absence would only add a failure mode). DWEEB's own MCP authorization server now sends
+  `iss` on every authorization response, errors included, and advertises
+  `authorization_response_iss_parameter_supported`. (7) Already right, checked: every read-only
+  media field Discord added (`placeholder`, `placeholder_version`, `flags`,
+  `content_scan_metadata`) is stripped on export by all four lists; the Activity SDK uses no
+  renamed participants call; no flow touches pins, guild creation, or Get Current User Guilds'
+  large-sharding `shard` param.
 
 ## CI
 
