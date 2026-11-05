@@ -12,7 +12,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::store::{InstanceConfig, ModalDef, ReplyDef};
+use crate::store::{kind, InstanceConfig, ModalDef, ModalField, ReplyDef};
 
 // Interaction request types.
 pub const TYPE_PING: u8 = 1;
@@ -25,10 +25,24 @@ const RESPONSE_CHANNEL_MESSAGE: u8 = 4;
 const RESPONSE_MODAL: u8 = 9;
 
 // Component / flag constants.
-const COMPONENT_ACTION_ROW: u8 = 1;
-const COMPONENT_TEXT_INPUT: u8 = 4;
-const COMPONENT_TEXT_DISPLAY: u8 = 10;
-const COMPONENT_CONTAINER: u8 = 17;
+const COMPONENT_STRING_SELECT: u64 = 3;
+const COMPONENT_TEXT_INPUT: u64 = 4;
+const COMPONENT_USER_SELECT: u64 = 5;
+const COMPONENT_ROLE_SELECT: u64 = 6;
+const COMPONENT_MENTIONABLE_SELECT: u64 = 7;
+const COMPONENT_CHANNEL_SELECT: u64 = 8;
+const COMPONENT_TEXT_DISPLAY: u64 = 10;
+const COMPONENT_CONTAINER: u64 = 17;
+/// A modal question's frame: its label and description, around one input.
+/// Discord deprecated the Action Row + labelled Text Input modal (2025-08-25)
+/// in its favour, and every modal-only input added since — selects, radio
+/// groups, checkboxes — exists only inside one.
+const COMPONENT_LABEL: u64 = 18;
+const COMPONENT_RADIO_GROUP: u64 = 21;
+const COMPONENT_CHECKBOX_GROUP: u64 = 22;
+const COMPONENT_CHECKBOX: u64 = 23;
+/// Discord allows at most this many top-level components in a modal.
+pub const MAX_MODAL_COMPONENTS: usize = 5;
 const TEXT_INPUT_SHORT: u8 = 1;
 const TEXT_INPUT_PARAGRAPH: u8 = 2;
 /// Discord's text-input ceiling, used to clamp min/max length and prefills.
@@ -127,23 +141,17 @@ pub struct Interaction {
 pub struct InteractionData {
     #[serde(default)]
     pub custom_id: Option<String>,
-    /// Present on MODAL_SUBMIT: action rows holding the submitted text inputs.
+    /// Present on MODAL_SUBMIT: one entry per top-level modal component — a
+    /// Label wrapping the answered input, a Text Display (no answer), or, for
+    /// a modal opened before the Label upgrade was deployed, an Action Row
+    /// holding a Text Input. Read loosely by [`collect_modal_values`], since an
+    /// unknown shape must cost one answer, never the whole submission.
     #[serde(default)]
-    pub components: Option<Vec<ModalRow>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ModalRow {
+    pub components: Option<Vec<Value>>,
+    /// Users, roles and channels the member picked, as Discord resolved them.
+    /// Read only to tell a mentionable pick's users from its roles.
     #[serde(default)]
-    pub components: Vec<ModalRowChild>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ModalRowChild {
-    #[serde(default)]
-    pub custom_id: Option<String>,
-    #[serde(default)]
-    pub value: Option<String>,
+    pub resolved: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,19 +190,118 @@ impl Interaction {
     }
 }
 
-/// Flatten the submitted modal fields into `(field_id, value)` pairs.
-pub fn collect_modal_values(data: &InteractionData) -> Vec<(String, String)> {
+/// Flatten the submitted modal into `(field_id, answer)` pairs, in the
+/// modal's order, each answer already worded for the forwarded message: text
+/// as typed, a choice by its label (not its stored value), a checkbox as
+/// Yes/No, and a picked member, role or channel as its mention. An empty
+/// answer is an empty string (the forward shows a dash for it).
+pub fn collect_modal_values(data: &InteractionData, modal: &ModalDef) -> Vec<(String, String)> {
+    let resolved = data.resolved.as_ref();
     let mut out = Vec::new();
-    if let Some(rows) = &data.components {
-        for row in rows {
-            for child in &row.components {
-                if let (Some(id), Some(value)) = (&child.custom_id, &child.value) {
-                    out.push((id.clone(), value.clone()));
-                }
+    // Read by shape, not by `type`: a Label carries one `component`, an Action
+    // Row (a modal opened before the Label upgrade, submitted after it) a
+    // `components` list, and a Text Display — which answers nothing — neither.
+    // An answer is never dropped over a discriminator.
+    for top in data.components.iter().flatten() {
+        if let Some(child) = top.get("component") {
+            out.extend(answer_of(child, modal, resolved));
+        } else if let Some(children) = top.get("components").and_then(Value::as_array) {
+            for child in children {
+                out.extend(answer_of(child, modal, resolved));
             }
         }
     }
     out
+}
+
+/// One submitted input's `(field_id, answer)`, or `None` when it carries no
+/// custom id at all.
+fn answer_of(
+    child: &Value,
+    modal: &ModalDef,
+    resolved: Option<&Value>,
+) -> Option<(String, String)> {
+    let id = child.get("custom_id").and_then(Value::as_str)?.to_string();
+    let field = modal.fields.iter().find(|f| f.id == id);
+    let strings = |key: &str| -> Vec<String> {
+        child
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+    let answer = match child.get("type").and_then(Value::as_u64) {
+        Some(COMPONENT_STRING_SELECT | COMPONENT_CHECKBOX_GROUP) => {
+            choice_labels(field, &strings("values"))
+        }
+        Some(COMPONENT_RADIO_GROUP) => {
+            let picked: Vec<String> = child
+                .get("value")
+                .and_then(Value::as_str)
+                .map(|v| vec![v.to_string()])
+                .unwrap_or_default();
+            choice_labels(field, &picked)
+        }
+        Some(COMPONENT_CHECKBOX) => match child.get("value").and_then(Value::as_bool) {
+            Some(true) => "Yes".to_string(),
+            Some(false) => "No".to_string(),
+            None => String::new(),
+        },
+        Some(COMPONENT_USER_SELECT) => mentions(&strings("values"), |id| format!("<@{id}>")),
+        Some(COMPONENT_ROLE_SELECT) => mentions(&strings("values"), |id| format!("<@&{id}>")),
+        Some(COMPONENT_CHANNEL_SELECT) => mentions(&strings("values"), |id| format!("<#{id}>")),
+        Some(COMPONENT_MENTIONABLE_SELECT) => {
+            let is_user = |id: &str| {
+                resolved
+                    .and_then(|r| r.get("users"))
+                    .and_then(|u| u.get(id))
+                    .is_some()
+            };
+            mentions(&strings("values"), |id| {
+                if is_user(id) {
+                    format!("<@{id}>")
+                } else {
+                    format!("<@&{id}>")
+                }
+            })
+        }
+        // A Text Input (4), or a type this build doesn't know but which
+        // carries a plain `value`: take the text.
+        _ => child
+            .get("value")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    };
+    Some((id, answer))
+}
+
+/// Picked option values, worded by their labels where the form still has them.
+fn choice_labels(field: Option<&ModalField>, picked: &[String]) -> String {
+    picked
+        .iter()
+        .map(|value| {
+            field
+                .and_then(|f| f.options.iter().find(|o| &o.value == value))
+                .map(|o| o.label.clone())
+                .unwrap_or_else(|| value.clone())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Snowflake picks as mentions. Anything that isn't a snowflake is dropped:
+/// a submission is member input, and an id pasted into a mention must not be
+/// able to carry markdown into the forwarded message.
+fn mentions(ids: &[String], mention: impl Fn(&str) -> String) -> String {
+    ids.iter()
+        .filter(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()))
+        .map(|id| mention(id))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 // ── Outgoing callbacks ───────────────────────────────────────────────────────
@@ -215,15 +322,135 @@ pub fn ephemeral_text(content: &str) -> Value {
     })
 }
 
-/// Build the MODAL callback from a stored modal definition. Carries each text
-/// input's style, required flag, placeholder, prefilled value, and length
-/// bounds — every property Discord's text input supports.
+/// Build the MODAL callback from a stored modal definition: the optional
+/// intro as a Text Display, then one Label per question — its label and
+/// description around the input the question's kind names (a text input, a
+/// select, a radio or checkbox group, a checkbox). At most five in all.
 pub fn modal_response(submit_custom_id: &str, modal: &ModalDef) -> Value {
-    let rows: Vec<Value> = modal
-        .fields
-        .iter()
-        .take(5) // Discord allows at most 5 rows in a modal.
-        .map(|f| {
+    let mut components: Vec<Value> = Vec::new();
+    if let Some(intro) = modal.intro_text() {
+        components.push(json!({
+            "type": COMPONENT_TEXT_DISPLAY,
+            "content": clamp(intro, crate::validate::MAX_INTRO),
+        }));
+    }
+    for f in &modal.fields {
+        if components.len() >= MAX_MODAL_COMPONENTS {
+            break;
+        }
+        let mut label = json!({
+            "type": COMPONENT_LABEL,
+            "label": clamp(&f.label, 45),
+            "component": field_input(f),
+        });
+        if let Some(d) = f
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+        {
+            label["description"] = json!(clamp(d, 100));
+        }
+        components.push(label);
+    }
+
+    json!({
+        "type": RESPONSE_MODAL,
+        "data": {
+            "custom_id": submit_custom_id,
+            "title": clamp(&modal.title, 45),
+            "components": components,
+        }
+    })
+}
+
+/// The input inside a question's Label. No `label` here: inside a Label it is
+/// the Label's, and on a Text Input Discord deprecated it.
+fn field_input(f: &ModalField) -> Value {
+    let custom_id = clamp(&f.id, 100);
+    let options = || -> Vec<Value> {
+        f.options
+            .iter()
+            .map(|o| {
+                let mut opt = json!({
+                    "label": clamp(&o.label, 100),
+                    "value": clamp(&o.value, 100),
+                });
+                if let Some(d) = o.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                    opt["description"] = json!(clamp(d, 100));
+                }
+                if o.default {
+                    opt["default"] = json!(true);
+                }
+                opt
+            })
+            .collect()
+    };
+    let picks = |input: &mut Value| {
+        if let Some(min) = f.min_values {
+            input["min_values"] = json!(min);
+        }
+        if let Some(max) = f.max_values {
+            input["max_values"] = json!(max);
+        }
+    };
+    let placeholder = |input: &mut Value| {
+        if let Some(p) = f.placeholder.as_deref().filter(|p| !p.trim().is_empty()) {
+            input["placeholder"] = json!(clamp(p, 150));
+        }
+    };
+    match f.kind.as_str() {
+        kind::SELECT => {
+            let mut input = json!({
+                "type": COMPONENT_STRING_SELECT,
+                "custom_id": custom_id,
+                "options": options(),
+                "required": f.required,
+            });
+            picks(&mut input);
+            placeholder(&mut input);
+            input
+        }
+        kind::RADIO => json!({
+            "type": COMPONENT_RADIO_GROUP,
+            "custom_id": custom_id,
+            "options": options(),
+            "required": f.required,
+        }),
+        kind::CHECKBOXES => {
+            let mut input = json!({
+                "type": COMPONENT_CHECKBOX_GROUP,
+                "custom_id": custom_id,
+                "options": options(),
+                "required": f.required,
+            });
+            picks(&mut input);
+            input
+        }
+        // Discord can't make a lone checkbox required; never send the field.
+        kind::CHECKBOX => json!({
+            "type": COMPONENT_CHECKBOX,
+            "custom_id": custom_id,
+            "default": f.checked,
+        }),
+        kind::USER | kind::ROLE | kind::MENTIONABLE | kind::CHANNEL => {
+            let component = match f.kind.as_str() {
+                kind::USER => COMPONENT_USER_SELECT,
+                kind::ROLE => COMPONENT_ROLE_SELECT,
+                kind::MENTIONABLE => COMPONENT_MENTIONABLE_SELECT,
+                _ => COMPONENT_CHANNEL_SELECT,
+            };
+            let mut input = json!({
+                "type": component,
+                "custom_id": custom_id,
+                "required": f.required,
+            });
+            picks(&mut input);
+            placeholder(&mut input);
+            input
+        }
+        // kind::TEXT, and anything validation would have refused.
+        _ => {
             let style = if f.style == "paragraph" {
                 TEXT_INPUT_PARAGRAPH
             } else {
@@ -231,12 +458,11 @@ pub fn modal_response(submit_custom_id: &str, modal: &ModalDef) -> Value {
             };
             let mut input = json!({
                 "type": COMPONENT_TEXT_INPUT,
-                "custom_id": clamp(&f.id, 100),
-                "label": clamp(&f.label, 45),
+                "custom_id": custom_id,
                 "style": style,
                 "required": f.required,
             });
-            if let Some(p) = &f.placeholder {
+            if let Some(p) = f.placeholder.as_deref().filter(|p| !p.is_empty()) {
                 input["placeholder"] = json!(clamp(p, 100));
             }
             if let Some(v) = &f.value {
@@ -250,18 +476,9 @@ pub fn modal_response(submit_custom_id: &str, modal: &ModalDef) -> Value {
             if let Some(m) = f.max_length {
                 input["max_length"] = json!(m.clamp(1, TEXT_INPUT_MAX));
             }
-            json!({ "type": COMPONENT_ACTION_ROW, "components": [input] })
-        })
-        .collect();
-
-    json!({
-        "type": RESPONSE_MODAL,
-        "data": {
-            "custom_id": submit_custom_id,
-            "title": clamp(&modal.title, 45),
-            "components": rows,
+            input
         }
-    })
+    }
 }
 
 /// Reply to the user (ephemeral) with whichever the instance is configured for:
@@ -396,12 +613,7 @@ mod tests {
         ModalField {
             id: id.into(),
             label: label.into(),
-            style: "short".into(),
-            required: false,
-            placeholder: None,
-            value: None,
-            min_length: None,
-            max_length: None,
+            ..ModalField::default()
         }
     }
 
@@ -409,6 +621,7 @@ mod tests {
         InstanceConfig {
             modal: ModalDef {
                 title: "Application".into(),
+                intro: None,
                 fields: vec![field("f1", "Name"), field("f2", "Why")],
             },
             forward_webhook: "https://discord.com/api/webhooks/1/tok".into(),
@@ -434,29 +647,199 @@ mod tests {
             .to_string()
     }
 
+    fn submit(components: Value, resolved: Option<Value>) -> InteractionData {
+        serde_json::from_value(json!({
+            "custom_id": "modalform:submit:x",
+            "components": components,
+            "resolved": resolved,
+        }))
+        .unwrap()
+    }
+
+    /// A modal opened before the Label upgrade was deployed still submits in
+    /// the old Action Row shape, and its answers must still arrive.
     #[test]
-    fn collect_flattens_submitted_values_in_order() {
-        let data = InteractionData {
-            custom_id: Some("modalform:submit:x".into()),
-            components: Some(vec![
-                ModalRow {
-                    components: vec![ModalRowChild {
-                        custom_id: Some("f1".into()),
-                        value: Some("Ada".into()),
-                    }],
-                },
-                ModalRow {
-                    components: vec![ModalRowChild {
-                        custom_id: Some("f2".into()),
-                        value: Some("Because".into()),
-                    }],
-                },
+    fn collect_reads_a_legacy_action_row_submission() {
+        let data = submit(
+            json!([
+                { "type": 1, "components": [{ "type": 4, "custom_id": "f1", "value": "Ada" }] },
+                { "type": 1, "components": [{ "type": 4, "custom_id": "f2", "value": "Because" }] },
             ]),
-        };
+            None,
+        );
         assert_eq!(
-            collect_modal_values(&data),
+            collect_modal_values(&data, &base_cfg().modal),
             vec![("f1".into(), "Ada".into()), ("f2".into(), "Because".into())]
         );
+    }
+
+    fn option(label: &str, value: &str) -> crate::store::FieldOption {
+        crate::store::FieldOption {
+            label: label.into(),
+            value: value.into(),
+            ..Default::default()
+        }
+    }
+
+    fn every_kind_modal() -> ModalDef {
+        let with = |id: &str, kind_: &str, options: Vec<crate::store::FieldOption>| ModalField {
+            id: id.into(),
+            label: id.into(),
+            kind: kind_.into(),
+            options,
+            ..ModalField::default()
+        };
+        ModalDef {
+            title: "Every kind".into(),
+            intro: Some("Read the **rules** first.".into()),
+            fields: vec![
+                with("text", kind::TEXT, vec![]),
+                with(
+                    "pick",
+                    kind::SELECT,
+                    vec![option("Europe", "eu"), option("Asia", "as")],
+                ),
+                with(
+                    "one",
+                    kind::RADIO,
+                    vec![option("Yes please", "y"), option("No thanks", "n")],
+                ),
+                with(
+                    "many",
+                    kind::CHECKBOXES,
+                    vec![option("Mod", "m"), option("Events", "e")],
+                ),
+            ],
+        }
+    }
+
+    /// The Label-shaped submission: each answer worded for the forward.
+    #[test]
+    fn collect_words_every_kind_of_answer() {
+        let modal = every_kind_modal();
+        let data = submit(
+            json!([
+                { "type": 10, "id": 1 },
+                { "type": 18, "id": 2, "component": { "type": 4, "id": 3, "custom_id": "text", "value": "hello" } },
+                { "type": 18, "id": 4, "component": { "type": 3, "id": 5, "custom_id": "pick", "values": ["as"] } },
+                { "type": 18, "id": 6, "component": { "type": 21, "id": 7, "custom_id": "one", "value": "n" } },
+                { "type": 18, "id": 8, "component": { "type": 22, "id": 9, "custom_id": "many", "values": ["m", "e"] } },
+                { "type": 18, "id": 10, "component": { "type": 23, "id": 11, "custom_id": "agree", "value": true } },
+                { "type": 18, "id": 12, "component": { "type": 5, "custom_id": "who", "values": ["111111111111111111"] } },
+                { "type": 18, "id": 13, "component": { "type": 6, "custom_id": "role", "values": ["222222222222222222"] } },
+                { "type": 18, "id": 14, "component": { "type": 8, "custom_id": "where", "values": ["333333333333333333"] } },
+                { "type": 18, "id": 15, "component": { "type": 7, "custom_id": "ment",
+                    "values": ["444444444444444444", "555555555555555555"] } },
+            ]),
+            Some(
+                json!({ "users": { "444444444444444444": { "id": "444444444444444444" } },
+                         "roles": { "555555555555555555": { "id": "555555555555555555" } } }),
+            ),
+        );
+        let got = collect_modal_values(&data, &modal);
+        let answer = |id: &str| got.iter().find(|(k, _)| k == id).map(|(_, v)| v.as_str());
+        assert_eq!(answer("text"), Some("hello"));
+        // Choices by their labels, never their stored values.
+        assert_eq!(answer("pick"), Some("Asia"));
+        assert_eq!(answer("one"), Some("No thanks"));
+        assert_eq!(answer("many"), Some("Mod, Events"));
+        assert_eq!(answer("agree"), Some("Yes"));
+        assert_eq!(answer("who"), Some("<@111111111111111111>"));
+        assert_eq!(answer("role"), Some("<@&222222222222222222>"));
+        assert_eq!(answer("where"), Some("<#333333333333333333>"));
+        // A mentionable pick is a user when Discord resolved it as one.
+        assert_eq!(
+            answer("ment"),
+            Some("<@444444444444444444>, <@&555555555555555555>")
+        );
+        // The Text Display answered nothing; the order is the modal's.
+        assert_eq!(got.len(), 9);
+        assert_eq!(got[0].0, "text");
+    }
+
+    /// An unpicked choice is empty (the forward shows a dash), and a pick that
+    /// isn't a snowflake never becomes a mention.
+    #[test]
+    fn empty_and_forged_picks_say_nothing() {
+        let modal = every_kind_modal();
+        let data = submit(
+            json!([
+                { "type": 18, "component": { "type": 21, "custom_id": "one", "value": null } },
+                { "type": 18, "component": { "type": 22, "custom_id": "many", "values": [] } },
+                { "type": 18, "component": { "type": 5, "custom_id": "who", "values": ["1)**bold**", ""] } },
+            ]),
+            None,
+        );
+        let got = collect_modal_values(&data, &modal);
+        assert!(got.iter().all(|(_, v)| v.is_empty()), "{got:?}");
+    }
+
+    #[test]
+    fn the_modal_is_built_from_labels_around_each_kind_of_input() {
+        let mut modal = every_kind_modal();
+        modal.fields[1].required = true;
+        modal.fields[1].max_values = Some(2);
+        modal.fields[1].placeholder = Some("Pick one".into());
+        modal.fields[2].options[0].default = true;
+        modal.fields[3].description = Some("Pick all that apply".into());
+        let v = modal_response("modalform:submit:x", &modal);
+        let comps = v["data"]["components"].as_array().unwrap();
+        // The intro takes the first of the five slots.
+        assert_eq!(comps.len(), 5);
+        assert_eq!(comps[0]["type"], 10);
+        assert_eq!(comps[0]["content"], "Read the **rules** first.");
+        for label in &comps[1..] {
+            assert_eq!(label["type"], 18);
+            // The label lives on the Label, never on the input.
+            assert!(label["component"].get("label").is_none(), "{label}");
+        }
+        assert_eq!(comps[1]["component"]["type"], 4);
+        let select = &comps[2]["component"];
+        assert_eq!(select["type"], 3);
+        assert_eq!(select["required"], true);
+        assert_eq!(select["max_values"], 2);
+        assert_eq!(select["placeholder"], "Pick one");
+        assert_eq!(select["options"][1]["value"], "as");
+        assert!(select.get("disabled").is_none(), "modals refuse `disabled`");
+        let radio = &comps[3]["component"];
+        assert_eq!(radio["type"], 21);
+        assert_eq!(radio["options"][0]["default"], true);
+        assert!(radio["options"][1].get("default").is_none());
+        assert_eq!(comps[4]["description"], "Pick all that apply");
+        assert_eq!(comps[4]["component"]["type"], 22);
+    }
+
+    #[test]
+    fn a_checkbox_is_never_sent_as_required() {
+        let mut f = field("agree", "I agree to the rules");
+        f.kind = kind::CHECKBOX.into();
+        f.required = true;
+        f.checked = true;
+        let input = field_input(&f);
+        assert_eq!(input["type"], 23);
+        assert_eq!(input["default"], true);
+        assert!(input.get("required").is_none(), "{input}");
+    }
+
+    #[test]
+    fn entity_selects_carry_their_picks_and_placeholder() {
+        for (k, t) in [
+            (kind::USER, 5),
+            (kind::ROLE, 6),
+            (kind::MENTIONABLE, 7),
+            (kind::CHANNEL, 8),
+        ] {
+            let mut f = field("p", "Pick");
+            f.kind = k.into();
+            f.min_values = Some(1);
+            f.max_values = Some(3);
+            f.placeholder = Some("Choose".into());
+            let input = field_input(&f);
+            assert_eq!(input["type"], t, "{k}");
+            assert_eq!(input["min_values"], 1);
+            assert_eq!(input["max_values"], 3);
+            assert_eq!(input["placeholder"], "Choose");
+        }
     }
 
     #[test]
@@ -535,10 +918,14 @@ mod tests {
         f.style = "paragraph".into();
         let modal = ModalDef {
             title: "Report".into(),
+            intro: None,
             fields: vec![f],
         };
         let v = modal_response("modalform:submit:x", &modal);
-        let input = &v["data"]["components"][0]["components"][0];
+        let label = &v["data"]["components"][0];
+        assert_eq!(label["type"], 18);
+        assert_eq!(label["label"], "Bug");
+        let input = &label["component"];
         assert_eq!(input["custom_id"], "f1");
         assert_eq!(input["style"], TEXT_INPUT_PARAGRAPH);
         assert_eq!(input["value"], "Steps:\n1. ");

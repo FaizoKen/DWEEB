@@ -12,28 +12,155 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// What a question asks the member for — the component inside its Label.
+///
+/// Every form saved before 2026-11-05 carries no `kind` and was all text
+/// inputs, which is what an absent kind reads as.
+pub mod kind {
+    /// A Text Input (4); `style` picks short or paragraph.
+    pub const TEXT: &str = "text";
+    /// A String Select (3): a dropdown of the field's `options`.
+    pub const SELECT: &str = "select";
+    /// A Radio Group (21): exactly one of 2–10 `options`, shown at once.
+    pub const RADIO: &str = "radio";
+    /// A Checkbox Group (22): any number of 1–10 `options`.
+    pub const CHECKBOXES: &str = "checkboxes";
+    /// A single Checkbox (23): yes or no. Discord can't make it required.
+    pub const CHECKBOX: &str = "checkbox";
+    /// A User Select (5).
+    pub const USER: &str = "user";
+    /// A Role Select (6).
+    pub const ROLE: &str = "role";
+    /// A Mentionable Select (7): members and roles.
+    pub const MENTIONABLE: &str = "mentionable";
+    /// A Channel Select (8).
+    pub const CHANNEL: &str = "channel";
+
+    pub const ALL: [&str; 9] = [
+        TEXT,
+        SELECT,
+        RADIO,
+        CHECKBOXES,
+        CHECKBOX,
+        USER,
+        ROLE,
+        MENTIONABLE,
+        CHANNEL,
+    ];
+
+    /// The kinds that list the field's own `options`.
+    pub fn has_options(kind: &str) -> bool {
+        matches!(kind, SELECT | RADIO | CHECKBOXES)
+    }
+
+    /// The kinds Discord resolves to people, roles or channels.
+    pub fn is_entity_select(kind: &str) -> bool {
+        matches!(kind, USER | ROLE | MENTIONABLE | CHANNEL)
+    }
+
+    /// The kinds that take a pick count (`min_values` / `max_values`).
+    pub fn takes_pick_count(kind: &str) -> bool {
+        matches!(kind, SELECT | CHECKBOXES) || is_entity_select(kind)
+    }
+}
+
+/// One choice of a dropdown, single-choice or checkbox question.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FieldOption {
+    pub label: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Picked before the member touches it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub default: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalField {
     pub id: String,
     pub label: String,
-    /// `"short"` (single line) or `"paragraph"` (multi-line).
+    /// See [`kind`]. Absent = a text input, as every older form is.
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// Text inputs only: `"short"` (single line) or `"paragraph"` (multi-line).
+    #[serde(default = "default_style")]
     pub style: String,
     #[serde(default)]
     pub required: bool,
+    /// Help text under the question (the Label's description, ≤ 100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Text inputs and the selects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+    /// Text inputs: prefilled text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u32>,
+    /// Dropdown, single-choice and checkbox questions: the choices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<FieldOption>,
+    /// Questions with several picks: how few and how many.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_values: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_values: Option<u8>,
+    /// A yes/no checkbox: ticked before the member touches it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checked: bool,
+}
+
+impl Default for ModalField {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: String::new(),
+            kind: default_kind(),
+            style: default_style(),
+            required: false,
+            description: None,
+            placeholder: None,
+            value: None,
+            min_length: None,
+            max_length: None,
+            options: Vec::new(),
+            min_values: None,
+            max_values: None,
+            checked: false,
+        }
+    }
+}
+
+fn default_kind() -> String {
+    kind::TEXT.to_string()
+}
+
+fn default_style() -> String {
+    "short".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalDef {
     pub title: String,
+    /// Optional text shown at the top of the modal (a Text Display, with
+    /// markdown). It takes one of the modal's five slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intro: Option<String>,
     pub fields: Vec<ModalField>,
+}
+
+impl ModalDef {
+    /// The intro text, when there is any to show.
+    pub fn intro_text(&self) -> Option<&str> {
+        self.intro
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -302,15 +429,12 @@ mod tests {
         InstanceConfig {
             modal: ModalDef {
                 title: title.into(),
+                intro: None,
                 fields: vec![ModalField {
                     id: "field".into(),
                     label: "Question".into(),
-                    style: "short".into(),
                     required: true,
-                    placeholder: None,
-                    value: None,
-                    min_length: None,
-                    max_length: None,
+                    ..ModalField::default()
                 }],
             },
             forward_webhook: "https://discord.com/api/webhooks/1/secret".into(),
@@ -322,6 +446,22 @@ mod tests {
                 text: Some("Thanks".into()),
             },
         }
+    }
+
+    /// A form saved before field kinds existed reads as the text inputs it
+    /// always was, and round-trips without growing new keys.
+    #[test]
+    fn a_form_saved_before_field_kinds_reads_as_text_inputs() {
+        let old = r#"{"modal":{"title":"T","fields":[{"id":"f1","label":"Name","style":"paragraph","required":true}]},
+            "forward_webhook":"https://discord.com/api/webhooks/1/x","reply":{"text":"ok"}}"#;
+        let cfg: InstanceConfig = serde_json::from_str(old).unwrap();
+        let f = &cfg.modal.fields[0];
+        assert_eq!(f.kind, kind::TEXT);
+        assert_eq!(f.style, "paragraph");
+        assert!(f.options.is_empty() && f.min_values.is_none() && !f.checked);
+        assert!(cfg.modal.intro.is_none());
+        let back = serde_json::to_value(&cfg.modal.fields[0]).unwrap();
+        assert!(back.get("options").is_none() && back.get("checked").is_none());
     }
 
     #[test]

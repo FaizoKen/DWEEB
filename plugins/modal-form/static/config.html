@@ -1016,6 +1016,31 @@ summary .sub {
       #addField {
         margin-top: 10px;
       }
+      /* A choice question's options. */
+      .choices {
+        margin-top: 10px;
+      }
+      .choice {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .choice input[type="text"] {
+        flex: 1;
+        min-width: 0;
+      }
+      .choice .mini {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .choices button.add {
+        margin-top: 8px;
+      }
       .or {
         margin: 8px 0;
         font-size: 12px;
@@ -1030,8 +1055,15 @@ summary .sub {
     <label class="lbl" for="title">Form title</label>
     <input id="title" type="text" maxlength="45" placeholder="e.g. Staff application" />
 
+    <label class="lbl" for="intro">Intro text <span class="count">optional · shown above the questions</span></label>
+    <textarea id="intro" rows="2" maxlength="1000"
+      placeholder="e.g. Please read #rules before applying. **Markdown** works."></textarea>
+
     <label class="lbl">Questions <span class="count" id="fieldCount"></span></label>
     <div id="fields"></div>
+    <p class="hint" id="introNote" hidden>
+      A modal fits five items and the intro takes one — remove a question, or clear the intro.
+    </p>
     <button id="addField" type="button" class="add">+ Add question</button>
 
     <!-- Step 2 — where answers go ------------------------------------------- -->
@@ -1090,26 +1122,135 @@ summary .sub {
       const $ = (id) => document.getElementById(id);
 
       // ── Field list model ────────────────────────────────────────────────
-      const MAX_FIELDS = 5;
+      // A modal holds five top-level components; the intro text, when set,
+      // takes one of them.
+      const MAX_SLOTS = 5;
+      const maxFields = () => MAX_SLOTS - ($("intro").value.trim() ? 1 : 0);
       let fields = [];
-      const newField = (f = {}) => ({
-        // A stable id, preserved across reorders so answers never get reshuffled.
-        id: f.id || "f_" + Math.random().toString(36).slice(2, 9),
-        label: f.label || "",
-        style: f.style === "paragraph" ? "paragraph" : "short",
-        required: !!f.required,
-        placeholder: f.placeholder || "",
-        value: f.value || "",
-        min_length: f.min_length || "",
-        max_length: f.max_length || "",
+
+      // The answer types. "short"/"paragraph" are both a Text Input (kind
+      // "text"); every other value is the stored kind itself.
+      const ANSWERS = [
+        ["short", "Short text"],
+        ["paragraph", "Paragraph"],
+        ["select", "Dropdown"],
+        ["radio", "Pick one (radio buttons)"],
+        ["checkboxes", "Checkboxes (pick any)"],
+        ["checkbox", "Yes / no checkbox"],
+        ["user", "Member picker"],
+        ["role", "Role picker"],
+        ["mentionable", "Member or role picker"],
+        ["channel", "Channel picker"],
+      ];
+      const isText = (a) => a === "short" || a === "paragraph";
+      const hasOptions = (a) => a === "select" || a === "radio" || a === "checkboxes";
+      const takesPicks = (a) =>
+        a === "select" || a === "checkboxes" || a === "user" || a === "role" ||
+        a === "mentionable" || a === "channel";
+      const takesPlaceholder = (a) => isText(a) || (takesPicks(a) && a !== "checkboxes");
+      // Discord's bounds on how many choices each kind lists.
+      const OPTION_BOUNDS = { select: [1, 25], radio: [2, 10], checkboxes: [1, 10] };
+
+      const optionId = () => "c_" + Math.random().toString(36).slice(2, 9);
+      const newOption = (o = {}) => ({
+        label: o.label || "",
+        // A stable value, so renaming a choice never changes which answer it is.
+        value: o.value || optionId(),
+        default: !!o.default,
       });
+
+      const newField = (f = {}) => {
+        const kind = f.kind && f.kind !== "text" ? f.kind : null;
+        const answer = kind && ANSWERS.some(([a]) => a === kind)
+          ? kind
+          : f.style === "paragraph" ? "paragraph" : "short";
+        return {
+          // A stable id, preserved across reorders so answers never get reshuffled.
+          id: f.id || "f_" + Math.random().toString(36).slice(2, 9),
+          label: f.label || "",
+          answer,
+          required: !!f.required,
+          description: f.description || "",
+          placeholder: f.placeholder || "",
+          value: f.value || "",
+          min_length: f.min_length || "",
+          max_length: f.max_length || "",
+          options: (f.options || []).map(newOption),
+          min_values: f.min_values ?? "",
+          max_values: f.max_values ?? "",
+          checked: !!f.checked,
+        };
+      };
+
+      // Switching to a choice question starts it with blank choices to fill.
+      function ensureOptions(f) {
+        if (!hasOptions(f.answer)) return;
+        const [min] = OPTION_BOUNDS[f.answer];
+        while (f.options.length < Math.max(min, 2)) f.options.push(newOption());
+      }
+
+      function optionRows(f, i) {
+        const box = document.createElement("div");
+        box.className = "choices";
+        const [, max] = OPTION_BOUNDS[f.answer];
+        const label = document.createElement("label");
+        label.className = "lbl";
+        label.textContent = `Choices (${f.options.length}/${max})`;
+        box.appendChild(label);
+        f.options.forEach((o, j) => {
+          const row = document.createElement("div");
+          row.className = "choice";
+          // Static markup only; values are assigned through properties below.
+          row.innerHTML = `
+            <input type="text" maxlength="100" data-o="label" />
+            <label class="mini" title="Picked before they answer">
+              <input type="checkbox" data-o="default" /> Default
+            </label>
+            <button type="button" class="icon del" title="Remove choice">✕</button>`;
+          const text = row.querySelector('[data-o="label"]');
+          text.value = o.label;
+          text.placeholder = `Choice ${j + 1}`;
+          text.setAttribute("aria-label", `Question ${i + 1}, choice ${j + 1}`);
+          text.addEventListener("input", () => (o.label = text.value));
+          const def = row.querySelector('[data-o="default"]');
+          def.checked = o.default;
+          def.addEventListener("change", () => {
+            // A radio group has one default at most.
+            if (f.answer === "radio") f.options.forEach((other) => (other.default = false));
+            o.default = def.checked;
+            if (f.answer === "radio") renderFields();
+          });
+          const del = row.querySelector(".del");
+          del.setAttribute("aria-label", `Remove choice ${j + 1}`);
+          del.disabled = f.options.length <= OPTION_BOUNDS[f.answer][0];
+          del.addEventListener("click", () => {
+            f.options.splice(j, 1);
+            renderFields();
+          });
+          box.appendChild(row);
+        });
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "add";
+        add.textContent = "+ Add choice";
+        add.disabled = f.options.length >= max;
+        add.addEventListener("click", () => {
+          f.options.push(newOption());
+          renderFields();
+        });
+        box.appendChild(add);
+        return box;
+      }
 
       function renderFields() {
         const wrap = $("fields");
         wrap.innerHTML = "";
+        const MAX_FIELDS = maxFields();
         fields.forEach((f, i) => {
+          ensureOptions(f);
           const el = document.createElement("div");
           el.className = "field";
+          const a = f.answer;
           // No user data is interpolated into this template; values are assigned
           // via the .value/.checked properties below, so there's no injection.
           el.innerHTML = `
@@ -1122,21 +1263,26 @@ summary .sub {
             </div>
             <div class="grid">
               <div>
-                <label class="lbl">Answer style</label>
-                <select data-k="style">
-                  <option value="short">Short (single line)</option>
-                  <option value="paragraph">Paragraph</option>
-                </select>
+                <label class="lbl">Answer type</label>
+                <select data-k="answer" aria-label="Answer type for question ${i + 1}"></select>
               </div>
-              <label class="check">
-                <input type="checkbox" data-k="required" /> <span>Required</span>
-              </label>
+              ${a === "checkbox"
+                ? `<label class="check"><input type="checkbox" data-k="checked" /> <span>Ticked by default</span></label>`
+                : `<label class="check"><input type="checkbox" data-k="required" /> <span>Required</span></label>`}
             </div>
+            <div class="slot-choices"></div>
             <details class="adv">
-              <summary>More <span class="sub">placeholder, prefill, length</span></summary>
+              <summary>More <span class="sub">${
+                isText(a) ? "help text, placeholder, prefill, length"
+                  : takesPicks(a) ? "help text, placeholder, how many picks"
+                  : "help text"}</span></summary>
               <div class="details-body">
+              <label class="lbl">Help text <span class="count">under the question</span></label>
+              <input type="text" maxlength="100" placeholder="optional" data-k="description" />
+              ${takesPlaceholder(a) ? `
               <label class="lbl">Placeholder</label>
-              <input type="text" maxlength="100" placeholder="optional" data-k="placeholder" />
+              <input type="text" maxlength="${isText(a) ? 100 : 150}" placeholder="optional" data-k="placeholder" />` : ""}
+              ${isText(a) ? `
               <label class="lbl">Prefilled text</label>
               <textarea rows="2" maxlength="4000" placeholder="optional" data-k="value"></textarea>
               <div class="grid">
@@ -1148,18 +1294,38 @@ summary .sub {
                   <label class="lbl">Max length</label>
                   <input type="number" min="1" max="4000" placeholder="optional" data-k="max_length" />
                 </div>
-              </div>
+              </div>` : ""}
+              ${takesPicks(a) ? `
+              <div class="grid">
+                <div>
+                  <label class="lbl">Fewest picks</label>
+                  <input type="number" min="0" max="25" placeholder="${a === "checkboxes" ? "1" : "1"}" data-k="min_values" />
+                </div>
+                <div>
+                  <label class="lbl">Most picks</label>
+                  <input type="number" min="1" max="25" placeholder="${a === "checkboxes" ? "all" : "1"}" data-k="max_values" />
+                </div>
+              </div>` : ""}
               </div>
             </details>`;
-          el.querySelector('[data-k="label"]').value = f.label;
-          el.querySelector('[data-k="style"]').value = f.style;
-          el.querySelector('[data-k="required"]').checked = f.required;
-          el.querySelector('[data-k="placeholder"]').value = f.placeholder;
-          el.querySelector('[data-k="value"]').value = f.value;
-          el.querySelector('[data-k="min_length"]').value = f.min_length;
-          el.querySelector('[data-k="max_length"]').value = f.max_length;
+          const sel = el.querySelector('[data-k="answer"]');
+          for (const [value, text] of ANSWERS) {
+            const o = document.createElement("option");
+            o.value = value;
+            o.textContent = text;
+            sel.appendChild(o);
+          }
+          sel.value = a;
+          sel.addEventListener("change", () => {
+            f.answer = sel.value;
+            renderFields();
+          });
+          if (hasOptions(a)) el.querySelector(".slot-choices").appendChild(optionRows(f, i));
           el.querySelectorAll("[data-k]").forEach((input) => {
             const k = input.getAttribute("data-k");
+            if (k === "answer") return;
+            if (input.type === "checkbox") input.checked = !!f[k];
+            else input.value = f[k];
             input.addEventListener("input", () => {
               f[k] = input.type === "checkbox" ? input.checked : input.value;
             });
@@ -1178,6 +1344,7 @@ summary .sub {
         });
         $("fieldCount").textContent = `${fields.length}/${MAX_FIELDS}`;
         $("addField").disabled = fields.length >= MAX_FIELDS;
+        $("introNote").hidden = !(fields.length > MAX_FIELDS);
         sendResize();
       }
 
@@ -1189,10 +1356,81 @@ summary .sub {
       }
 
       $("addField").addEventListener("click", () => {
-        if (fields.length >= MAX_FIELDS) return;
+        if (fields.length >= maxFields()) return;
         fields.push(newField());
         renderFields();
       });
+      $("intro").addEventListener("input", () => {
+        $("fieldCount").textContent = `${fields.length}/${maxFields()}`;
+        $("addField").disabled = fields.length >= maxFields();
+        $("introNote").hidden = !(fields.length > maxFields());
+      });
+
+      // The stored shape of one question: a text input keeps its old
+      // `style` form, every other answer type is its `kind`.
+      function fieldBody(f) {
+        const a = f.answer;
+        const num = (v) => (v === "" || v == null ? null : Number(v));
+        const body = {
+          id: f.id,
+          label: f.label.trim(),
+          kind: isText(a) ? "text" : a,
+          style: a === "paragraph" ? "paragraph" : "short",
+          // Discord can't make a single checkbox required.
+          required: a === "checkbox" ? false : !!f.required,
+          description: f.description.trim() ? f.description.trim().slice(0, 100) : null,
+        };
+        if (takesPlaceholder(a))
+          body.placeholder = f.placeholder ? String(f.placeholder).slice(0, isText(a) ? 100 : 150) : null;
+        if (isText(a)) {
+          body.value = f.value ? String(f.value).slice(0, 4000) : null;
+          body.min_length = num(f.min_length) || null;
+          body.max_length = num(f.max_length) || null;
+        }
+        if (hasOptions(a))
+          body.options = f.options.map((o) => ({
+            label: o.label.trim(),
+            value: o.value,
+            ...(o.default ? { default: true } : {}),
+          }));
+        if (takesPicks(a)) {
+          body.min_values = num(f.min_values);
+          body.max_values = num(f.max_values);
+        }
+        if (a === "checkbox") body.checked = !!f.checked;
+        return body;
+      }
+
+      // What can be caught here before the server refuses it.
+      function fieldProblem(f) {
+        const name = f.label.trim();
+        if (!name) return "Every question needs a label.";
+        if (isText(f.answer)) {
+          const min = f.min_length === "" ? null : Number(f.min_length);
+          const max = f.max_length === "" ? null : Number(f.max_length);
+          if (min !== null && max !== null && min > max)
+            return `Question “${name}”: min length can't be larger than max length.`;
+        }
+        if (hasOptions(f.answer)) {
+          const [min, max] = OPTION_BOUNDS[f.answer];
+          const named = f.options.filter((o) => o.label.trim());
+          if (named.length !== f.options.length)
+            return `Question “${name}”: give every choice a name, or remove it.`;
+          if (named.length < min || named.length > max)
+            return `Question “${name}” needs between ${min} and ${max} choices.`;
+          const names = new Set(named.map((o) => o.label.trim().toLowerCase()));
+          if (names.size !== named.length) return `Question “${name}” lists the same choice twice.`;
+        }
+        if (takesPicks(f.answer)) {
+          const min = f.min_values === "" ? null : Number(f.min_values);
+          const max = f.max_values === "" ? null : Number(f.max_values);
+          if (min !== null && max !== null && min > max)
+            return `Question “${name}”: the fewest picks can't be more than the most.`;
+          if (min === 0 && f.required)
+            return `Question “${name}” is required, so it needs at least 1 pick.`;
+        }
+        return null;
+      }
 
       // ── Starter templates ───────────────────────────────────────────────
       // Ready-made forms for the most common use cases. Picking one fills the
@@ -1304,6 +1542,7 @@ summary .sub {
         if (editedSincePreset && !confirm(`Replace the current form with the “${p.name}” template?`))
           return;
         $("title").value = p.title;
+        $("intro").value = p.intro || "";
         fields = p.fields.map(newField);
         if (typeof p.reply === "string") $("replyText").value = p.reply;
         if (typeof p.includeSubmitter === "boolean") $("includeSubmitter").checked = p.includeSubmitter;
@@ -1482,6 +1721,7 @@ summary .sub {
           }
           const data = await res.json();
           $("title").value = data.modal?.title || "";
+          $("intro").value = data.modal?.intro || "";
           fields = (data.modal?.fields || []).map(newField);
           if (!fields.length) fields = [newField()];
 
@@ -1510,13 +1750,13 @@ summary .sub {
         const title = $("title").value.trim();
         if (!title) return fail("Give your form a title.");
         if (!fields.length) return fail("Add at least one field.");
+        if (fields.length > maxFields())
+          return fail("A modal fits five items and the intro takes one — remove a question, or clear the intro.");
         for (const f of fields) {
-          if (!f.label.trim()) return fail("Every field needs a label.");
-          const min = f.min_length === "" ? null : Number(f.min_length);
-          const max = f.max_length === "" ? null : Number(f.max_length);
-          if (min !== null && max !== null && min > max)
-            return fail(`Field “${f.label.trim()}”: min length can't be larger than max length.`);
+          const problem = fieldProblem(f);
+          if (problem) return fail(problem);
         }
+        const intro = $("intro").value.trim();
 
         const replyText = $("replyText").value.trim();
         if (!replyText) return fail("Type the reply members get after submitting.");
@@ -1533,16 +1773,8 @@ summary .sub {
         const body = {
           modal: {
             title,
-            fields: fields.map((f) => ({
-              id: f.id,
-              label: f.label.trim(),
-              style: f.style,
-              required: !!f.required,
-              placeholder: f.placeholder ? String(f.placeholder).slice(0, 100) : null,
-              value: f.value ? String(f.value).slice(0, 4000) : null,
-              min_length: f.min_length === "" ? null : Number(f.min_length) || null,
-              max_length: f.max_length === "" ? null : Number(f.max_length) || null,
-            })),
+            intro: intro || null,
+            fields: fields.map(fieldBody),
           },
           forward_webhook: webhookInput,
           forward_username: forwardName || null,

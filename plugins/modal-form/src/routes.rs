@@ -271,7 +271,7 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
         }
     }
 
-    let values = discord::collect_modal_values(data);
+    let values = discord::collect_modal_values(data, &cfg.modal);
     let forward = discord::build_forward_message(&cfg, &values, interaction.actor());
 
     // `with_components=true` is required for Discord to respect the V2
@@ -403,15 +403,12 @@ mod tests {
         let cfg = InstanceConfig {
             modal: ModalDef {
                 title: "Application".into(),
+                intro: None,
                 fields: vec![ModalField {
                     id: "f1".into(),
                     label: "Why".into(),
-                    style: "short".into(),
                     required: true,
-                    placeholder: None,
-                    value: None,
-                    min_length: None,
-                    max_length: None,
+                    ..ModalField::default()
                 }],
             },
             // Stored directly (validation would demand discord.com) so the
@@ -478,6 +475,33 @@ mod tests {
             1,
             "only one answer went out"
         );
+    }
+
+    /// The Label-shaped submission Discord sends for the upgraded modal: the
+    /// answer reaches the destination.
+    #[tokio::test]
+    async fn a_label_submission_is_forwarded_with_its_answer() {
+        let (state, forwards) = form_forwarding_to(StatusCode::NO_CONTENT).await;
+        let interaction: discord::Interaction = serde_json::from_value(json!({
+            "type": 5,
+            "member": { "user": { "id": "43", "username": "lin" } },
+            "data": {
+                "custom_id": "modalform:submit:inst",
+                "components": [
+                    { "type": 18, "id": 1, "component": { "type": 4, "id": 2, "custom_id": "f1", "value": "second" } }
+                ]
+            }
+        }))
+        .unwrap();
+        let data = interaction.data.as_ref().unwrap();
+        let cfg = state.store.get("inst").unwrap().unwrap();
+        assert_eq!(
+            discord::collect_modal_values(data, &cfg.modal),
+            vec![("f1".to_string(), "second".to_string())]
+        );
+        let reply = reply_text(handle_modal_submit(&state, &interaction).await).await;
+        assert!(reply.contains("Thanks"), "{reply}");
+        assert_eq!(forwards.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
