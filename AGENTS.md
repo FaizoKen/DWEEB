@@ -2945,10 +2945,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   fallback. It powers the Code tab's **Website → Link preview** target and a card on every
   generated page (`linkPreviewCard`, layout.ts; one switch `LINK_PREVIEW_CARDS` turns them all off;
   `index.html`/`/` and `404.html` carry none yet). The SEO audit re-validates each page's payload
-  with `componentEmbedViolations`, which shares no code path with the builder. Unverified until
-  deployed — Discord's Embed Debugger (discord.com/developers/embeds) takes a public URL only:
-  after a deploy, run a template page through it, and share with `?v=2` to dodge the ~30-minute
-  preview cache. (5) **Discord's default upload limit is 20 MiB per file** since 2026-09-03 (was
+  with `componentEmbedViolations`, which shares no code path with the builder. **Verified live
+  2026-11-06** in Discord's Embed Debugger (discord.com/developers/embeds — public URLs only, so
+  check after a deploy, with `?v=<anything>` to dodge the ~30-minute preview cache): Discord parsed
+  the card as a `"type": "components"` embed with every field intact. Its preview renderer prints
+  `-#` subtext literally (a `###` heading renders), so the card carries no subtext line — don't add
+  one back to a preview without re-checking there. (5) **Discord's default upload limit is 20 MiB per file** since 2026-09-03 (was
   10): `DISCORD_DEFAULT_UPLOAD_LIMIT_BYTES` (lib/fileUpload.ts) drives the picker's oversize
   warning and the web 413 copy; webhooks get the *server's* limit (boosts raise it, the poster's
   Nitro doesn't). The Activity's 32 MiB multipart bound stays — a memory bound, not Discord's.

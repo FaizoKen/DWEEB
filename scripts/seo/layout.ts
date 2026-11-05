@@ -170,8 +170,10 @@ export function linkPreviewCard(opts: {
       components: [
         { type: 10, content: `### ${heading}\n${opts.description}` },
         { type: 12, items: [{ media: { url: opts.image }, description: opts.imageAlt }] },
+        // No `-#` subtext footer: Discord's link-preview renderer prints the
+        // marker literally (seen in its Embed Debugger, 2026-11-06), and the
+        // social card already carries the branding.
         { type: 1, components: [{ type: 2, style: 5, label: opts.cta.label, url: href }] },
-        { type: 10, content: "-# DWEEB · free Discord message builder" },
       ],
     },
   ]);
