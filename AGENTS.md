@@ -1123,8 +1123,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   that is gone until `lb_try_duration` (2 s) runs out, then logs a synthesised 502 at ERROR.
   The ~2.0 s durations are that retry window, not backend latency. `CONN_ABORT_RE` now drops
   both spellings; the `(remote)` anchor is load-bearing — a `(local)` application error is
-  *our* side aborting and still pages. Don't "fix" this by disabling GET retries: they are what
-  let an in-flight GET survive a container restart. **`dweeb-alerts` must also parse past the
+  *our* side aborting and still pages. **Chromium can also hang up with a *transport* code**
+  (2026-11-05): when its network stack drops all of its connections at once
+  (`HttpNetworkSession::CloseAllConnections` → `QUIC_PEER_GOING_AWAY`, 16, which QUICHE sends as
+  transport `INTERNAL_ERROR`, with `CloseSessionOnError`'s reason `net error` behind the code),
+  quic-go prints `INTERNAL_ERROR (remote): 16:net error`. One page: Android Chrome 156, an HTTP/3
+  GET of `/api/guilds`, 2.2 s, nothing in the proxy's log. That exact reason is muted, under the
+  same duration gate. Any other remote transport code (`PROTOCOL_VIOLATION`, …) is a browser
+  saying our QUIC stack broke the protocol and still pages, and Chromium's other
+  `<code>:net error` closes get added only on evidence. Don't "fix" this by disabling GET
+  retries: they are what let an in-flight GET survive a container restart. **`dweeb-alerts` must also parse past the
   request span** (2026-09-09): tracing renders the proxy's span *before* the target —
   `ERROR http{method=… path=… error=…}: tower_http::trace::on_failure: response failed …` —
   and the old `TRACING_RE` took `http` as the target and threw the braces away. So every proxy
@@ -1144,7 +1152,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `APPLICATION_ERROR (remote)` spelling is a close that arrived before the handshake completed
   and carries no code, so it also covers an early close with any code; and the mechanism is a
   property of the pinned stack (Caddy v2.11.4, quic-go v0.59.1, Go 1.25 — quic-go ≥0.60 turns it
-  into a scheduling race, so a partial recurrence after an image pull is not a new bug; the
+  into a scheduling race, so a partial recurrence after an image pull is not a new bug. Prod has
+  since pulled Caddy v2.11.7 / quic-go v0.63.0 / Go 1.26.8 from `caddy:2-alpine` and still logs
+  the ~2 s 502: nine in the four days to 2026-11-05; the
   Caddyfile's `upstream_retry` comment now states the real retry rule). Because every
   Discord-side failure is now a WARN, **the alerter pages once on a sustained one**: ten
   `upstream failed` warns from one service within five minutes post a single `UPSTREAM STORM`

@@ -135,11 +135,26 @@ CONN_ABORT_RE = re.compile(
 # failure: it re-tries the GET (its default for non-dial errors) against nothing
 # for the whole `lb_try_duration`, then logs a synthesised 502 at ERROR — eleven
 # pages 2026-08-20 → 09-03, all HTTP/3.0 GETs of ordinary app routes, all
-# ~2.0 s, all `(remote)`. A per-stream cancel (STOP_SENDING) is a plain cancel
-# and was always silent, so these two spellings are the complete set. The
-# `(remote)` anchor is load-bearing: Caddy is never a QUIC client here, so
-# `(remote)` can only be the browser, and a `(local)` application error is OUR
-# side aborting, and still pages.
+# ~2.0 s, all `(remote)`. The race resolves the same way often enough on the
+# newer stack too: Caddy v2.11.7 / quic-go v0.63.0 / Go 1.26.8 logged nine in
+# the four days to 2026-11-05, every one ~2.1-2.2 s. A per-stream cancel
+# (STOP_SENDING) is a plain cancel and was always silent.
+#
+# A browser may also close with a *transport* code, and Chromium does whenever
+# its network stack drops all of its connections at once:
+# `HttpNetworkSession::CloseAllConnections` closes every QUIC session with
+# QUIC_PEER_GOING_AWAY (16), which QUICHE sends as transport INTERNAL_ERROR;
+# `CloseSessionOnError` gives the reason "net error" and the framer puts the
+# code in front of it. quic-go prints that as `INTERNAL_ERROR (remote): 16:net
+# error`. It paged once, on 2026-11-04: Android Chrome 156, an HTTP/3 GET of
+# /api/guilds, 2.2 s, nothing logged by the proxy. Only that exact reason is
+# muted. Another remote transport code (PROTOCOL_VIOLATION, FLOW_CONTROL_ERROR,
+# …) is a browser saying OUR QUIC stack broke the protocol, which still pages,
+# and Chromium's other `<code>:net error` closes are added only on evidence.
+#
+# The `(remote)` anchor is load-bearing: Caddy is never a QUIC client here, so
+# `(remote)` can only be the browser, and a `(local)` error is OUR side
+# aborting, and still pages.
 #
 # The duration gate is what keeps this from hiding a stalled backend: a pure
 # hang-up's fingerprint is `duration` ≈ the 2 s retry window (a close inside it
@@ -149,7 +164,10 @@ CONN_ABORT_RE = re.compile(
 # sample. The bound covers the retry window plus the longest Discord-bounded
 # read the proxy will wait on (a 10 s deadline after a ≤4 s rate-limit wait).
 H3_CLIENT_CLOSE_RE = re.compile(
-    r"application error 0x100 \(remote\)|application_error \(remote\)", re.IGNORECASE
+    r"application error 0x100 \(remote\)"
+    r"|application_error \(remote\)"
+    r"|internal_error \(remote\): 16:net error",
+    re.IGNORECASE,
 )
 H3_ABANDON_MAX_SECS = float(os.environ.get("ALERTS_H3_ABANDON_MAX_SECS", "15"))
 
@@ -535,7 +553,43 @@ PARSE_CASES: list[tuple[str, str | None, tuple[str, ...]]] = [
         None,
         (),
     ),
-    # …but the same spelling after a long wait means our upstream never answered:
+    # Chromium dropping all its connections at once closes with a transport code
+    # (QUIC_PEER_GOING_AWAY → INTERNAL_ERROR): the 2026-11-04 page, headers trimmed.
+    (
+        '{"level":"error","ts":1793833792.9506037,"logger":"http.log.error",'
+        '"msg":"INTERNAL_ERROR (remote): 16:net error","request":{"proto":"HTTP/3.0","method":"GET",'
+        '"host":"api.dweeb.faizo.net","uri":"/api/guilds","headers":{"User-Agent":["Mozilla/5.0 '
+        '(Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile '
+        'Safari/537.36"]}},"duration":2.196946485,"status":502,"err_trace":"reverseproxy.statusError '
+        '(reverseproxy.go:1695)"}',
+        None,
+        (),
+    ),
+    # …and is duration-gated like the others.
+    (
+        '{"level":"error","logger":"http.log.error","msg":"INTERNAL_ERROR (remote): 16:net error",'
+        '"request":{"proto":"HTTP/3.0","method":"GET","uri":"/api/guilds"},"duration":30.5,"status":502}',
+        "ERROR http.log.error",
+        ("GET /api/guilds", "30.5s", "16:net error"),
+    ),
+    # Only Chromium's going-away close is a hang-up. Any other remote transport
+    # error is the browser saying our QUIC stack broke the protocol: it pages.
+    (
+        '{"level":"error","logger":"http.log.error","msg":"PROTOCOL_VIOLATION (remote): bad frame",'
+        '"request":{"proto":"HTTP/3.0","method":"GET","uri":"/api/guilds"},"duration":2.1,"status":502}',
+        "ERROR http.log.error",
+        ("PROTOCOL_VIOLATION (remote)",),
+    ),
+    (
+        '{"level":"error","logger":"http.log.error","msg":"INTERNAL_ERROR (remote): 116:net error",'
+        '"request":{"proto":"HTTP/3.0","method":"GET","uri":"/api/guilds"},"duration":2.1,"status":502}',
+        "ERROR http.log.error",
+        ("116:net error",),
+    ),
+    # …and our own side closing is never a hang-up.
+    ('{"level":"error","logger":"http.log.error","msg":"INTERNAL_ERROR (local): 16:net error","status":502}',
+     "ERROR http.log.error", ("INTERNAL_ERROR (local)",)),
+    # A hang-up spelling after a long wait means our upstream never answered:
     # that pages, naming method + path (never the query) and the duration.
     (
         '{"level":"error","logger":"http.log.error","msg":"Application error 0x100 (remote)",'

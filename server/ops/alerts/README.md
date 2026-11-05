@@ -11,7 +11,8 @@ on contabo (like `dweeb-maintenance.timer`). The webhook URL lives only in
   gatus/dozzle/beszel excluded). Alerts on tracing `ERROR` lines, Rust panics, `web_crash`
   warns, and Caddy JSON error entries — **except** Caddy connection aborts (`broken pipe`,
   `connection reset by peer`, `context canceled`, `client disconnected`, and their HTTP/3
-  spellings `Application error 0x100 (remote)` / `APPLICATION_ERROR (remote)`), which are
+  spellings `Application error 0x100 (remote)` / `APPLICATION_ERROR (remote)` / Chromium's
+  `INTERNAL_ERROR (remote): 16:net error`), which are
   network reality rather than a backend fault and must not page; see `CONN_ABORT_RE` for why
   an upstream actually going down still does. A tracing line is parsed *past* its request
   span (`ERROR http{method=… path=… error=…}: target: msg`) so the alert names the route and
