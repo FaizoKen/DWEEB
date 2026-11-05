@@ -5,7 +5,9 @@
  * it is the wrong one for the developer whose bot is written in discord.js or
  * discord.py, who would otherwise retype the whole layout as builder calls. This
  * panel renders the same message through `core/codegen` for five destinations:
- * the two bot libraries, and three ways to call a webhook URL directly.
+ * the two bot libraries, and three ways to call a webhook URL directly — plus
+ * a sixth that sends nothing: the message as a Discord link preview (a
+ * component embed) for a website's `<head>`.
  *
  * Read-only by design. The JSON tab doubles as an import box because JSON
  * round-trips; generated code does not, and an editable field here would only
@@ -16,6 +18,8 @@ import { useMemo, useState } from "react";
 import { useUniqueId } from "@/lib/useUniqueId";
 import { useMessageStore } from "@/core/state/messageStore";
 import { CODE_TARGETS, generateCode, isCodeTarget, type CodeTarget } from "@/core/codegen";
+import { prepareCodegenInput } from "@/core/codegen/payload";
+import { buildComponentEmbed, EMBED_DEBUGGER_URL } from "@/core/linkPreview/componentEmbed";
 import { copyText } from "@/core/serialization";
 import { validateMessage } from "@/core/schema/validation";
 import { trackAnalytics } from "@/core/telemetry/analytics";
@@ -31,6 +35,7 @@ const TARGET_STORAGE_KEY = "dweeb.codeTarget.v1";
 const GROUPS = [
   { kind: "bot", label: "Bot library" },
   { kind: "webhook", label: "Webhook URL" },
+  { kind: "website", label: "Website" },
 ] as const;
 
 /**
@@ -68,6 +73,15 @@ export function CodePanel() {
   const issues = useMemo(
     () => validateMessage(message).issues.filter((issue) => issue.severity === "error").length,
     [message],
+  );
+  // A link preview is judged by its own rules (one Container, link buttons,
+  // https media, 3,000 bytes), not by whether the message would post.
+  const preview = useMemo(
+    () =>
+      target === "linkpreview"
+        ? buildComponentEmbed(prepareCodegenInput(message).payload.components)
+        : null,
+    [message, target],
   );
 
   const pick = (next: CodeTarget) => {
@@ -131,7 +145,18 @@ export function CodePanel() {
 
       <p className={styles.lead}>{info.summary}</p>
 
-      {issues > 0 ? (
+      {preview ? (
+        <LinkPreviewNotes
+          omitted={[
+            ...(preview.wrapped
+              ? ["Your message was wrapped in a Container — a link preview is a single Container."]
+              : []),
+            ...preview.omitted,
+          ]}
+          problems={preview.problems}
+          bytes={preview.bytes}
+        />
+      ) : issues > 0 ? (
         <Callout tone="warning" role="note">
           This message has {issues} validation issue{issues === 1 ? "" : "s"}. The code will run,
           but Discord will reject the message until {issues === 1 ? "it is" : "they are"} fixed —
@@ -151,12 +176,55 @@ export function CodePanel() {
 
       <div className={styles.actions}>
         <Button variant="primary" onClick={copy}>
-          Copy code
+          {preview ? "Copy HTML" : "Copy code"}
         </Button>
         <Button variant="secondary" onClick={download}>
           Download {info.fileName}
         </Button>
       </div>
+    </>
+  );
+}
+
+/** What a link preview kept, left out, and still needs — and where to test it. */
+function LinkPreviewNotes({
+  omitted,
+  problems,
+  bytes,
+}: {
+  omitted: string[];
+  problems: string[];
+  bytes: number;
+}) {
+  return (
+    <>
+      {problems.length > 0 ? (
+        <Callout tone="warning" role="note">
+          {problems.map((line) => (
+            <span key={line} className={styles.calloutLine}>
+              {line}
+            </span>
+          ))}
+        </Callout>
+      ) : null}
+      {omitted.length > 0 ? (
+        <Callout tone="info" role="note">
+          {omitted.map((line) => (
+            <span key={line} className={styles.calloutLine}>
+              {line}
+            </span>
+          ))}
+        </Callout>
+      ) : null}
+      <p className={styles.lead}>
+        {bytes > 0 ? `${bytes.toLocaleString("en-US")} of 3,000 bytes. ` : null}
+        Discord reads it only from the HTML your server sends, so it can't be added by a script.
+        Test the live page in{" "}
+        <a href={EMBED_DEBUGGER_URL} target="_blank" rel="noopener noreferrer">
+          Discord's Embed Debugger
+        </a>
+        .
+      </p>
     </>
   );
 }

@@ -323,7 +323,8 @@ export const FEATURES: FeatureSeo[] = [
       },
     ],
     configurable: [
-      "Custom questions in a pop-up modal",
+      "Up to five questions in a pop-up modal: short or paragraph text, a dropdown, pick-one radio buttons, checkboxes, a yes/no checkbox, or a member, role or channel picker",
+      "Help text under each question, and an optional intro at the top of the form",
       "Forward answers to any channel — named or anonymous",
       "A private reply to the member who submitted",
       "Optional one-response-per-person limit",
@@ -346,6 +347,10 @@ export const FEATURES: FeatureSeo[] = [
       {
         q: "Can I limit it to one response per person?",
         a: "Yes. Turn on the one-response-per-person option — handy for applications and ban appeals.",
+      },
+      {
+        q: "Can a Discord form have dropdowns or checkboxes?",
+        a: "Yes. Besides short and paragraph text, a question can be a dropdown, a set of radio buttons, checkboxes, a single yes/no checkbox, or a picker for members, roles or channels. These are Discord's own modal components, not a web page — members answer without leaving Discord.",
       },
     ],
     keywords: [
@@ -971,6 +976,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
  *  2026-10-22: Discord granted that intent, so the answer promises the
  *  conversation again.
  *  2026-10-23: the ticket bot can open private threads instead of channels. */
-export const FEATURES_LASTMOD = "2026-10-23";
+export const FEATURES_LASTMOD = "2026-11-05";
 
 export { ACCENT_BLURPLE };

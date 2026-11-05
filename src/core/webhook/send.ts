@@ -24,6 +24,7 @@ import { collectSessionAttachments, type CollectedFile } from "@/core/serializat
 // request below — back on the boot path. Re-exported for the Share dialog.
 export { parseWebhookUrl, type ParsedWebhookUrl } from "./webhookUrl";
 import type { ParsedWebhookUrl } from "./webhookUrl";
+import { DISCORD_DEFAULT_UPLOAD_LIMIT_LABEL } from "@/lib/fileUpload";
 
 /**
  * Extract a message snowflake from either:
@@ -268,7 +269,19 @@ function retryAfterFrom(res: Response, body: unknown): number | undefined {
       : undefined;
 }
 
+/** What a 413 means for a webhook post: one of its files is over the
+ *  server's per-file limit. Webhooks get the server's limit — the poster's
+ *  Nitro doesn't apply — and Discord's default is 20 MB per file since
+ *  2026-09-03 (boosted servers allow more). */
+export function fileTooLargeMessage(): string {
+  return `Discord refused a file as too large (413). Each file must be ${DISCORD_DEFAULT_UPLOAD_LIMIT_LABEL} or less unless the server is boosted, which raises the limit.`;
+}
+
 function describeError(status: number, body: unknown): string {
+  // A file past the destination's upload limit: Discord answers 413 (code
+  // 40005, "Request entity too large"), or its edge does with no JSON at all.
+  // Either way the fix is the same, and neither wording says what it is.
+  if (status === 413) return fileTooLargeMessage();
   // Discord shapes: { code, message, errors? }
   if (body && typeof body === "object") {
     const obj = body as { message?: unknown; code?: unknown; errors?: unknown };

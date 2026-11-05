@@ -18,6 +18,7 @@ import { guideLandingOgSources, OG_CARD_HEIGHT, OG_CARD_WIDTH } from "./og-card-
 import { parseOgAssetManifest, sha256, type OgAssetManifest } from "./og-asset-manifest";
 import { ROOT_OG_SVG } from "./root-og-source";
 import { auditDiscoveryArtifacts } from "./artifact-audit";
+import { componentEmbedViolations } from "../../src/core/linkPreview/componentEmbed";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DIST = join(ROOT, "dist");
@@ -467,6 +468,25 @@ async function main(): Promise<void> {
     if (!title) errors.push(`${entry.url}: missing title`);
     if (!description) errors.push(`${entry.url}: missing meta description`);
     if (!canonical) errors.push(`${entry.url}: missing canonical`);
+
+    // Discord component embed (the page's link-preview card): a payload
+    // outside Discord's rules can suppress the preview entirely, not merely
+    // fall back to og: — so every one shipped is re-checked here, by the
+    // validator that shares no code path with the builder that made it.
+    const embeds = [
+      ...html.matchAll(
+        /<script\s+id="discord:component-embed"\s+type="application\/json">([\s\S]*?)<\/script>/gi,
+      ),
+    ];
+    if (embeds.length > 1) errors.push(`${entry.url}: more than one discord:component-embed`);
+    for (const [, json] of embeds) {
+      for (const violation of componentEmbedViolations(json ?? "")) {
+        errors.push(`${entry.url}: discord:component-embed ${violation}`);
+      }
+    }
+    if (embeds.length && html.indexOf("discord:component-embed") > html.indexOf("</head>")) {
+      errors.push(`${entry.url}: discord:component-embed must be inside <head>`);
+    }
     if (canonical !== entry.url) errors.push(`${entry.url}: canonical is ${canonical}`);
     if (canonical) {
       try {

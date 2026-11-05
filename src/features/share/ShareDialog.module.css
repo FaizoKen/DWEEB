@@ -55,6 +55,14 @@
   color: var(--app-accent-text);
 }
 
+/* One note per line inside a Callout (the link-preview export's list). */
+.calloutLine {
+  display: block;
+}
+.calloutLine + .calloutLine {
+  margin-top: 4px;
+}
+
 .aboutLinks {
   display: flex;
   flex-wrap: wrap;

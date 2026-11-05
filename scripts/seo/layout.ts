@@ -19,6 +19,7 @@ import {
 } from "./content";
 import type { ResolvedFeature } from "./features";
 import { withClientParams } from "@/core/seo/clientParams";
+import { buildComponentEmbed, componentEmbedScript } from "@/core/linkPreview/componentEmbed";
 import type { TemplatePayload } from "./template-payload";
 
 const TEMPLATES_INDEX_PATH = "/templates/";
@@ -128,6 +129,56 @@ function howToSteps(
   ];
 }
 
+/** DWEEB blurple, the accent stripe on every page's link-preview card. */
+const PREVIEW_ACCENT = 0x5865f2;
+
+/**
+ * Whether generated pages carry a Discord component embed at all. One switch
+ * so that, should Discord ever stop showing these cards, every page falls back
+ * to its plain Open Graph preview with a one-line change. The app shell (`/`,
+ * `index.html`) doesn't carry one yet.
+ */
+const LINK_PREVIEW_CARDS = true;
+
+/**
+ * The page's Discord link preview as a **component embed** (2026-10-05): what a
+ * shared DWEEB link unfurls into in Discord — the page's heading and summary,
+ * its social card, and a button straight into the builder. A Discord tool's
+ * links are shared in Discord more than anywhere, and a plain Open Graph card
+ * can't carry the button.
+ *
+ * Built through `core/linkPreview/componentEmbed`, which emits only what
+ * Discord documents (a payload outside the rules can suppress the preview
+ * entirely rather than fall back to the og: tags, which stay as the fallback
+ * for every other site and for any client without component embeds). The
+ * audit re-validates every page's payload. Empty when the card would not fit.
+ */
+export function linkPreviewCard(opts: {
+  title: string;
+  description: string;
+  image: string;
+  imageAlt: string;
+  cta: { label: string; href: string };
+}): string {
+  if (!LINK_PREVIEW_CARDS) return "";
+  const heading = opts.title.replace(/\s*\|\s*DWEEB$/, "");
+  const href = new URL(opts.cta.href, SITE.origin).toString();
+  const embed = buildComponentEmbed([
+    {
+      type: 17,
+      accent_color: PREVIEW_ACCENT,
+      components: [
+        { type: 10, content: `### ${heading}\n${opts.description}` },
+        { type: 12, items: [{ media: { url: opts.image }, description: opts.imageAlt }] },
+        { type: 1, components: [{ type: 2, style: 5, label: opts.cta.label, url: href }] },
+        { type: 10, content: "-# DWEEB · free Discord message builder" },
+      ],
+    },
+  ]);
+  if (!embed.payload || embed.problems.length || embed.omitted.length) return "";
+  return componentEmbedScript(embed.json);
+}
+
 /**
  * Wrap a head/body in the shared document shell: meta, canonical, OG/Twitter,
  * favicons, CSP, and the inlined stylesheet.
@@ -150,6 +201,11 @@ export function htmlDocument(opts: {
   extraCss?: string;
   /** First-party module scripts (a guide tool's bundle); deferred by type. */
   moduleScripts?: string[];
+  /**
+   * The link-preview card's button (see `linkPreviewCard`): where it goes and
+   * what it says. Defaults to opening the builder, attributed to this page.
+   */
+  previewCta?: { label: string; href: string };
 }): string {
   const csp = [
     "default-src 'self'",
@@ -166,6 +222,13 @@ export function htmlDocument(opts: {
     "form-action 'self'",
   ].join("; ");
   const builderUrl = withClientParams("/", { entry: `${opts.pageType}:${opts.pageId}` });
+  const previewCard = linkPreviewCard({
+    title: opts.title,
+    description: opts.description,
+    image: opts.ogImage,
+    imageAlt: opts.imageAlt,
+    cta: opts.previewCta ?? { label: "Open the builder", href: builderUrl },
+  });
 
   return `<!doctype html>
 <html lang="en" data-page-type="${attr(opts.pageType)}" data-page-id="${attr(opts.pageId)}">
@@ -205,6 +268,7 @@ export function htmlDocument(opts: {
     <meta name="twitter:description" content="${attr(opts.description)}" />
     <meta name="twitter:image" content="${attr(opts.ogImage)}" />
     <meta name="twitter:image:alt" content="${attr(opts.imageAlt)}" />
+    ${previewCard}
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
@@ -610,6 +674,7 @@ export function renderTemplatePage(
     ogType: "article",
     pageType: "template",
     pageId: seo.slug,
+    previewCta: { label: "Use this template", href: seo.appUrl },
     modifiedTime: seo.modified,
     section: seo.category,
     jsonLd: [

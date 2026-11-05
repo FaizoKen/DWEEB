@@ -16,6 +16,7 @@
 import type { WebhookMessage } from "@/core/schema/types";
 import { generateDiscordJs } from "./discordjs";
 import { generateDiscordPy } from "./discordpy";
+import { generateLinkPreview } from "./linkPreview";
 import { prepareCodegenInput } from "./payload";
 import { generateCurl, generateFetch, generatePythonRequests } from "./webhook";
 
@@ -60,6 +61,15 @@ export const CODE_TARGETS = [
     kind: "webhook",
     summary: "One command for a terminal, a CI job or a cron entry.",
   },
+  {
+    id: "linkpreview",
+    label: "Link preview",
+    language: "HTML",
+    fileName: "discord-link-preview.html",
+    kind: "website",
+    summary:
+      "Make your website's links unfurl in Discord as this layout — no bot. Paste it into the page's <head>.",
+  },
 ] as const;
 
 export type CodeTarget = (typeof CODE_TARGETS)[number]["id"];
@@ -71,6 +81,7 @@ const GENERATORS: Record<CodeTarget, (input: ReturnType<typeof prepareCodegenInp
   python: generatePythonRequests,
   fetch: generateFetch,
   curl: generateCurl,
+  linkpreview: generateLinkPreview,
 };
 
 export function isCodeTarget(value: unknown): value is CodeTarget {

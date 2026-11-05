@@ -15,7 +15,13 @@ import { useEffect, useRef, useState } from "react";
 import { useUniqueId } from "@/lib/useUniqueId";
 import { Button } from "@/ui/Button";
 import { isSessionUrl, parseSessionUrl, registerAttachment } from "@/core/state/attachmentStore";
-import { fileFromClipboard, formatBytes, matchesAccept } from "@/lib/fileUpload";
+import {
+  DISCORD_DEFAULT_UPLOAD_LIMIT_LABEL,
+  exceedsDefaultUploadLimit,
+  fileFromClipboard,
+  formatBytes,
+  matchesAccept,
+} from "@/lib/fileUpload";
 import { useAttachmentRecord } from "./useAttachmentRecord";
 import styles from "./AttachmentPicker.module.css";
 
@@ -158,6 +164,12 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
             <div className={styles.fileMeta}>
               <span className={styles.fileName}>{record.file.name}</span>
               <span className={styles.fileSize}>{formatBytes(record.file.size)}</span>
+              {exceedsDefaultUploadLimit(record.file.size) ? (
+                <span className={styles.warningText}>
+                  Over Discord's {DISCORD_DEFAULT_UPLOAD_LIMIT_LABEL} per-file limit — only a
+                  boosted server will accept it.
+                </span>
+              ) : null}
             </div>
           ) : (
             <div className={styles.fileMetaMissing}>
