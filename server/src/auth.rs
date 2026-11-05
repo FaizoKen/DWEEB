@@ -280,6 +280,23 @@ pub struct CallbackQuery {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
+    /// RFC 9207 issuer identification: Discord names itself on every
+    /// authorization response since 2026-10-14.
+    iss: Option<String>,
+}
+
+/// The issuer Discord's authorization responses carry (its OAuth metadata's
+/// `issuer`; `authorization_response_iss_parameter_supported` is true).
+const DISCORD_ISSUER: &str = "https://discord.com";
+
+/// Whether a callback's `iss` rules it out: present and naming someone other
+/// than Discord. Absent is accepted — Discord is our only authorization
+/// server, so there is no second issuer a response could be mixed up with,
+/// and refusing an absent parameter would turn any flow Discord answers
+/// without it into a failed sign-in. Compared exactly: RFC 9207 §2.4 asks for
+/// simple string comparison, with no normalisation.
+fn issuer_mismatch(iss: Option<&str>) -> bool {
+    iss.is_some_and(|iss| iss != DISCORD_ISSUER)
 }
 
 /// `GET /auth/callback` — verify state, exchange the code, mint the session.
@@ -297,7 +314,13 @@ pub async fn callback(
     // cancel, but fall back to the cookie we stored at the flow's start in case it
     // doesn't. The custom-app credentials cookie (if this was that flow) is
     // cleared too — an abandoned flow must not leave a secret parked in the browser.
-    if q.error.is_some() || q.code.is_none() {
+    // A response naming another issuer is refused like a cancelled one: it
+    // was not Discord's answer to our request (RFC 9207 §2.4).
+    let foreign_issuer = issuer_mismatch(q.iss.as_deref());
+    if foreign_issuer {
+        tracing::warn!("OAuth callback named an issuer other than Discord; refused");
+    }
+    if q.error.is_some() || q.code.is_none() || foreign_issuer {
         let flow_state = q
             .state
             .clone()
@@ -866,4 +889,20 @@ fn percent_encode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod issuer_tests {
+    use super::issuer_mismatch;
+
+    #[test]
+    fn only_a_present_foreign_issuer_is_refused() {
+        assert!(!issuer_mismatch(None));
+        assert!(!issuer_mismatch(Some("https://discord.com")));
+        // Simple string comparison, no normalisation (RFC 9207 §2.4).
+        assert!(issuer_mismatch(Some("https://discord.com/")));
+        assert!(issuer_mismatch(Some("https://Discord.com")));
+        assert!(issuer_mismatch(Some("https://evil.example")));
+        assert!(issuer_mismatch(Some("")));
+    }
 }

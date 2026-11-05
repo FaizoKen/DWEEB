@@ -176,6 +176,29 @@ pub struct Channel {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub nsfw: Option<bool>,
+    /// Read for [`CHANNEL_OBFUSCATED`] only, and never passed on: the lists
+    /// built from these go to the browser and the cache as they were.
+    #[serde(default, skip_serializing)]
+    pub flags: u64,
+}
+
+/// Channel flag `CHANNEL_OBFUSCATED` (2026-08-12): a channel the bot can't
+/// view, sent with its name replaced by `___hidden___` and its overwrites
+/// reduced to one `@everyone` deny. Discord sends these over the Gateway; from
+/// 2026-11-16 `GET /guilds/{id}/channels` leaves such channels out instead.
+/// The flag — never the name — is the documented test.
+pub const CHANNEL_OBFUSCATED: u64 = 1 << 17;
+
+/// Drop the channels the bot can't view. Today that's a no-op over HTTP (it
+/// only omits them from 2026-11-16, and the Gateway is what obfuscates), but a
+/// placeholder named `___hidden___` must never reach a channel picker, and the
+/// channel-in-server checks must answer for a hidden channel the way they will
+/// once Discord omits it: not one the bot can reach.
+pub fn visible_channels(channels: Vec<Channel>) -> Vec<Channel> {
+    channels
+        .into_iter()
+        .filter(|c| c.flags & CHANNEL_OBFUSCATED == 0)
+        .collect()
 }
 
 /// A thread channel (a thread under a text/announcement channel, or a
@@ -415,6 +438,46 @@ impl UserGuild {
             .map(|p| p & ADMINISTRATOR != 0 || p & MANAGE_WEBHOOKS != 0)
             .unwrap_or(false)
     }
+
+    /// Owner or Administrator: no channel overwrite can take a permission
+    /// away from them, so a per-channel check could only ever say yes.
+    pub fn overrides_channel_overwrites(&self) -> bool {
+        self.owner
+            || self
+                .permissions
+                .parse::<u64>()
+                .is_ok_and(|p| p & ADMINISTRATOR != 0)
+    }
+}
+
+/// What Discord answered about one member's permissions in one channel
+/// (`GET /channels/{channel}/permissions/member/{user}`, 2026-10-30).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChannelPermissions {
+    /// The member's computed bits there: roles, `@everyone` and the channel's
+    /// overwrites, implicit masking applied (no View Channel ⇒ no permissions).
+    Bits(u64),
+    /// The user isn't a member of the channel's server (10007 Unknown Member,
+    /// or 10013 Unknown User).
+    NotMember,
+    /// No such channel (10003), or one the bot can't view (403: Discord asks
+    /// the caller to view the channel). From 2026-11-16 a bot can't tell the
+    /// two apart, and neither can be posted into through it.
+    Unreachable,
+}
+
+/// Classify a non-2xx answer to the channel-permissions read by its status
+/// and Discord's JSON error `code`. `None` = anything else (a rate limit,
+/// Discord's 5xx, our token), mapped by the ordinary bot-read rules.
+pub(crate) fn classify_channel_permissions(
+    status: u16,
+    code: Option<u64>,
+) -> Option<ChannelPermissions> {
+    match (status, code) {
+        (404, Some(10007 | 10013)) => Some(ChannelPermissions::NotMember),
+        (404, Some(10003)) | (403, _) => Some(ChannelPermissions::Unreachable),
+        _ => None,
+    }
 }
 
 /// What Discord publishes about an application. `verify_key` is the public
@@ -585,8 +648,76 @@ impl Discord {
         self.get_bot(&format!("/guilds/{guild}/roles")).await
     }
 
+    /// The guild's channels **the bot can view**. From 2026-11-16 Discord
+    /// omits every other channel from this read (a hidden staff channel is no
+    /// longer listed, or reachable through DWEEB's bot); `visible_channels`
+    /// already treats an obfuscated one that way.
     pub async fn channels(&self, guild: &str) -> Result<Vec<Channel>, AppError> {
-        self.get_bot(&format!("/guilds/{guild}/channels")).await
+        self.get_bot(&format!("/guilds/{guild}/channels"))
+            .await
+            .map(visible_channels)
+    }
+
+    /// A member's computed permissions in one channel, as Discord itself
+    /// works them out (2026-10-30). Asked with the bot token, so DWEEB checks a
+    /// channel-level permission with Discord's own arithmetic rather than a
+    /// copy of it. Discord requires the *bot* to view the channel; when it
+    /// can't, the answer is [`ChannelPermissions::Unreachable`].
+    pub async fn channel_member_permissions(
+        &self,
+        channel: &str,
+        user: &str,
+    ) -> Result<ChannelPermissions, AppError> {
+        let _permit = self
+            .bot_sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::Internal("rate-limit semaphore closed".into()))?;
+        let url = format!("{API_BASE}/channels/{channel}/permissions/member/{user}");
+        let resp = send_with_retry(self.http.get(&url).header(AUTHORIZATION, &self.bot_auth))
+            .await
+            .map_err(transport_error)?;
+        let status = resp.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct Answer {
+                permissions: String,
+            }
+            let answer: Answer = resp
+                .json()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e))?;
+            return answer
+                .permissions
+                .parse::<u64>()
+                .map(ChannelPermissions::Bits)
+                .map_err(|_| {
+                    AppError::Internal("Discord sent an unreadable permission bitfield".into())
+                });
+        }
+        let retry_after = if status.as_u16() == 429 {
+            resp.headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<f64>().ok())
+        } else {
+            None
+        };
+        let body = resp.json::<Value>().await.ok();
+        let code = body
+            .as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(Value::as_u64);
+        if let Some(verdict) = classify_channel_permissions(status.as_u16(), code) {
+            return Ok(verdict);
+        }
+        let message = body
+            .as_ref()
+            .and_then(|v| v.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("Discord returned an error")
+            .to_string();
+        Err(map_discord_error(status, message, retry_after, false))
     }
 
     pub async fn emojis(&self, guild: &str) -> Result<Vec<Emoji>, AppError> {
@@ -2045,7 +2176,7 @@ async fn webhook_error_from(resp: reqwest::Response) -> AppError {
         413 => AppError::Status {
             status: StatusCode::PAYLOAD_TOO_LARGE,
             message: "That file is larger than this server's Discord upload limit \
-                      (10 MB unless the server is boosted)."
+                      (20 MB per file unless the server is boosted)."
                 .into(),
             retry_after: None,
         },
@@ -2109,6 +2240,80 @@ fn audit_reason(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The channel-permissions read separates what the webhook gate must
+    /// refuse with a reason of its own from the failures every bot read maps.
+    #[test]
+    fn channel_permission_answers_are_classified_by_status_and_code() {
+        assert_eq!(
+            classify_channel_permissions(404, Some(10007)),
+            Some(ChannelPermissions::NotMember)
+        );
+        assert_eq!(
+            classify_channel_permissions(404, Some(10013)),
+            Some(ChannelPermissions::NotMember)
+        );
+        assert_eq!(
+            classify_channel_permissions(404, Some(10003)),
+            Some(ChannelPermissions::Unreachable)
+        );
+        // Discord requires the bot to view the channel: a 403 is "the bot
+        // can't see it", whatever the code says.
+        assert_eq!(
+            classify_channel_permissions(403, Some(50001)),
+            Some(ChannelPermissions::Unreachable)
+        );
+        assert_eq!(
+            classify_channel_permissions(403, None),
+            Some(ChannelPermissions::Unreachable)
+        );
+        // A bare 404 (no code — a route Discord doesn't know), a rate limit,
+        // a 5xx and our own token all take the ordinary bot-read mapping.
+        for (status, code) in [
+            (404, None),
+            (429, None),
+            (500, None),
+            (502, None),
+            (401, Some(0)),
+        ] {
+            assert_eq!(classify_channel_permissions(status, code), None, "{status}");
+        }
+    }
+
+    #[test]
+    fn owners_and_administrators_override_channel_overwrites() {
+        let g = |owner: bool, permissions: &str| UserGuild {
+            id: "1".into(),
+            name: "g".into(),
+            icon: None,
+            owner,
+            permissions: permissions.into(),
+        };
+        assert!(g(true, "0").overrides_channel_overwrites());
+        assert!(g(false, &ADMINISTRATOR.to_string()).overrides_channel_overwrites());
+        // Manage Webhooks server-wide is exactly what an overwrite can deny.
+        assert!(!g(false, &MANAGE_WEBHOOKS.to_string()).overrides_channel_overwrites());
+        assert!(!g(false, "not a number").overrides_channel_overwrites());
+    }
+
+    #[test]
+    fn an_obfuscated_channel_never_reaches_a_list() {
+        let parse = |v: Value| serde_json::from_value::<Channel>(v).unwrap();
+        let channels = vec![
+            parse(
+                serde_json::json!({ "id": "1", "type": 0, "name": "___hidden___", "flags": CHANNEL_OBFUSCATED }),
+            ),
+            // Any other flag keeps the channel (PINNED | REQUIRE_TAG here).
+            parse(serde_json::json!({ "id": "2", "type": 15, "name": "help", "flags": 18 })),
+            parse(serde_json::json!({ "id": "3", "type": 0, "name": "general" })),
+        ];
+        let kept = visible_channels(channels);
+        let ids: Vec<&str> = kept.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["2", "3"]);
+        // The flag is read, never passed on to the browser or the cache.
+        let out = serde_json::to_value(&kept).unwrap();
+        assert!(out[0].get("flags").is_none(), "{out}");
+    }
 
     /// 2026-10-12: a post picked in the thread picker plus a leftover forum
     /// post title answered 400 code 220002 ("cannot have both a thread_name and

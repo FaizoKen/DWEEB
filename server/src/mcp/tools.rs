@@ -878,11 +878,9 @@ async fn webhook_for(
         .await
         .map_err(from_error)?;
     match usage {
-        WebhookUse::Post => {
-            crate::activity::require_dweeb_webhook(st, &session.uid, guild, channel)
-                .await
-                .map_err(from_error)
-        }
+        WebhookUse::Post => crate::activity::require_dweeb_webhook(st, &session, guild, channel)
+            .await
+            .map_err(from_error),
         WebhookUse::Existing => {
             match crate::activity::dweeb_webhook_in_channel(st, guild, channel, None)
                 .await

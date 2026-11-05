@@ -215,6 +215,12 @@ pub struct UsableGuild {
     /// for entries cached before it existed.
     #[serde(default)]
     pub can_manage: bool,
+    /// Owner or Administrator, whom no channel overwrite can restrict — so
+    /// the per-channel check in [`ensure_may_add_webhook_here`] is skipped
+    /// for them. Defaults to false for entries cached before it existed, which
+    /// only means they are asked about (once per webhook created).
+    #[serde(default)]
+    pub overrides_channel_overwrites: bool,
 }
 
 /// Liveness probe — no auth, no upstream calls.
@@ -407,7 +413,7 @@ pub async fn channel_threads(
     let Some(kind) = channel_type_in_guild(&st, &guild, &channel_id).await? else {
         return Err(client_error(
             StatusCode::NOT_FOUND,
-            "That channel isn't in this server.",
+            "That channel isn't in this server, or DWEEB's bot can't see it.",
         ));
     };
     if !THREAD_PARENT_TYPES.contains(&kind) {
@@ -1455,6 +1461,7 @@ pub async fn webhook_create(
         None => None,
     };
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+    ensure_may_add_webhook_here(&st, &session, &guild, &channel_id).await?;
     let reason = format!("Created via DWEEB by {}", session.uid);
     let w = st
         .discord
@@ -1535,6 +1542,7 @@ pub async fn webhook_modify(
     ensure_webhook_in_guild(&st, &guild, &webhook_id).await?;
     if let Some(c) = &move_to {
         ensure_channel_in_guild(&st, &guild, c).await?;
+        ensure_may_add_webhook_here(&st, &session, &guild, c).await?;
     }
     let reason = format!("Edited via DWEEB by {}", session.uid);
     let w = st
@@ -1735,8 +1743,67 @@ pub(crate) async fn ensure_channel_in_guild(
     }
     Err(client_error(
         StatusCode::NOT_FOUND,
-        "That channel isn't in this server.",
+        "That channel isn't in this server, or DWEEB's bot can't see it.",
     ))
+}
+
+/// Discord's own gate for *creating* a webhook in a channel, or moving one
+/// into it, is Manage Webhooks **in that channel** — a channel overwrite can
+/// deny it to someone who holds it server-wide. DWEEB's bot makes those calls
+/// with its own, broader permissions, so the user's server-wide bit (all the
+/// `authorize_*webhooks*` gates can see) isn't enough: ask Discord what this
+/// member holds in this channel (2026-10-30 endpoint) before the bot acts.
+/// Owners and Administrators skip the read, since nothing restricts them.
+///
+/// Only creation and moves are checked. Posting through a webhook that
+/// already exists stays a server-wide decision, like Discord's own server
+/// settings, which show every webhook's URL to whoever manages webhooks.
+pub(crate) async fn ensure_may_add_webhook_here(
+    st: &AppState,
+    session: &Session,
+    guild: &str,
+    channel_id: &str,
+) -> Result<(), AppError> {
+    let entry = find_guild(st, session, GuildLens::Member, guild).await?;
+    if entry
+        .as_ref()
+        .is_some_and(|g| g.overrides_channel_overwrites)
+    {
+        return Ok(());
+    }
+    let verdict = st
+        .discord
+        .channel_member_permissions(channel_id, &session.uid)
+        .await?;
+    match webhook_add_refusal(&verdict) {
+        None => Ok(()),
+        Some((status, message)) => Err(client_error(status, message)),
+    }
+}
+
+/// Why a member may not add a webhook to a channel, given Discord's answer —
+/// or `None` when they may.
+fn webhook_add_refusal(
+    verdict: &crate::discord::ChannelPermissions,
+) -> Option<(StatusCode, &'static str)> {
+    use crate::discord::{ChannelPermissions, ADMINISTRATOR, MANAGE_WEBHOOKS};
+    match verdict {
+        ChannelPermissions::Bits(bits) if bits & (ADMINISTRATOR | MANAGE_WEBHOOKS) != 0 => None,
+        ChannelPermissions::Bits(_) => Some((
+            StatusCode::FORBIDDEN,
+            "You don't have Manage Webhooks in that channel, so DWEEB won't add a webhook there \
+             for you. Pick another channel, or ask an admin to allow it in the channel's permissions.",
+        )),
+        ChannelPermissions::NotMember => Some((
+            StatusCode::FORBIDDEN,
+            "You're not a member of this server any more — sign in again to refresh your servers.",
+        )),
+        ChannelPermissions::Unreachable => Some((
+            StatusCode::NOT_FOUND,
+            "That channel isn't in this server, or DWEEB's bot can't see it. Give the DWEEB role \
+             View Channel and Manage Webhooks there, then try again.",
+        )),
+    }
 }
 
 /// A channel's Discord `type` from the guild's channel list — cached first,
@@ -2102,6 +2169,7 @@ fn guild_lenses(
         .map(|g| UsableGuild {
             can_manage_webhooks: g.can_manage_webhooks(),
             can_manage: g.can_manage(),
+            overrides_channel_overwrites: g.overrides_channel_overwrites(),
             id: g.id,
             name: g.name,
             icon: g.icon,
@@ -2289,6 +2357,44 @@ fn value_response(value: &Value) -> Response {
 mod tests {
     use super::*;
     use crate::discord::AppIdentity;
+
+    // ── webhook creation gate ─────────────────────────────────────────────────
+
+    /// Creating (or moving) a webhook needs Manage Webhooks *in the channel*,
+    /// which an overwrite can take from someone holding it server-wide.
+    #[test]
+    fn a_webhook_is_added_only_where_the_member_may_manage_webhooks() {
+        use crate::discord::{ChannelPermissions, ADMINISTRATOR, MANAGE_WEBHOOKS};
+        const VIEW_CHANNEL: u64 = 1 << 10;
+        const SEND_MESSAGES: u64 = 1 << 11;
+
+        assert_eq!(
+            webhook_add_refusal(&ChannelPermissions::Bits(MANAGE_WEBHOOKS | VIEW_CHANNEL)),
+            None
+        );
+        assert_eq!(
+            webhook_add_refusal(&ChannelPermissions::Bits(ADMINISTRATOR)),
+            None
+        );
+
+        // Denied in this channel, or a channel they can't even see (implicit
+        // masking turns that into no permissions at all).
+        for bits in [VIEW_CHANNEL | SEND_MESSAGES, 0] {
+            let (status, message) = webhook_add_refusal(&ChannelPermissions::Bits(bits)).unwrap();
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert!(
+                message.contains("Manage Webhooks in that channel"),
+                "{message}"
+            );
+        }
+        let (status, _) = webhook_add_refusal(&ChannelPermissions::NotMember).unwrap();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // The bot can't see the channel: a 4xx naming the fix, never a 5xx
+        // (5xx is the paging channel, and this is the server's setup).
+        let (status, message) = webhook_add_refusal(&ChannelPermissions::Unreachable).unwrap();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(message.contains("can't see it"), "{message}");
+    }
 
     // ── thread picker ─────────────────────────────────────────────────────────
 

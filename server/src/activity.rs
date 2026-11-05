@@ -259,7 +259,7 @@ async fn ensure_postable_channel(
     match crate::routes::channel_type_in_guild(st, guild, channel_id).await? {
         None => Err(AppError::Status {
             status: StatusCode::NOT_FOUND,
-            message: "That channel isn't in this server.".into(),
+            message: "That channel isn't in this server, or DWEEB's bot can't see it.".into(),
             retry_after: None,
         }),
         // Into an existing thread: no post is started, so neither title rule
@@ -614,7 +614,7 @@ pub async fn activity_post(
         // the channel; otherwise mint one. Either way the post carries
         // DWEEB's component routing.
         None => {
-            let (id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
+            let (id, token) = require_dweeb_webhook(&st, &session, &guild, &channel_id).await?;
             (id, token, None)
         }
     };
@@ -1514,7 +1514,7 @@ pub(crate) async fn dweeb_webhook_in_channel(
 /// webhook, and the bot would create one in someone else's server.
 pub(crate) async fn require_dweeb_webhook(
     st: &AppState,
-    session_uid: &str,
+    session: &crate::session::Session,
     guild: &str,
     channel_id: &str,
 ) -> Result<(String, String), AppError> {
@@ -1527,11 +1527,13 @@ pub(crate) async fn require_dweeb_webhook(
             {
                 return Err(AppError::Status {
                     status: StatusCode::NOT_FOUND,
-                    message: "That channel isn't in this server.".into(),
+                    message: "That channel isn't in this server, or DWEEB's bot can't see it."
+                        .into(),
                     retry_after: None,
                 });
             }
-            let reason = format!("Created via DWEEB Activity by {session_uid}");
+            crate::routes::ensure_may_add_webhook_here(st, session, guild, channel_id).await?;
+            let reason = format!("Created via DWEEB Activity by {}", session.uid);
             let w = st
                 .discord
                 .create_webhook(channel_id, "DWEEB", None, Some(&reason))
@@ -1824,7 +1826,7 @@ pub async fn activity_schedule(
             let hook = require_custom_hook(&st, &guild, app).await?;
             (hook.webhook_id, hook.token)
         }
-        None => require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?,
+        None => require_dweeb_webhook(&st, &session, &guild, &channel_id).await?,
     };
 
     let created = crate::schedule::create_for_owner(

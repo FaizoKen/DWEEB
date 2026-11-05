@@ -821,9 +821,12 @@ async fn run() {
         // post bodies are bounded well before JSON parsing; the room is a WS.
         // Post/edit take a bigger body than the other JSON routes because they
         // may arrive as multipart carrying the message's uploaded files (the
-        // proxy forwards them to Discord): 32 MiB covers Discord's 10 MiB base
-        // per-file limit with room for several images, while still bounding
-        // what one request can make the proxy buffer.
+        // proxy forwards them to Discord): 32 MiB covers Discord's 20 MiB base
+        // per-file limit (10 MiB until 2026-09-03) plus the rest of a message's
+        // images, while still bounding what one request can make the proxy
+        // buffer. A boosted server's bigger files don't fit; that is the price
+        // of a memory bound on a small host, and Discord would 413 them on an
+        // unboosted server anyway.
         .route(
             "/api/activity/token",
             post(activity::activity_token).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),

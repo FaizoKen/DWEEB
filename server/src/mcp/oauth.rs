@@ -124,6 +124,10 @@ pub async fn authorization_server(State(st): State<AppState>) -> Response {
         // 2.1 for good reason: it protects nothing against an attacker who can
         // read the authorization request.
         "code_challenge_methods_supported": ["S256"],
+        // RFC 9207: every authorization response carries `iss` (the issuer
+        // above), which is what lets a client reject a response that came from
+        // a different authorization server than the one it asked.
+        "authorization_response_iss_parameter_supported": true,
         "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
         "service_documentation": "https://dweeb.faizo.net/",
     }))
@@ -336,6 +340,7 @@ pub async fn authorize(
     // From here the redirect URI is trusted, so failures go back to the client.
     if q.response_type.trim() != "code" {
         return Ok(redirect_error(
+            &public_base(&st),
             &redirect_uri,
             "unsupported_response_type",
             "Only the authorization code flow is supported.",
@@ -344,6 +349,7 @@ pub async fn authorize(
     }
     if q.code_challenge_method.as_deref().unwrap_or("") != "S256" {
         return Ok(redirect_error(
+            &public_base(&st),
             &redirect_uri,
             "invalid_request",
             "PKCE with code_challenge_method=S256 is required.",
@@ -353,6 +359,7 @@ pub async fn authorize(
     let challenge = q.code_challenge.trim().to_string();
     if challenge.len() < 43 || challenge.len() > 128 {
         return Ok(redirect_error(
+            &public_base(&st),
             &redirect_uri,
             "invalid_request",
             "code_challenge must be a base64url-encoded SHA-256 digest.",
@@ -440,6 +447,7 @@ pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &s
         Err(e) => {
             tracing::warn!(target: "mcp_oauth", error = %e, "discord code exchange failed");
             return redirect_error(
+                &public_base(st),
                 &pending.redirect_uri,
                 "access_denied",
                 "Discord did not complete the sign-in.",
@@ -452,6 +460,7 @@ pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &s
         Err(e) => {
             tracing::warn!(target: "mcp_oauth", error = %e, "could not read the Discord user");
             return redirect_error(
+                &public_base(st),
                 &pending.redirect_uri,
                 "access_denied",
                 "Could not read your Discord account.",
@@ -476,6 +485,7 @@ pub async fn complete_authorization(st: &AppState, state: &str, discord_code: &s
         Err(e) => {
             tracing::error!(target: "mcp_oauth", error = %e, "could not store the pending consent");
             return redirect_error(
+                &public_base(st),
                 &pending.redirect_uri,
                 "server_error",
                 "Could not complete the authorization.",
@@ -537,6 +547,7 @@ pub async fn consent(State(st): State<AppState>, Form(form): Form<ConsentForm>) 
             "declined an MCP client"
         );
         return redirect_error(
+            &public_base(&st),
             &pending.redirect_uri,
             "access_denied",
             "The authorization was declined.",
@@ -556,6 +567,7 @@ pub async fn consent(State(st): State<AppState>, Form(form): Form<ConsentForm>) 
         Err(e) => {
             tracing::error!(target: "mcp_oauth", error = %e, "could not store the authorization code");
             return redirect_error(
+                &public_base(&st),
                 &pending.redirect_uri,
                 "server_error",
                 "Could not complete the authorization.",
@@ -571,10 +583,12 @@ pub async fn consent(State(st): State<AppState>, Form(form): Form<ConsentForm>) 
         "authorized an MCP client"
     );
 
+    let issuer = public_base(&st);
     let mut params = vec![("code", code.as_str())];
     if let Some(client_state) = pending.client_state.as_deref() {
         params.push(("state", client_state));
     }
+    params.push(("iss", issuer.as_str()));
     Redirect::to(&with_query(&pending.redirect_uri, &params)).into_response()
 }
 
@@ -904,6 +918,7 @@ fn error_page(title: &str, detail: &str) -> Response {
 /// An OAuth error handed back to the client at its (already validated) redirect
 /// URI, per RFC 6749 §4.1.2.1.
 fn redirect_error(
+    issuer: &str,
     redirect_uri: &str,
     code: &str,
     description: &str,
@@ -913,6 +928,10 @@ fn redirect_error(
     if let Some(state) = client_state {
         params.push(("state", state));
     }
+    // RFC 9207: name ourselves on every authorization response, errors too, so
+    // a client talking to several authorization servers can tell which one
+    // answered (the mix-up defence; advertised in our metadata).
+    params.push(("iss", issuer));
     Redirect::to(&with_query(redirect_uri, &params)).into_response()
 }
 
@@ -1010,6 +1029,7 @@ mod tests {
     #[test]
     fn a_redirect_uri_with_its_own_query_still_receives_readable_parameters() {
         let resp = redirect_error(
+            "https://api.example",
             "https://client.example/cb?tenant=a",
             "access_denied",
             "nope",
@@ -1023,6 +1043,7 @@ mod tests {
                 ("error".into(), "access_denied".into()),
                 ("error_description".into(), "nope".into()),
                 ("state".into(), "st".into()),
+                ("iss".into(), "https://api.example".into()),
             ]
         );
         // And a plain URI gets a plain query.
