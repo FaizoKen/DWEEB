@@ -1,14 +1,17 @@
 //! The Discord REST layer, and the bounded cache in front of it.
 //!
-//! Three reads, all authenticated with the deployment's shared **bot token**, all
+//! Four reads, all authenticated with the deployment's shared **bot token**, all
 //! read-only — this plugin never writes anything to a server — and all of them
 //! answered by a bot that is merely a *member* of the guild:
 //!   • `GET /guilds/{id}?with_counts=true` — the guild's name, plus its
 //!     approximate member/online totals (see [`GuildStructure::member_count`]).
 //!   • `GET /guilds/{id}/roles` — every role, with colours and permission bits.
-//!   • `GET /guilds/{id}/channels` — every channel, with topics.
+//!   • `GET /guilds/{id}/channels` — every channel the bot can view, with topics.
+//!   • `GET /guilds/{id}/roles/member-counts` — how many members hold each role
+//!     (added to Discord's API 2025-12-09; see [`RoleView::member_count`]).
+//!     Optional: its failure costs the counts and nothing else.
 //!
-//! The three are fetched concurrently, so a click answers **inline** — there is
+//! The four are fetched concurrently, so a click answers **inline** — there is
 //! no deferral path anywhere in this plugin, and nothing here can take longer
 //! than one Discord round-trip.
 //!
@@ -19,12 +22,14 @@
 //! Every *per-member* read Discord offers is gated behind the privileged
 //! `GUILD_MEMBERS` intent: `GET /guilds/{id}/members` requires it outright, and
 //! the one endpoint that doesn't (`/members/search`) needs a name prefix and
-//! cannot filter by role, so it can't enumerate anything. A role object carries
-//! no member count either. So "who holds this role" is not a feature this plugin
-//! can implement, by any route — it was tried, and what shipped was an apology
-//! line in the middle of members' messages. Don't reintroduce it without the
-//! intent actually being on. Server-wide totals are the honest substitute, and
-//! they come free with the guild fetch above.
+//! cannot filter by role, so it can't enumerate anything. So "who holds this
+//! role" is not a feature this plugin can implement, by any route — it was
+//! tried, and what shipped was an apology line in the middle of members'
+//! messages. Don't reintroduce it without the intent actually being on. *How
+//! many* hold it is a different question with an ungated answer: Discord's
+//! role member-count map (a count, never a name), which is what the roster's
+//! optional per-role count reads. Server-wide totals come free with the guild
+//! fetch above.
 //!
 //! ## Why the cache is shaped the way it is
 //!
@@ -229,6 +234,13 @@ pub struct RoleView {
     /// A role's own unicode emoji, when it has one (shown before the name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unicode_emoji: Option<String>,
+    /// How many members hold the role, from Discord's role member-count map.
+    ///
+    /// `None` when the map couldn't be read or doesn't name the role — and
+    /// then the roster shows no count for it, never a `0`: silence from
+    /// Discord must not become a claim about someone's server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_count: Option<u64>,
     /// The role's raw permission bits — what a clicker's channel visibility is
     /// computed from. Server-side only: the config UI gets the badges instead.
     #[serde(skip)]
@@ -440,6 +452,23 @@ struct RawChannel {
     nsfw: bool,
     #[serde(default)]
     permission_overwrites: Vec<RawOverwrite>,
+    /// Read for [`CHANNEL_OBFUSCATED`] only.
+    #[serde(default)]
+    flags: u64,
+}
+
+/// Channel flag `CHANNEL_OBFUSCATED` (2026-08-12): a channel the bot can't
+/// view, its name replaced by `___hidden___`. Discord obfuscates over the
+/// Gateway and, from 2026-11-16, leaves such channels out of
+/// `GET /guilds/{id}/channels`; one that arrives anyway is dropped here, so a
+/// placeholder name can never reach a directory or a picker. The flag — never
+/// the name — is the documented test.
+const CHANNEL_OBFUSCATED: u64 = 1 << 17;
+
+impl RawChannel {
+    fn bot_can_view(&self) -> bool {
+        self.flags & CHANNEL_OBFUSCATED == 0
+    }
 }
 
 #[derive(Deserialize)]
@@ -506,6 +535,7 @@ fn role_view(raw: RawRole, guild_id: &str) -> Option<RoleView> {
         staff: bits & STAFF_PERMISSIONS != 0,
         badges: permission_badges(bits),
         unicode_emoji: raw.unicode_emoji.filter(|e| !e.is_empty()),
+        member_count: None,
         permissions: bits,
     })
 }
@@ -526,11 +556,25 @@ pub async fn fetch_structure(
     let guild_url = format!("{API_BASE}/guilds/{guild_id}?with_counts=true");
     let roles_url = format!("{API_BASE}/guilds/{guild_id}/roles");
     let channels_url = format!("{API_BASE}/guilds/{guild_id}/channels");
-    let (guild, roles, channels): (RawGuild, Vec<RawRole>, Vec<RawChannel>) = tokio::try_join!(
-        get_json(http, token, &guild_url),
-        get_json(http, token, &roles_url),
-        get_json(http, token, &channels_url),
-    )?;
+    let counts_url = format!("{API_BASE}/guilds/{guild_id}/roles/member-counts");
+    // The counts ride beside the three reads the roster can't do without and
+    // never fail them: a refused or slow count read costs the counts alone.
+    let (required, counts) = tokio::join!(
+        async {
+            tokio::try_join!(
+                get_json::<RawGuild>(http, token, &guild_url),
+                get_json::<Vec<RawRole>>(http, token, &roles_url),
+                get_json::<Vec<RawChannel>>(http, token, &channels_url),
+            )
+        },
+        get_json::<HashMap<String, u64>>(http, token, &counts_url),
+    );
+    let (guild, roles, channels) = required?;
+    let role_counts = counts.unwrap_or_else(|e| {
+        // Info, never higher: a missing count is not worth anyone's page.
+        tracing::info!(guild = %guild_id, error = ?e, "role member counts unavailable");
+        HashMap::new()
+    });
 
     // @everyone (its id is the guild's) never appears in a roster, but its
     // permissions are every member's baseline — what channel visibility starts
@@ -543,6 +587,10 @@ pub async fn fetch_structure(
     let mut role_views: Vec<RoleView> = roles
         .into_iter()
         .filter_map(|r| role_view(r, guild_id))
+        .map(|mut r| {
+            r.member_count = role_counts.get(&r.id).copied();
+            r
+        })
         .collect();
     // Discord's own hierarchy order: highest position first, and among equal
     // positions the older (lower) id sits higher.
@@ -554,6 +602,7 @@ pub async fn fetch_structure(
 
     let mut channel_views: Vec<ChannelView> = channels
         .into_iter()
+        .filter(RawChannel::bot_can_view)
         .map(|c| {
             let overwrites: Vec<Overwrite> = c
                 .permission_overwrites
@@ -1140,6 +1189,23 @@ mod tests {
     /// 400. That is the caller's mistake and must answer 4xx — a 5xx here would
     /// let anyone page the maintainer on demand.
     #[test]
+    fn an_obfuscated_channel_is_never_listed() {
+        let parse = |v: serde_json::Value| serde_json::from_value::<RawChannel>(v).unwrap();
+        let hidden = parse(serde_json::json!({
+            "id": "1", "type": 0, "name": "___hidden___", "flags": 1u64 << 17,
+            "permission_overwrites": [{ "id": "9", "type": 0, "allow": "0", "deny": "1024" }],
+        }));
+        assert!(!hidden.bot_can_view());
+        // Any other flag (PINNED, REQUIRE_TAG, …) leaves the channel listed,
+        // and so does no flags field at all.
+        let pinned =
+            parse(serde_json::json!({ "id": "2", "type": 15, "name": "help", "flags": 2 }));
+        assert!(pinned.bot_can_view());
+        let plain = parse(serde_json::json!({ "id": "3", "type": 0, "name": "general" }));
+        assert!(plain.bot_can_view());
+    }
+
+    #[test]
     fn a_400_from_discord_is_the_callers_mistake_not_a_page() {
         let e = status_error(400);
         assert_eq!(e, ConnectError::InvalidId);
@@ -1176,6 +1242,7 @@ mod tests {
             staff: false,
             badges: vec![],
             unicode_emoji: None,
+            member_count: None,
             permissions,
         }
     }

@@ -210,6 +210,13 @@ pub struct InstanceConfig {
     /// breakdown is not something this plugin can offer at all.
     #[serde(default)]
     pub show_member_count: bool,
+    /// Roles mode: add how many members hold each role ("· 12 members").
+    ///
+    /// From Discord's role member-count map (`GET /guilds/{id}/roles/
+    /// member-counts`), which needs no privileged intent: it is a number per
+    /// role, never who holds it. A role Discord gives no count for shows none.
+    #[serde(default)]
+    pub show_role_counts: bool,
     /// Per-id host copy, for roles or channels depending on `mode`.
     #[serde(default)]
     pub notes: Vec<Note>,
@@ -603,6 +610,7 @@ pub(crate) mod tests {
             roles: vec![],
             groups: vec![],
             show_member_count: false,
+            show_role_counts: false,
             show_permissions: true,
             channel_source: CHANNEL_SOURCE_ALL.into(),
             channels: vec![],

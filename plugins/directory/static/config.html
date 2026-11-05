@@ -1114,6 +1114,13 @@ summary .sub {
         <input id="showPermissions" type="checkbox" checked />
         <label for="showPermissions">Show what each role <b>can do</b> (Admin · Bans · Timeouts)</label>
       </div>
+      <div class="checkrow">
+        <input id="showRoleCounts" type="checkbox" />
+        <label for="showRoleCounts">Show <b>how many members</b> hold each role</label>
+      </div>
+      <div class="hint">
+        A live “· 12 members” after each role. Discord gives the number, never the names.
+      </div>
     </div>
 
     <!-- ── CHANNELS MODE ──────────────────────────────────────────────────── -->
@@ -2109,6 +2116,7 @@ summary .sub {
           // option value, so re-using one would make two options collide.
           nextGroupKey = 1;
           $("showMemberCount").checked = !!d.show_member_count;
+          $("showRoleCounts").checked = !!d.show_role_counts;
           $("showPermissions").checked = d.show_permissions !== false;
 
           $("channelSource").value = d.channel_source || "all";
@@ -2467,6 +2475,7 @@ summary .sub {
           roles: roleRefs(pickedRoles),
           groups: cleanGroups,
           show_member_count: $("showMemberCount").checked,
+          show_role_counts: $("showRoleCounts").checked,
           show_permissions: $("showPermissions").checked,
           channel_source: channelSource(),
           channels: channelRefs(pickedChannels),

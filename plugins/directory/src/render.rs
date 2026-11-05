@@ -239,16 +239,21 @@ fn server_counts(input: &RenderInput<'_>) -> Option<String> {
     }
     let mut parts = Vec::new();
     if let Some(total) = input.structure.member_count {
-        parts.push(format!(
-            "{} {}",
-            thousands(total),
-            if total == 1 { "member" } else { "members" }
-        ));
+        parts.push(members_label(total));
     }
     if let Some(online) = input.structure.online_count {
         parts.push(format!("{} online", thousands(online)));
     }
     (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// `1 member`, `1,204 members`.
+fn members_label(n: u64) -> String {
+    format!(
+        "{} {}",
+        thousands(n),
+        if n == 1 { "member" } else { "members" }
+    )
 }
 
 /// Group a number with thin thousands separators: `1204` → `1,204`.
@@ -393,6 +398,11 @@ fn push_role(
     let mut head = format!("<@&{}>", role.id);
     if let Some(emoji) = &role.unicode_emoji {
         head = format!("{} {}", one_line(emoji), head);
+    }
+    if cfg.show_role_counts {
+        if let Some(count) = role.member_count {
+            head.push_str(&format!(" · {}", members_label(count)));
+        }
     }
     if cfg.show_permissions && !role.badges.is_empty() {
         head.push_str(&format!(" `{}`", role.badges.join(" · ")));
@@ -739,6 +749,7 @@ mod tests {
             staff: perms != 0,
             badges: permission_badges(perms),
             unicode_emoji: None,
+            member_count: None,
             permissions: perms,
         }
     }
@@ -1024,6 +1035,47 @@ mod tests {
         // The roster itself is unaffected.
         assert!(text.contains("<@&r1>"), "{text}");
         assert!(text.contains("`Bans`"), "{text}");
+    }
+
+    /// Discord's role member-count map: a count beside each role when asked
+    /// for, and nothing at all — never a `0` — for a role it didn't count.
+    #[test]
+    fn role_counts_render_beside_each_role_only_when_known_and_asked_for() {
+        let mut cfg = count_cfg();
+        cfg.show_member_count = false;
+        cfg.roles.push(RoleRef {
+            id: "r2".into(),
+            name: "Helper".into(),
+            color: 0,
+        });
+        let mut counted = role("r1", "Mod", true, 0);
+        counted.member_count = Some(1204);
+        let mut single = role("r2", "Helper", true, 0);
+        single.member_count = Some(1);
+        let st = structure(vec![counted.clone(), single], vec![]);
+        let read = |cfg: &InstanceConfig, st: &GuildStructure| {
+            text_of(&render(&RenderInput {
+                cfg,
+                structure: st,
+                section: None,
+                viewer: None,
+            }))
+        };
+
+        // Off by default: the roster reads exactly as it did.
+        let text = read(&cfg, &st);
+        assert!(!text.contains("member"), "{text}");
+
+        cfg.show_role_counts = true;
+        let text = read(&cfg, &st);
+        assert!(text.contains("<@&r1> · 1,204 members"), "{text}");
+        assert!(text.contains("<@&r2> · 1 member\n"), "{text}");
+
+        // Discord named no count for the role: say nothing about it.
+        let uncounted = structure(vec![role("r1", "Mod", true, 0)], vec![]);
+        let text = read(&cfg, &uncounted);
+        assert!(text.contains("<@&r1>"), "{text}");
+        assert!(!text.contains("member"), "{text}");
     }
 
     /// Off by default, and off means *absent* — not a zero.
