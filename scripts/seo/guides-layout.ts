@@ -82,7 +82,7 @@ export const GUIDES_INDEX_PATH = "/guides/";
 export const GUIDES_INDEX_URL = `${SITE.origin}${GUIDES_INDEX_PATH}`;
 export const ABOUT_PATH = "/about/";
 export const ABOUT_URL = `${SITE.origin}${ABOUT_PATH}`;
-export const ABOUT_LASTMOD = "2026-08-20";
+export const ABOUT_LASTMOD = "2026-11-13";
 
 function trackedAppPath(path: string, type: "guide" | "landing", id: string): string {
   return withClientParams(path, { entry: `${type}:${id}` });
@@ -516,6 +516,21 @@ export function renderAboutPage(): string {
         <h2>How product and guide claims are reviewed</h2>
         <p>Guides begin with Discord's developer documentation and are checked against the editor's actual import, validation, send, restore and update paths. Dates on a page change only after a substantive content review. Security and privacy copy distinguishes local browser data from optional connected services, and the <a href="/privacy">Privacy Policy</a> lists those boundaries.</p>
         <p>Errors and edge cases are tested before release through TypeScript checks, unit tests, generated validation corpora shared with the server, a production build and a post-generation SEO audit. The audit checks canonical URLs, sitemap coverage, metadata, structured data, internal links, content depth and social assets across every indexable page.</p>
+      </section>
+
+      <section class="block sources">
+        <h2>Engineering notes behind DWEEB</h2>
+        <p>Faizo writes up how DWEEB is built and what running it in production has taught, in long-form articles on <a href="${SITE.makerUrl}">faizo.net</a>. These cover the parts of the product this page describes:</p>
+        <ul>
+          <li><a href="${SITE.notesUrl}measuring-discord-message-rendering/">Measuring how Discord renders a message instead of guessing</a> — the preview workflow above, in detail.</li>
+          <li><a href="${SITE.notesUrl}two-implementations-one-corpus/">Keeping a TypeScript validator and its Rust port in agreement</a> — how the validation corpus shared with the server works.</li>
+          <li><a href="${SITE.notesUrl}discord-interaction-deadlines/">Nested deadlines: answering Discord interactions inside three seconds</a> — how button clicks reach DWEEB's plugins.</li>
+          <li><a href="${SITE.notesUrl}discord-webhook-avatar-url-hosting/">Discord keeps your webhook's avatar_url, not the image, so host it forever</a> — why uploaded avatars are hosted permanently.</li>
+          <li><a href="${SITE.notesUrl}open-discord-app-from-web-link/">Opening the Discord app from a web page without opening the website too</a> — the “Open in Discord” links.</li>
+          <li><a href="${SITE.notesUrl}localstorage-multiple-tabs/">A stale browser tab deleted four hours of saved drafts</a> — how browser drafts stay safe across tabs.</li>
+          <li><a href="${SITE.notesUrl}code-splitting-boot-bundle-module-boundaries/">Cutting 30 KB from a boot bundle by moving module boundaries</a> — what keeps the editor's first load small.</li>
+        </ul>
+        <p><a href="${SITE.notesUrl}">All engineering notes on faizo.net</a></p>
       </section>
 
       <section class="block sources">

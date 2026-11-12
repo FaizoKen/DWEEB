@@ -310,9 +310,10 @@ export function htmlDocument(opts: {
         <a href="/about/">About</a> ·
         <a href="/privacy">Privacy</a> ·
         <a href="/terms">Terms</a> ·
+        <a href="${SITE.notesUrl}">Engineering notes</a> ·
         <a href="${SITE.githubUrl}" rel="noopener" target="_blank">GitHub</a>
       </p>
-      <p class="muted">Independent project; not affiliated with Discord Inc.</p>
+      <p class="muted">Independent project by <a href="${SITE.makerUrl}">Faizo</a>; not affiliated with Discord Inc.</p>
     </footer>
   </body>
 </html>`;

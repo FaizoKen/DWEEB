@@ -45,6 +45,13 @@ export const SITE = {
   authorUrl: "https://dweeb.faizo.net/about/",
   githubUrl: "https://github.com/FaizoKen/DWEEB",
   communityUrl: "https://discord.gg/2wB7rHRDg2",
+  // The maintainer's own site and its engineering articles. Plain `<a>` links
+  // only (footer, /about/): never put these in JSON-LD as `url`/`sameAs` —
+  // the identity rule above still holds. They exist so crawlers that visit this
+  // site daily also discover the articles on the apex (2026-11-13: none of them
+  // had been crawled, "Referring page: None detected").
+  makerUrl: "https://faizo.net/",
+  notesUrl: "https://faizo.net/writing/",
 } as const;
 
 /**
