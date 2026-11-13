@@ -2195,6 +2195,32 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Keep the default `webhook.incoming` OAuth path. Custom bots must not collect bot tokens;
   their OAuth create flow uses the popup/localStorage handshake because Discord can sever
   `window.opener`.
+- **An OAuth popup opens at its URL. Only a URL that needs an `await` is sent there
+  afterwards, and a refusal falls back to leaving the page** (`core/oauth/popupFlow.ts`,
+  2026-11-14). Six `kind=error` pages came in 2.5 minutes from the live build `bd47ebb8c8`,
+  all reading "The operation is insecure." at `navigatePopup`'s `popup.location.href = url`.
+  One came from Create with DWEEB, five from Sign in. `window.open("about:blank", …)` had
+  handed back a window that the browser then refused to let us navigate, so each click left
+  a blank window and did nothing else. The engine is WebKit (Safari, or an iOS in-app
+  browser): the column lands on `.href`, while Firefox puts it at the start of the assignment
+  and Chromium words a SecurityError differently. Why WebKit refused is **not known**.
+  Headless Firefox navigated in every shape tried: sandboxed iframes, a CSP sandbox, a
+  cross-origin frame, a COOP page, a named window left by an open or closed tab. WebKit isn't
+  installed here. The fix doesn't depend on the cause. (1) `startPopupFlow(flow, url)` opens
+  the window *at* the URL for every click that knows it synchronously (Sign in, bot add,
+  Create with DWEEB). The browser navigates the window as part of opening it, so no
+  cross-window navigation is left to refuse. (2) Only the custom-bot webhook keeps
+  blank-then-navigate, because its URL is minted by a POST after the click. It goes through
+  `sendPopup`, which closes the blank window on a refused navigation and runs the flow with
+  `redirectFullPage` instead. Draft autosave makes that lossless. (3) `cancelPopup` and
+  `redirectFullPage` end the tab's attempt. That attempt lives in sessionStorage, which
+  survives the page's own navigation, and a leftover one would let the returning page act on
+  popup results (the 2026-10-05 forging rule). The marks are set before `window.open` and
+  rolled back when it returns null. Nothing new reaches the network. Don't prefetch the
+  custom-bot URL to make it synchronous: each one is a POST that mints server state. Don't
+  bring back `window.open("about:blank")` + `location.href` for a URL the click already
+  knows. Guarded by "a flow always gets somewhere" in `popupFlow.test.ts`. Bundles from before
+  the fix keep the bug until their service worker updates, and their beacons still page.
 - Link-plugin URLs stay freely editable and the binding follows the URL. Keep one uniform
   link-plugin UI; do not reintroduce per-plugin parameter panels.
 - **Link plugins have two optional manifest upgrades** (docs/plugins.md): `statusUrl` — a

@@ -157,8 +157,12 @@ function markPending(kind: string): void {
  *  the opener's poll / storage listener can still pick it up; the consumer
  *  ({@link subscribePopupResult}) drops the result key once it has applied it. */
 export function clearPopupPending(flow: PopupFlow<unknown>): void {
+  clearPendingMark(flow.kind);
+}
+
+function clearPendingMark(kind: string): void {
   try {
-    localStorage.removeItem(pendingKey(flow.kind));
+    localStorage.removeItem(pendingKey(kind));
   } catch {
     /* ignore */
   }
@@ -210,27 +214,108 @@ function centeredFeatures(): string {
   return `popup=yes,width=${w},height=${h},left=${left},top=${top}`;
 }
 
+/** `window.open`, with a refusal that throws read as the refusal it is. */
+function openWindow(url: string, kind: string): Window | null {
+  try {
+    return window.open(url, channelName(kind), centeredFeatures());
+  } catch {
+    return null;
+  }
+}
+
+/** Forget a popup attempt that never got going: no handshake, no attempt. */
+function unmark(kind: string): void {
+  clearPendingMark(kind);
+  endAttempt(kind);
+}
+
+function focusQuietly(popup: Window): void {
+  try {
+    popup.focus?.();
+  } catch {
+    /* focus is a nicety; the popup is already on its way */
+  }
+}
+
+function closeQuietly(popup: Window): void {
+  try {
+    popup.close();
+  } catch {
+    /* the user can close it */
+  }
+}
+
 /**
- * Open a blank, centered popup for `flow` — synchronously, so it isn't caught by
- * the popup blocker (the OAuth URL often isn't known until after an `await`,
- * which would break the user-gesture if we opened then). Navigate it with
- * {@link navigatePopup} once the URL is ready, then hand it to {@link watchPopup}.
- * Returns `null` when unsupported or blocked, so the caller falls back to
- * {@link redirectFullPage}.
+ * Run `flow` in a popup opened straight at `url`, for a click that already
+ * knows where it goes. The browser navigates the new window itself, as part of
+ * opening it, so nothing here ever has to send a window on from outside — the
+ * step some browsers refuse (see {@link sendPopup}). Only a blocked popup falls
+ * back to leaving the page, so the flow always completes.
+ */
+export function startPopupFlow<R>(flow: PopupFlow<R>, url: string): void {
+  if (typeof window === "undefined") return;
+  // Marked first, so the handshake exists before the window can come back.
+  markPending(flow.kind); // the handshake the returning popup recognises itself by
+  markAttempt(flow.kind); // and what lets THIS tab act on the result it brings
+  const popup = openWindow(url, flow.kind);
+  if (!popup) {
+    redirectFullPage(flow, url);
+    return;
+  }
+  focusQuietly(popup);
+  watchPopup(flow, popup);
+}
+
+/**
+ * Open a blank, centered popup for `flow`, for a click whose OAuth URL isn't
+ * known until after an `await`: opening the window then would lose the click's
+ * user activation, and the popup blocker would catch it. Call it synchronously
+ * in the click, then hand the popup and the URL to {@link sendPopup} (or
+ * {@link cancelPopup} if no URL comes). Returns `null` when unsupported or
+ * blocked; {@link sendPopup} then leaves the page instead. A click that already
+ * knows its URL uses {@link startPopupFlow}.
  */
 export function openPopup(flow: PopupFlow<unknown>): Window | null {
   if (typeof window === "undefined") return null;
-  const popup = window.open("about:blank", channelName(flow.kind), centeredFeatures());
-  if (!popup) return null;
-  markPending(flow.kind); // the handshake the returning popup recognises itself by
-  markAttempt(flow.kind); // and what lets THIS tab act on the result it brings
+  markPending(flow.kind);
+  markAttempt(flow.kind);
+  const popup = openWindow("about:blank", flow.kind);
+  if (!popup) unmark(flow.kind);
   return popup;
 }
 
-/** Point an already-open popup (from {@link openPopup}) at the OAuth URL. */
-export function navigatePopup(popup: Window, url: string): void {
-  popup.location.href = url;
-  popup.focus?.();
+/**
+ * Send a popup from {@link openPopup} on to `url` and watch it, or — with no
+ * popup, or one the browser won't let us navigate — run the flow by leaving
+ * the page. Never throws.
+ *
+ * Navigating another window is the one step here a browser may refuse: Safari
+ * answered `popup.location.href = url` with a SecurityError ("The operation is
+ * insecure.") on a popup `window.open` had just handed back (2026-11-13). The
+ * click died, the blank window stayed open, and every retry did the same. Now
+ * the blank window is closed and the page goes to Discord itself.
+ */
+export function sendPopup<R>(flow: PopupFlow<R>, popup: Window | null, url: string): void {
+  if (popup) {
+    try {
+      popup.location.href = url;
+    } catch {
+      closeQuietly(popup);
+      redirectFullPage(flow, url);
+      return;
+    }
+    focusQuietly(popup);
+    watchPopup(flow, popup);
+    return;
+  }
+  redirectFullPage(flow, url);
+}
+
+/** Abandon a popup from {@link openPopup} whose URL never came (the request
+ *  for it failed): close it and forget the attempt, so no result is awaited. */
+export function cancelPopup(flow: PopupFlow<unknown>, popup: Window | null): void {
+  if (popup) closeQuietly(popup);
+  unmark(flow.kind);
 }
 
 /**
@@ -240,7 +325,7 @@ export function navigatePopup(popup: Window, url: string): void {
  * `popup.closed` reads true and this just stops) — in which case the popup's own
  * relay delivers via the storage handshake instead. Harmless either way.
  */
-export function watchPopup<R>(flow: PopupFlow<R>, popup: Window): void {
+function watchPopup<R>(flow: PopupFlow<R>, popup: Window): void {
   if (typeof window === "undefined") return;
   let done = false;
   const stop = () => {
@@ -279,14 +364,18 @@ export function watchPopup<R>(flow: PopupFlow<R>, popup: Window): void {
 }
 
 /**
- * Full-page fallback for when the popup couldn't open (blocked / unsupported):
- * mark this tab so its OAuth return is handled in place (not mistaken for a
+ * Full-page fallback for when the popup couldn't open (blocked / unsupported)
+ * or the browser wouldn't navigate it: mark this tab so its OAuth return is
+ * handled in place (not mistaken for a
  * popup), drop any stale handshake state, then navigate it into the flow. The
  * result comes back via the URL on reload (see {@link consumeReturn}).
  */
 export function redirectFullPage(flow: PopupFlow<unknown>, url: string): void {
   // No popup is in flight — this tab handles its own return; drop stale state.
-  clearPopupPending(flow);
+  // That includes this tab's attempt: it lives in sessionStorage, which
+  // survives the navigation, and would otherwise leave the returning page
+  // acting on a popup result for minutes when no popup of its own exists.
+  unmark(flow.kind);
   try {
     localStorage.removeItem(resultKey(flow.kind));
   } catch {

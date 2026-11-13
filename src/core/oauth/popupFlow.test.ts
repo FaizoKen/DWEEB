@@ -4,10 +4,13 @@ type Engine = typeof import("./popupFlow");
 type Flows = typeof import("./flows");
 
 // Fresh modules per test: the engine keeps this tab's attempts in module state.
+let cancelPopup: Engine["cancelPopup"];
 let consumeReturn: Engine["consumeReturn"];
 let openPopup: Engine["openPopup"];
 let redirectFullPage: Engine["redirectFullPage"];
 let relayPopupIfApplicable: Engine["relayPopupIfApplicable"];
+let sendPopup: Engine["sendPopup"];
+let startPopupFlow: Engine["startPopupFlow"];
 let subscribePopupResult: Engine["subscribePopupResult"];
 let botAddFlow: Flows["botAddFlow"];
 let loginFlow: Flows["loginFlow"];
@@ -21,6 +24,7 @@ let webhookFlow: Flows["webhookFlow"];
 let local: Map<string, string>;
 let session: Map<string, string>;
 let replaceState: ReturnType<typeof vi.fn>;
+let assign: ReturnType<typeof vi.fn>;
 
 function storage(map: Map<string, string>): Storage {
   return {
@@ -31,9 +35,16 @@ function storage(map: Map<string, string>): Storage {
 }
 
 function stubBrowser(
-  opts: { hash?: string; search?: string; opener?: unknown; name?: string } = {},
+  opts: {
+    hash?: string;
+    search?: string;
+    opener?: unknown;
+    name?: string;
+    open?: (...args: unknown[]) => unknown;
+  } = {},
 ) {
   replaceState = vi.fn();
+  assign = vi.fn();
   const hash = opts.hash ?? "";
   const search = opts.search ?? "";
   vi.stubGlobal("localStorage", storage(local));
@@ -44,14 +55,14 @@ function stubBrowser(
       search,
       pathname: "/",
       href: `https://dweeb.test/${search}${hash}`,
-      assign: () => {},
+      assign,
     },
     history: { replaceState },
     opener: opts.opener ?? null,
     name: opts.name ?? "",
     innerWidth: 1200,
     innerHeight: 800,
-    open: () => ({ closed: false, location: {}, focus: () => {} }),
+    open: opts.open ?? (() => ({ closed: false, location: {}, focus: () => {} })),
     addEventListener: () => {},
     removeEventListener: () => {},
     setInterval: () => 0,
@@ -78,8 +89,16 @@ beforeEach(async () => {
   session = new Map();
   stubBrowser();
   vi.resetModules();
-  ({ consumeReturn, openPopup, redirectFullPage, relayPopupIfApplicable, subscribePopupResult } =
-    await import("./popupFlow"));
+  ({
+    cancelPopup,
+    consumeReturn,
+    openPopup,
+    redirectFullPage,
+    relayPopupIfApplicable,
+    sendPopup,
+    startPopupFlow,
+    subscribePopupResult,
+  } = await import("./popupFlow"));
   ({ botAddFlow, loginFlow, webhookFlow } = await import("./flows"));
 });
 
@@ -224,5 +243,93 @@ describe("a full-page return is applied only by the tab that redirected itself",
     expect(consumeReturn(webhookFlow)).toEqual({ url: MINE, channelName: "general" });
     // One use: a reload of the same URL isn't a second return.
     expect(consumeReturn(webhookFlow)).toBeNull();
+  });
+});
+
+describe("a flow always gets somewhere, whatever the browser does with the popup", () => {
+  const LOGIN = "https://api.dweeb.test/auth/login";
+
+  /** A popup like the one Safari handed back on 2026-11-13: real enough to
+   *  hold, but sending it on from outside throws. */
+  function unnavigablePopup() {
+    const popup = { closed: false, focus: vi.fn(), close: vi.fn(), location: {} };
+    Object.defineProperty(popup.location, "href", {
+      get: () => "about:blank",
+      set: () => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+    return popup;
+  }
+
+  it("opens a click's known URL in the popup itself, never navigating it from outside", () => {
+    const popup = unnavigablePopup();
+    const open = vi.fn(() => popup);
+    stubBrowser({ open });
+    // The incident: this threw out of the Sign in click, every time.
+    expect(() => startPopupFlow(loginFlow, LOGIN)).not.toThrow();
+    expect(open).toHaveBeenCalledWith(LOGIN, "dweeb_login", expect.stringContaining("popup=yes"));
+    expect(local.has("dweeb_login_pending")).toBe(true);
+    expect(session.has("dweeb_login_attempt")).toBe(true);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("leaves the page when the popup is blocked, holding no popup attempt", () => {
+    stubBrowser({ open: () => null });
+    startPopupFlow(webhookFlow, LOGIN);
+    expect(assign).toHaveBeenCalledWith(LOGIN);
+    expect(session.get("dweeb_webhook_self_redirect")).toBe("1");
+    expect(local.has("dweeb_webhook_pending")).toBe(false);
+    expect(session.has("dweeb_webhook_attempt")).toBe(false);
+  });
+
+  it("reads a window.open that throws as a blocked popup", () => {
+    stubBrowser({
+      open: () => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+    expect(() => startPopupFlow(botAddFlow, LOGIN)).not.toThrow();
+    expect(assign).toHaveBeenCalledWith(LOGIN);
+  });
+
+  it("closes a popup the browser won't navigate and leaves the page instead", () => {
+    const popup = unnavigablePopup();
+    stubBrowser({ open: () => popup });
+    const opened = openPopup(webhookFlow);
+    expect(opened).toBe(popup);
+    // …the authorize URL arrives after an await…
+    expect(() => sendPopup(webhookFlow, opened, LOGIN)).not.toThrow();
+    expect(popup.close).toHaveBeenCalled();
+    expect(assign).toHaveBeenCalledWith(LOGIN);
+    expect(session.get("dweeb_webhook_self_redirect")).toBe("1");
+    // No popup is in flight, so this tab no longer waits on a popup's result.
+    expect(session.has("dweeb_webhook_attempt")).toBe(false);
+    expect(local.has("dweeb_webhook_pending")).toBe(false);
+  });
+
+  it("sends a navigable popup on and stays on the page", () => {
+    const popup = { closed: false, focus: vi.fn(), close: vi.fn(), location: { href: "" } };
+    stubBrowser({ open: () => popup });
+    sendPopup(webhookFlow, openPopup(webhookFlow), LOGIN);
+    expect(popup.location.href).toBe(LOGIN);
+    expect(popup.close).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("forgets an abandoned popup, so its kind of result is no longer awaited", async () => {
+    const popup = { closed: false, focus: vi.fn(), close: vi.fn(), location: {} };
+    stubBrowser({ open: () => popup });
+    cancelPopup(webhookFlow, openPopup(webhookFlow));
+    expect(popup.close).toHaveBeenCalled();
+    expect(local.has("dweeb_webhook_pending")).toBe(false);
+    const seen: unknown[] = [];
+    const stop = subscribePopupResult(webhookFlow, (r) => seen.push(r));
+    try {
+      await broadcast("webhook", { url: THEIRS });
+      expect(seen).toEqual([]);
+    } finally {
+      stop();
+    }
   });
 });

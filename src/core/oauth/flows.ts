@@ -4,17 +4,11 @@
  * Each descriptor says how to recognise its return in a URL and how to dedupe
  * its result; the engine in `popupFlow.ts` does everything else (open, relay,
  * deliver, full-page fallback). The thin `start…` wrappers below are what UI
- * click handlers call — open a popup synchronously, point it at Discord, and
+ * click handlers call — open a popup at the Discord URL, synchronously, and
  * fall back to a full-page redirect only if the popup is blocked.
  */
 
-import {
-  navigatePopup,
-  openPopup,
-  redirectFullPage,
-  watchPopup,
-  type PopupFlow,
-} from "./popupFlow";
+import { startPopupFlow, type PopupFlow } from "./popupFlow";
 import { botInviteUrl, loginUrl, type IncomingWebhookResult } from "@/core/guild/config";
 
 /* ── webhook.incoming (DWEEB's own app, or a server's custom bot) ────────── */
@@ -106,14 +100,7 @@ export const botAddFlow: PopupFlow<BotAddResult> = {
  */
 export function startLoginPopup(): void {
   const url = loginUrl();
-  if (!url) return;
-  const popup = openPopup(loginFlow);
-  if (popup) {
-    navigatePopup(popup, url);
-    watchPopup(loginFlow, popup);
-  } else {
-    redirectFullPage(loginFlow, url);
-  }
+  if (url) startPopupFlow(loginFlow, url);
 }
 
 /**
@@ -123,12 +110,6 @@ export function startLoginPopup(): void {
  */
 export function startBotAddPopup(guildId?: string): void {
   const url = botInviteUrl(guildId);
-  if (!url) return; // no client id configured — the caller hides the CTA anyway
-  const popup = openPopup(botAddFlow);
-  if (popup) {
-    navigatePopup(popup, url);
-    watchPopup(botAddFlow, popup);
-  } else {
-    redirectFullPage(botAddFlow, url);
-  }
+  // No client id configured — the caller hides the CTA anyway.
+  if (url) startPopupFlow(botAddFlow, url);
 }

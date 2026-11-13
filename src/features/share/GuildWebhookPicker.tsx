@@ -38,7 +38,7 @@ import {
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { compareSnowflakes } from "@/core/webhook/snowflakeOrder";
 import { botInviteUrl } from "@/core/guild/config";
-import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
+import { cancelPopup, openPopup, sendPopup } from "@/core/oauth/popupFlow";
 import { startBotAddPopup, webhookFlow } from "@/core/oauth/flows";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
@@ -416,15 +416,10 @@ export function GuildWebhookPicker({
         try {
           url = await createCustomBotWebhook(connectedId, identity.applicationId);
         } catch (e) {
-          popup?.close();
+          cancelPopup(webhookFlow, popup);
           throw e;
         }
-        if (popup) {
-          navigatePopup(popup, url);
-          watchPopup(webhookFlow, popup);
-        } else {
-          redirectFullPage(webhookFlow, url);
-        }
+        sendPopup(webhookFlow, popup, url);
         return;
       }
       const created = await createGuildWebhook(connectedId, channelId, AUTO_WEBHOOK_NAME);

@@ -160,7 +160,7 @@ import {
   webhookCreateUrl,
   type IncomingWebhook,
 } from "@/core/guild/config";
-import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
+import { cancelPopup, openPopup, sendPopup, startPopupFlow } from "@/core/oauth/popupFlow";
 import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { encodeJson } from "@/core/serialization";
@@ -3381,16 +3381,11 @@ function CreateWebhookOptions() {
                 setStarting(true);
                 createCustomBotWebhook(guildId, bot.application_id)
                   .then((url) => {
-                    if (popup) {
-                      navigatePopup(popup, url);
-                      watchPopup(webhookFlow, popup);
-                    } else {
-                      redirectFullPage(webhookFlow, url);
-                    }
+                    sendPopup(webhookFlow, popup, url);
                     setStarting(false);
                   })
                   .catch((e) => {
-                    popup?.close();
+                    cancelPopup(webhookFlow, popup);
                     setStarting(false);
                     pushToast(e instanceof Error ? e.message : String(e), "error");
                   });
@@ -3419,14 +3414,7 @@ function CreateWebhookOptions() {
           // Pre-select the server the builder is connected to, if any, so the
           // webhook lands where the user is already working. Run it in a popup;
           // only a blocked popup falls back to a full-page redirect.
-          const url = webhookCreateUrl(useGuildStore.getState().guildId);
-          const popup = openPopup(webhookFlow);
-          if (popup) {
-            navigatePopup(popup, url);
-            watchPopup(webhookFlow, popup);
-          } else {
-            redirectFullPage(webhookFlow, url);
-          }
+          startPopupFlow(webhookFlow, webhookCreateUrl(useGuildStore.getState().guildId));
         }}
       >
         <span className={styles.createCardIcon} aria-hidden>
