@@ -224,9 +224,10 @@ function report(kind: CrashKind, error: unknown): void {
     const resolvedKind = resolveCrashKind(kind, payload.message, isStaleChunkReloadInProgress());
     if (resolvedKind === null) return;
     // Someone else's code crashing in our page is not our crash — a stack
-    // whose every location is a browser extension's (MetaMask, 2026-09-14) or
-    // a third-party script's (an extension's fetch hook dropping gtag's failed
-    // hit, 2026-10-19), an unattributed userscript/console stack, a muted
+    // whose every location is a browser extension's (MetaMask, 2026-09-14), a
+    // third-party script's (an extension's fetch hook dropping gtag's failed
+    // hit, 2026-10-19) or the page's own URL (a script injected as text,
+    // 2026-11-12), an unattributed userscript/console stack, a muted
     // cross-origin script — so don't spend a beacon or a throttle slot on it.
     // Judged on the FULL stack, not the six-line wire: V8 keeps up to ten
     // frames and spends a wire line on its header, and `wireStack` built the
@@ -236,7 +237,7 @@ function report(kind: CrashKind, error: unknown): void {
     // Checked after the stale-chunk resolve so a Safari stale-chunk-fatal
     // (whose stack can be sparse) is never mistaken for foreign code.
     const fullStack = topFrames(describeError(error).stack, Infinity);
-    if (isForeignCodeError(resolvedKind, payload.message, fullStack)) return;
+    if (isForeignCodeError(resolvedKind, payload.message, fullStack, payload.path)) return;
     // A cancellation nobody handled (2026-09-25) — maybe not even by us: a
     // page-world fetch hook's dropped `.then` carries our abort's stack. The
     // work was cancelled on purpose; not a crash, and not worth a slot either.

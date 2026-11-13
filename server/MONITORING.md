@@ -147,7 +147,9 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
 # by whose: frames=extension is a browser extension (MetaMask & co.);
 # frames=third-party is a script we load but don't ship (gtag.js), maybe with
 # an extension's frames beside it — e.g. a fetch hook dropping gtag's failed
-# hit; frames=none names no location at all — a userscript/console stack, a
+# hit; frames=injected names only the reporting page's own URL — a script
+# something put into the page as text (an iOS in-app browser's, 2026-11-12);
+# frames=none names no location at all — a userscript/console stack, a
 # muted cross-origin `Script error.`, or a V8 header-only stack (which can be
 # ours: see AGENTS.md). The proxy's fields are ANSI-coloured (`frames` and `=`
 # wear separate escape codes), so strip the colour before matching `frames=`.
@@ -169,6 +171,19 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep ' dns: '
 journalctl -u docker.service -o short-iso | grep 'failed to query external DNS' \
   | cut -c1-10 | uniq -c
 resolvectl statistics | grep -A2 'Failure Transactions'
+
+# Is the host itself slow? (2026-11-10/11: dispatcher dial pages while every
+# plugin was healthy.) dockerd's container listings timing out, per day, then
+# the disk's average await per day (normal is single-digit ms; 11-10 was 40).
+journalctl -u docker.service -o short-iso | grep 'failed to resolve container image' \
+  | cut -c1-10 | uniq -c
+for f in /var/log/sysstat/sa[0-9]*; do echo "$f $(LC_ALL=C sar -d -f "$f" | grep 'Average.*sda')"; done
+
+# Dispatcher → plugin hops: dials that recovered, ones that paged (late_ms =
+# how late the dispatcher's own timer fired; hundreds of ms = the host stalled),
+# and keep-warm state changes (WARN when a plugin stops answering, INFO when back).
+journalctl CONTAINER_NAME=dweeb-dispatcher-1 --since -14d -o cat \
+  | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'failed dial|forward failed|keep-warm'
 ```
 
 ## Off-host dead-man's switch (recommended)

@@ -758,7 +758,7 @@ export const THIRD_PARTY_SCRIPT_HOSTS: readonly string[] = [
 /** Whose code a stack names — see [`frameOrigin`]. Also logged by the proxy
  *  (`frames=`) on the two crash lines that turn on it: the foreign-code line it
  *  demotes and the `web app crash` line it pages. */
-export type FrameOrigin = "none" | "page" | "extension" | "third-party" | "mixed";
+export type FrameOrigin = "none" | "page" | "extension" | "third-party" | "injected" | "mixed";
 
 /** Every control character (Unicode Cc — exactly what Rust's `char::is_control`
  *  means). */
@@ -788,8 +788,9 @@ function isSchemeChar(code: number): boolean {
 }
 
 /** Whose code one location is: an extension's, a third-party script's (see
- *  [`THIRD_PARTY_SCRIPT_HOSTS`]), or — anything else, malformed included — ours. */
-type LocationOwner = "ours" | "extension" | "third-party";
+ *  [`THIRD_PARTY_SCRIPT_HOSTS`]), a script injected into the page (see
+ *  [`namesThePage`]), or — anything else, malformed included — ours. */
+type LocationOwner = "ours" | "extension" | "third-party" | "injected";
 
 /** One `://` in a text: the whole scheme run before it, lowercased (possibly
  *  empty), where that run starts, where the `://` itself starts, and whose code
@@ -804,24 +805,80 @@ interface UrlLocation {
 /** Every `://` in `text`, left to right, each with the whole scheme run before
  *  it. A hand scan, not a regex, so it yields exactly the runs `telemetry.rs`'s
  *  byte scan does — the empty run included, which a letter-anchored regex would
- *  skip. Scheme characters are ASCII, so UTF-16 and UTF-8 agree. */
-function locations(text: string): UrlLocation[] {
+ *  skip. Scheme characters are ASCII, so UTF-16 and UTF-8 agree. `page` is the
+ *  path the report comes from (see [`namesThePage`]). */
+function locations(text: string, page: string): UrlLocation[] {
   const found: UrlLocation[] = [];
   for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
     let start = at;
     while (start > 0 && isSchemeChar(text.charCodeAt(start - 1))) start--;
     const scheme = text.slice(start, at).toLowerCase();
-    found.push({ scheme, start, at, owner: locationOwner(text, scheme, at + 3) });
+    found.push({ scheme, start, at, owner: locationOwner(text, scheme, at + 3, page) });
   }
   return found;
 }
 
-function locationOwner(text: string, scheme: string, host: number): LocationOwner {
+function locationOwner(text: string, scheme: string, host: number, page: string): LocationOwner {
   if (EXTENSION_SCHEMES.includes(scheme)) return "extension";
   if (scheme === "https" && THIRD_PARTY_SCRIPT_HOSTS.some((h) => startsWithHost(text, host, h))) {
     return "third-party";
   }
+  if (namesThePage(text, scheme, host, page)) return "injected";
   return "ours";
+}
+
+/** Where a location's URL ends: a space (every control character is one by the
+ *  time a verdict is reached, see [`asProxyReads`]) or V8's closing `)`. */
+function endsLocation(code: number): boolean {
+  return code <= 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x29;
+}
+
+/** The `:line` (and `:column`) every engine prints after a location's URL. */
+const SOURCE_POSITION = /:\d+(?::\d+)?$/;
+
+/**
+ * Whether the http(s) location whose host starts at `host` names the page the
+ * report comes from (`page`, the beacon's `path`, i.e. `location.pathname`),
+ * followed by a `:line`. That is code compiled from the page document itself,
+ * not from a script file, and DWEEB ships every line of its code as a `.js`
+ * file. The shell's only inline scripts are its two CSP-hashed boot snippets,
+ * which cannot throw (`index.html`; keep them that way). So a frame like this
+ * belongs to a script something else put into the page.
+ *
+ * On 2026-11-12 three beacons paged from the live build (`9218cff86e`) within
+ * ten seconds: Safari's "Maximum call stack size exceeded.", `frames=page`,
+ * with every frame at `https://dweeb.faizo.net/:<line>:<col>` (`xk`/`vk`
+ * recursing at "line 230"). The shell's lines 190–230 are JSON-LD, and line
+ * 230 is 30 characters long, so those positions are not the shell's. WebKit
+ * reports code it is handed as text under the document's own URL, with lines
+ * counted from the start of that code: a native app's `evaluateJavaScript` (an
+ * iOS in-app browser's script, for one), or an inline script inserted at run
+ * time. The production CSP refuses inline scripts it has no hash for, but a
+ * native app's evaluated code is outside it.
+ *
+ * Narrow on purpose: the path must equal `page` exactly, compared after the
+ * query and fragment are cut off, and the host is not compared at all, since
+ * the Activity's page is on Discord's host. A script file served from an
+ * extensionless path, such as Stripe's `/v3/` or gtag's `/gtag/js`, can never
+ * equal a page's path. That keeps those hosts out unless a beacon puts them on
+ * [`THIRD_PARTY_SCRIPT_HOSTS`]. A location with no `:line` (a clamp can cut it
+ * there) reads as ours. So does another page's path, which an injected script
+ * still carries if the app replaced the URL after it ran. That pages, the safe
+ * side.
+ */
+function namesThePage(text: string, scheme: string, host: number, page: string): boolean {
+  if (page === "" || (scheme !== "https" && scheme !== "http")) return false;
+  let end = host;
+  while (end < text.length && !endsLocation(text.charCodeAt(end))) end++;
+  const token = text.slice(host, end);
+  const position = SOURCE_POSITION.exec(token);
+  if (position === null) return false;
+  const url = token.slice(0, position.index);
+  const slash = url.indexOf("/");
+  if (slash === -1) return false;
+  const rest = url.slice(slash);
+  const cut = rest.search(/[?#]/);
+  return (cut === -1 ? rest : rest.slice(0, cut)) === page;
 }
 
 /** Whether `text` holds `host` and then `/` from `from` on, the host compared
@@ -849,36 +906,43 @@ function isOurWeb(location: UrlLocation): boolean {
 }
 
 /**
- * Whose code a stack names, judged from every location in it.
+ * Whose code a stack names, judged from every location in it. `page` is the
+ * path the report comes from (the beacon's `path`).
  *
  * A location is each `://`, read with the **whole** run of scheme characters
  * before it and compared whole, ASCII-case-insensitively, against
  * [`EXTENSION_SCHEMES`] — so a malformed run (`1chrome-extension`, or none at
  * all) counts as ours, the paging side — plus each [`GECKO_MAIN_WORLD`] token;
  * an `https` one is a third-party script's when a listed host follows its
- * `://` ([`THIRD_PARTY_SCRIPT_HOSTS`]). Frames that name no location
- * (`<anonymous>`, `[native code]`, `async Promise.all (index 0)`, a bare
- * `fn@`) are ignored, and so is layout: the text is judged as the proxy reads
- * it ([`asProxyReads`]), so a stack reaches the same answer whether its lines
- * are joined by newlines or spaces.
+ * `://` ([`THIRD_PARTY_SCRIPT_HOSTS`]), and an http(s) one naming `page`
+ * itself is a script injected into the page ([`namesThePage`]). Frames that
+ * name no location (`<anonymous>`, `[native code]`, `async Promise.all (index
+ * 0)`, a bare `fn@`) are ignored, and so is layout: the text is judged as the
+ * proxy reads it ([`asProxyReads`]), so a stack reaches the same answer
+ * whether its lines are joined by newlines or spaces.
  *
  * `none` = no location at all; `page` = locations, every one ours;
  * `extension` = locations, every one an extension's; `third-party` = none of
- * ours, at least one a third-party script's (extensions' beside it or not);
- * `mixed` = ours beside someone else's.
+ * ours, at least one a third-party script's (anyone else's beside it or not);
+ * `injected` = none of ours and no third-party script's, at least one naming
+ * the page itself (extensions' beside it or not); `mixed` = ours beside
+ * someone else's.
  */
-export function frameOrigin(stack: string): FrameOrigin {
+export function frameOrigin(stack: string, page: string): FrameOrigin {
   const text = asProxyReads(stack);
   let extension = text.includes(GECKO_MAIN_WORLD);
   let thirdParty = false;
+  let injected = false;
   let ours = false;
-  for (const { owner } of locations(text)) {
+  for (const { owner } of locations(text, page)) {
     if (owner === "extension") extension = true;
     else if (owner === "third-party") thirdParty = true;
+    else if (owner === "injected") injected = true;
     else ours = true;
   }
-  if (ours) return extension || thirdParty ? "mixed" : "page";
+  if (ours) return extension || thirdParty || injected ? "mixed" : "page";
   if (thirdParty) return "third-party";
+  if (injected) return "injected";
   return extension ? "extension" : "none";
 }
 
@@ -909,14 +973,18 @@ export function canBeForeign(kind: CrashKind): boolean {
  *    hook's over gtag.js's (see [`THIRD_PARTY_SCRIPT_HOSTS`]).
  *  - 2026-10-21: a Safari extension dropped its own failed
  *    `runtime.sendMessage()` — no stack at all (see [`isWebExtensionApiError`]).
+ *  - 2026-11-12: a script injected into the page as text blew its own stack —
+ *    every frame at the page's own URL, at lines the shell doesn't have (see
+ *    [`namesThePage`]).
  *
  * Four shapes qualify:
  *
  *  - **Someone else's only** (`error` and `unhandledrejection`): the stack
- *    names at least one location and every one is an extension's or a
- *    third-party script's ([`frameOrigin`] = `extension` or `third-party`).
- *    Every one, not just the top frame: an extension wrapping an API we call
- *    sits *above* our own frame, and that misuse of ours pages.
+ *    names at least one location and every one is an extension's, a
+ *    third-party script's, or the page's own ([`frameOrigin`] = `extension`,
+ *    `third-party` or `injected`). Every one, not just the top frame: an
+ *    extension wrapping an API we call sits *above* our own frame, and that
+ *    misuse of ours pages.
  *  - **Unattributed** (`error` only): frames exist but none names a location.
  *  - **Muted cross-origin error** (`error` only): the literal "Script error."
  *    with an empty stack — the browser withheld everything about it.
@@ -941,10 +1009,15 @@ export function canBeForeign(kind: CrashKind): boolean {
  * reads them ([`asProxyReads`]), it can never demote what this judged ours.
  * Both sides are pinned to `server/src/foreign-code-vectors.json`.
  */
-export function isForeignCodeError(kind: CrashKind, message: string, stack: string): boolean {
+export function isForeignCodeError(
+  kind: CrashKind,
+  message: string,
+  stack: string,
+  page: string,
+): boolean {
   if (!canBeForeign(kind)) return false;
-  const origin = frameOrigin(stack);
-  if (origin === "extension" || origin === "third-party") return true;
+  const origin = frameOrigin(stack, page);
+  if (origin === "extension" || origin === "third-party" || origin === "injected") return true;
   if (origin === "none" && isWebExtensionApiError(message)) return true;
   if (kind !== "error") return false;
   if (stack.length > 0 && origin === "none") return true;
@@ -1068,9 +1141,9 @@ const MARKER_RESERVE = 32;
  * left behind still reads as ours (an empty run) on both sides, whereas cutting
  * the run's front could leave an extension's scheme standing.
  */
-function fitPromoted(line: string, pick: (location: UrlLocation) => boolean): string {
+function fitPromoted(line: string, pick: (location: UrlLocation) => boolean, page: string): string {
   if (line.length <= PROMOTED_LINE_MAX) return line;
-  const location = locations(line).find(pick);
+  const location = locations(line, page).find(pick);
   if (location === undefined) return clamp(line, PROMOTED_LINE_MAX);
   const keepsRun = location.at + 3 - location.start <= PROMOTED_LINE_MAX;
   return clamp(line.slice(keepsRun ? location.start : location.at), PROMOTED_LINE_MAX);
@@ -1081,7 +1154,8 @@ function fitPromoted(line: string, pick: (location: UrlLocation) => boolean): st
  * plus, when that window names no http(s) location of ours but the full stack
  * does, the line that does promoted into the window as its last. (With no such
  * location anywhere, the same goes for any other location of ours — one that is
- * neither an extension's nor a third-party script's.)
+ * not an extension's, a third-party script's, or the page's own.) `page` is the
+ * path the report comes from, as it is for [`frameOrigin`].
  *
  * This carries *evidence*, never a verdict. The proxy classifies the wire alone
  * (it is the authority for every client, current or SW-cached), so a location
@@ -1108,14 +1182,14 @@ function fitPromoted(line: string, pick: (location: UrlLocation) => boolean): st
  * window already names an http(s) location of ours — the normal crash of ours —
  * the result is the plain window, exactly as it was before promotion existed.
  */
-export function wireStack(stack: string): string {
+export function wireStack(stack: string, page: string): string {
   const lines = stack
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const plain = clamp(lines.slice(0, STACK_FRAMES).join("\n"), STACK_MAX);
-  const hasOurWeb = (text: string) => locations(text).some(isOurWeb);
-  const hasOurs = (text: string) => locations(text).some(isOurs);
+  const hasOurWeb = (text: string) => locations(text, page).some(isOurWeb);
+  const hasOurs = (text: string) => locations(text, page).some(isOurs);
   // The first line below line 1 that `has` accepts, else line 1 itself if it
   // does, else -1.
   const sourceLine = (has: (text: string) => boolean) => {
@@ -1132,7 +1206,7 @@ export function wireStack(stack: string): string {
   }
   const target = lines[at]; // `at` is -1, and this undefined, when nothing matched
   if (target === undefined) return plain;
-  const promoted = fitPromoted(target, pick);
+  const promoted = fitPromoted(target, pick, page);
   // Newlines before the marker and the promoted line, plus the marker itself.
   const budget = STACK_MAX - promoted.length - 2 - MARKER_RESERVE;
   // Line 1 always leads, even ahead of its own promoted tail. Otherwise up to
@@ -1163,7 +1237,7 @@ export function buildCrashPayload(input: CrashInput): CrashPayload {
   return {
     kind: input.kind,
     message: clamp(message, MESSAGE_MAX),
-    stack: wireStack(stack),
+    stack: wireStack(stack, input.path),
     version: input.version,
     build: input.build,
     surface: input.surface,

@@ -165,7 +165,8 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
 - **A crash beacon must be *our* crash before it may page** (2026-07-24; extension frames
-  2026-09-14; third-party scripts 2026-10-19). The `error` and `unhandledrejection` traps hear
+  2026-09-14; third-party scripts 2026-10-19; scripts injected into the page 2026-11-12). The
+  `error` and `unhandledrejection` traps hear
   everything thrown or dropped in the page's own JS world, including code we never shipped —
   extension scripts that run in the page's world (a wallet must, to define `window.ethereum`; an
   isolated-world content script never reaches page listeners), third-party scripts we load,
@@ -218,13 +219,29 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   found.`, `frames=none`, empty stack — a Safari extension's content script dropping the rejection
   WebKit hands it for a tab it no longer tracks; Safari rejects extension API calls stackless, so
   only the wording attributes it, and DWEEB calls no extension API). Only WebKit's exact shape;
-  Chromium/Gecko extension wordings are added only on a beacon's evidence. Any frame of ours keeps a stack ours,
+  Chromium/Gecko extension wordings are added only on a beacon's evidence; (5) both traps, every
+  location someone else's counting **a location that names the reporting page itself**: an
+  http(s) URL whose path (query and fragment cut off) equals the beacon's own `path`, followed by
+  `:line[:col]` (`namesThePage` / `names_the_page`, logged `frames=injected`). 2026-11-12, three
+  pages in ten seconds from the live build `9218cff86e`: Safari's `Maximum call stack size
+  exceeded.` with every frame at `https://dweeb.faizo.net/:<line>:<col>`, `xk`/`vk` recursing at
+  "line 230". The shell's lines 190–230 are JSON-LD and line 230 is 30 characters long, so the
+  positions count from the start of code WebKit was handed as text and reported under the
+  document's URL: a native app's `evaluateJavaScript` (iOS in-app browsers), or an inline script
+  inserted at run time. Safe because every line we ship is a `.js` file and the shell's only inline
+  scripts are its two CSP-hashed boot snippets, which cannot throw. **Keep them throw-free**: an
+  error there now reads as foreign. Path-exact on purpose. The host isn't compared (the Activity's
+  page is on Discord's host). A script served from an extensionless path (Stripe's `/v3/`, gtag's
+  `/gtag/js`) can never equal a page path, so this rule cannot quietly list a third-party host. A
+  location with no `:line`, or naming another page (an injected script outlives a URL the app
+  replaced), reads as ours and pages. Any frame of ours keeps a stack ours,
   `gtag-init.js` included (served from our origin; it sits under gtag's frames whenever our own
   `gtag()` call fails), and our code never holds a gtag promise — the stub only pushes onto
   `dataLayer`. The client drops these before the throttle; the proxy logs them at **info** (`web
   app foreign-code error`, still under `web_crash`). Both that line and the paging `web app crash`
-  carry `frames=none|page|extension|third-party|mixed` right after `kind` — `third-party` = none
-  ours, at least one a third-party script's (extension frames beside it or not); on a page,
+  carry `frames=none|page|extension|third-party|injected|mixed` right after `kind` — `third-party` =
+  none ours, at least one a third-party script's (anyone else's beside it or not); `injected` = none
+  ours or a third-party script's, at least one naming the page (extension frames beside it or not); on a page,
   `frames=mixed` says someone else's code was in the stack beside ours. The same hook over a
   request of **ours** still pages (`frames=mixed`): "Failed to fetch" stays page-worthy (see the
   network-failure entry), and the stack cannot say whether we or the hook dropped it — if that ever
@@ -251,7 +268,7 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   whose only URL lies past the window used to send that URL's tail alone. A seeded property test
   pins "client says ours ⇒ proxy says ours", `reporter.test.ts` pins the full stack and the resolved kind, and a log-capture
   test (`log_crash`) pins the lines themselves — `INFO … foreign-code error … frames=extension` (or
-  `frames=third-party`) vs `WARN … web app crash … frames=mixed`. Don't replace promotion with a
+  `frames=third-party`, `frames=injected`) vs `WARN … web app crash … frames=mixed`. Don't replace promotion with a
   client-set "ours" flag (the `shellVerified` pattern): a verdict would freeze each bundle's policy
   into its beacons for as long as the bundle lives in SW caches, where evidence leaves the policy
   with the proxy. Residue,
@@ -268,9 +285,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   an empty stack, which pages); a misuse of gtag deeper than V8's ten frames never reaches our frame
   and reads as gtag's, and a bundle older than the third-party list promotes only into a window
   with no http(s) at all, so for it our frame under five lines of gtag's is hidden — both reachable
-  only through our own `gtag()` call, which nothing on screen waits on. Add a scheme only on
+  only through our own `gtag()` call, which nothing on screen waits on. A bundle older than rule
+  (5) counts a page-naming frame as ours, so it promotes nothing past six of them and the proxy now
+  demotes our frame beneath them — reachable only when our code calls into an injected script that
+  then throws. Add a scheme only on
   evidence (a page naming it), to both lists **and** the vector file — and never http(s) as a
-  scheme: promotion relies on every http(s) location not on a listed host staying ours. Add a
+  scheme: promotion relies on every http(s) location not on a listed host, and not naming the
+  reporting page, staying ours. Add a
   third-party host the same way — on evidence, lowercase, and only for code we load but never ship
   (never a host that serves our bundle); the production CSP's `script-src` bounds the candidates,
   and the other one, `js.stripe.com`, has not been seen in a beacon.
@@ -1299,6 +1320,39 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   prose. **An inner deadline must always be strictly smaller than the outer one that waits on
   it**, so the fault is reported by the component that knows what it was — the same principle
   as the entry below. No deploy ordering: nothing here is a contract between the two.
+- **A click must not depend on a dial: the dispatcher keeps one warm connection per plugin**
+  (2026-11-13). From 2026-11-09 to 11-11 the VPS's disk ran 5–80× slower than its own baseline
+  (sysstat average await 40 ms on 11-10 and 25 ms on 11-11, against 5–9 ms on ordinary days and
+  0.5 ms on 11-12) and recovered by itself on 11-11 between ~19:00 and 22:00 CET. Nothing on our
+  side changed: no deploy, reboot or package. Everything that waits on dockerd slowed with it. Its
+  "failed to resolve container image … context canceled" warnings (a `docker ps`-style listing
+  timing out) went 137 → 205 → 867 → 1,088 → **8,476** → 5,307 → 0 per day, healthchecks timed out
+  (`Could not send KILL signal`), the proxy's `dns:` serve-stale fired 19× on 11-10 against ~0 on
+  other days, and Caddy timed out dialling the picker. Not the cause: Contabo's hourly
+  `drop_caches`/`fstrim` cron (the slow listings were flat across the hour) or the plugins
+  (`ListenOverflows` 0, no CPU limits). The dispatcher paged because nearly every click *dialled*:
+  `pool_idle_timeout(30s)` against sparse clicks meant a fresh lookup of the compose name in
+  Docker's embedded DNS (served by dockerd) plus a TCP connect, both inside the 400 ms
+  `FORWARD_CONNECT_TIMEOUT`. 18 dials missed it, and the 5 that missed for the whole 1 s retry
+  window paged as `forward failed … failure="dial" … operation timed out` against plugins that
+  were healthy throughout. Plugins never close an idle keep-alive connection (measured: open and
+  reusable after 150 s idle). So `keep_warm` sends every distinct upstream a `GET /health` every
+  `KEEP_WARM_INTERVAL` (30 s, the first round 10 s after boot) through the forwarding client, reads
+  each body to the end so the connection goes back to the pool, and `POOL_IDLE_TIMEOUT` (120 s) is
+  `const`-asserted to outlive three rounds. A click then takes the warm connection, needing neither
+  DNS nor a handshake, so a slow host makes it slower instead of failing it. Pinned by
+  `a_click_after_a_keep_warm_round_rides_the_warm_connection`, which counts sockets at the plugin
+  and fails with idle pooling off. Costs: 9 static `/health` answers per 30 s on the compose
+  network. Nothing reaches Discord, RoleLogic or the internet. Keep-warm failures never page (Gatus
+  owns "plugin down") and log only on a change: WARN `keep-warm request failed; clicks to this
+  plugin will dial`, INFO `… answered again`. Every failed forward now also logs `late_ms`, how far
+  past its own deadline the failing attempt returned. Hundreds of ms means the dispatcher's own
+  timer fired late, i.e. the host stalled (11-10's `attempts=1 elapsed_ms=924` was a 400 ms
+  deadline firing 524 ms late), not that the plugin did. Don't "fix" a recurrence by raising
+  `FORWARD_CONNECT_TIMEOUT`, which eats the plugin's share of Discord's 3 s. Look at the host first:
+  `sar -d -f /var/log/sysstat/saDD` (await) and the daily count of dockerd's `failed to resolve
+  container image`. If it recurs, that is Contabo's host node, and the evidence above is what a
+  ticket asking them to check or migrate it needs. No deploy ordering.
 - **A 502 must name its route, and a reqwest deadline must not become a bandwidth
   requirement** (2026-08-12). A page arrived reading, in full, `response failed
   classification=Status code: 502 Bad Gateway latency=10002 ms` — no method, no path, no

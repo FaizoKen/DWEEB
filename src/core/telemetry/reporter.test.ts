@@ -158,6 +158,47 @@ describe("the crash reporter's foreign-code gate", () => {
     expect(sent()[0]?.stack.split("\n").at(-1)).toBe(ours);
   });
 
+  describe("a script injected into the page (2026-11-12)", () => {
+    /** The first beacon's frames, as Safari printed them: every one at the page's
+     *  own URL, at lines the shell doesn't have. */
+    const injected = [
+      "@https://dweeb.faizo.net/:194:68",
+      "@https://dweeb.faizo.net/:191:249",
+      "@https://dweeb.faizo.net/:194:39",
+      "@https://dweeb.faizo.net/:201:358",
+      "xk@https://dweeb.faizo.net/:230:389",
+      "vk@https://dweeb.faizo.net/:230:69",
+    ];
+    const overflow = (lines: string[]) => {
+      const error = new RangeError("Maximum call stack size exceeded.");
+      error.stack = lines.join("\n");
+      return error;
+    };
+
+    it("is never sent from the page its frames name", () => {
+      vi.stubGlobal("location", { origin: "https://dweeb.faizo.net", pathname: "/" });
+      const error = overflow(injected);
+      fire("error", { error, message: error.message });
+      expect(proxyFetch).not.toHaveBeenCalled();
+    });
+
+    it("is sent from any other page, whose path its frames don't name", () => {
+      vi.stubGlobal("location", { origin: "https://dweeb.faizo.net", pathname: "/s/AbCd1234" });
+      const error = overflow(injected);
+      fire("error", { error, message: error.message });
+      expect(sent()).toHaveLength(1);
+    });
+
+    it("sends a crash of ours beneath it, with our frame promoted onto the wire", () => {
+      vi.stubGlobal("location", { origin: "https://dweeb.faizo.net", pathname: "/" });
+      const ours = "Ks@https://dweeb.faizo.net/assets/index-DcBtb6aN.js:41:9528";
+      const error = overflow([...injected, ...injected, ours]);
+      fire("error", { error, message: error.message });
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0]?.stack.split("\n").at(-1)).toBe(ours);
+    });
+  });
+
   it("judges the resolved kind, so a sparse chunk failure is never taken for foreign code", async () => {
     // Safari words a failed chunk load without a URL, and its stack can name
     // nothing. As a raw window error that reads as "unattributed"; resolved, it

@@ -95,7 +95,10 @@ mod store;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -163,6 +166,33 @@ const DIAL_RETRY_WINDOW: Duration = Duration::from_millis(1000);
 const FORWARD_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
 /// Below this there is no point starting another attempt.
 const MIN_FORWARD_ATTEMPT: Duration = Duration::from_millis(50);
+/// How often every plugin gets a `GET /health` over the shared client
+/// ([`keep_warm`]), so each one always has an open, recently used connection in
+/// the pool for the next click to take.
+///
+/// A click that finds no idle connection has to *dial*: look the compose name up
+/// in Docker's embedded DNS (served by dockerd itself) and complete a TCP
+/// handshake, both inside [`FORWARD_CONNECT_TIMEOUT`]. Plugin clicks are sparse
+/// and the pool used to drop a connection after 30 s idle, so nearly every click
+/// dialled. On a healthy host that takes about a millisecond. From 2026-11-09 to
+/// 11-11 the VPS's disk ran 5–80× slower than its baseline (sysstat await 40 ms
+/// on 11-10 against 0.5 ms on 11-12), dockerd slowed with it, and 18 dials missed
+/// that deadline: 5 of them for the whole retry window, and those paged
+/// ("operation timed out" against self-role and tickets) while every plugin was
+/// healthy. A warm connection needs neither the lookup nor the handshake, so the
+/// same slowdown makes a click slower instead of failing it.
+const KEEP_WARM_INTERVAL: Duration = Duration::from_secs(30);
+/// The first round waits this long after boot, so a deploy that starts the
+/// plugins beside this service doesn't open with a warning per plugin.
+const KEEP_WARM_FIRST_DELAY: Duration = Duration::from_secs(10);
+/// Deadline for one keep-warm request.
+const KEEP_WARM_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long the pool keeps an idle connection: several keep-warm rounds, so the
+/// connection a round just used never idles out before the next round. Plugins
+/// never close an idle keep-alive connection themselves (measured on prod: still
+/// open and reusable after 150 s). A plugin that is recreated closes it with its
+/// process, the pool notices, and the next round dials the new container.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 // The two budget rules above are enforced here rather than left as prose: get
 // either wrong and the failure is a paging alert in production, weeks later.
@@ -175,6 +205,15 @@ const _: () = assert!(
 const _: () = assert!(
     DIAL_RETRY_WINDOW.as_millis() + DIAL_RETRY_DELAY.as_millis() < FORWARD_BUDGET.as_millis(),
     "dial retries must never be able to consume the whole forward budget"
+);
+const _: () = assert!(
+    POOL_IDLE_TIMEOUT.as_secs() >= 3 * KEEP_WARM_INTERVAL.as_secs(),
+    "the pool must outlive several keep-warm rounds, or the connection a round \
+     warms idles out before the next one and every click dials again"
+);
+const _: () = assert!(
+    KEEP_WARM_TIMEOUT.as_millis() < KEEP_WARM_INTERVAL.as_millis(),
+    "a keep-warm round must finish before the next one is due"
 );
 /// Longest cause chain written to a log line. These lines are forwarded
 /// verbatim into a Discord channel by `dweeb-alerts`, which samples 280 chars.
@@ -465,22 +504,28 @@ async fn run() {
         shortlink_api,
         server_url,
         toggle_key,
-        client: reqwest::Client::builder()
-            // Discord gives the whole chain 3s; leave headroom to still send
-            // the fallback reply if an upstream stalls. The forward hop sets
-            // its own per-attempt deadline from the remaining FORWARD_BUDGET,
-            // which overrides this — this is the backstop for the dispatcher's
-            // other, detached calls (shortlinks, component revival).
-            .timeout(FORWARD_BUDGET)
-            // Bound the dial separately so one unreachable attempt can't eat
-            // the whole budget that the retry in `interactions` needs.
-            .connect_timeout(FORWARD_CONNECT_TIMEOUT)
-            // Keep upstream connections warm — the forward hop stays sub-ms.
-            .pool_idle_timeout(Duration::from_secs(30))
-            .pool_max_idle_per_host(16)
-            .build()
-            .expect("reqwest client"),
+        client: forward_client(),
     });
+
+    // Keep one open connection per plugin in the pool, so a click rides it
+    // instead of dialling (see KEEP_WARM_INTERVAL).
+    {
+        let client = app.client.clone();
+        let bases = upstreams(&app.routes);
+        tokio::spawn(async move {
+            // "Answering" until shown otherwise, so a healthy first round is silent.
+            let answering: Vec<AtomicBool> = bases.iter().map(|_| AtomicBool::new(true)).collect();
+            let mut tick = tokio::time::interval_at(
+                tokio::time::Instant::now() + KEEP_WARM_FIRST_DELAY,
+                KEEP_WARM_INTERVAL,
+            );
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                keep_warm(&client, &bases, &answering).await;
+            }
+        });
+    }
 
     // Reclaim activity rows the sliding TTL can no longer use: one pass at
     // boot, then periodically. A row older than the TTL keeps nothing alive
@@ -875,6 +920,8 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
     let url = format!("{base}/interactions");
     let started = Instant::now();
     let mut attempts: u32 = 0;
+    // The most any attempt overran its own deadline (see [`lateness`]).
+    let mut late = Duration::ZERO;
 
     // A failed *dial* is retried inside a short window: a plugin container
     // being recreated refuses connections for well under a second, and this is
@@ -911,6 +958,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
                 .header("x-dweeb-forward-auth", secret);
         }
 
+        let attempt_started = Instant::now();
         match request.body(body.clone()).send().await {
             Ok(resp) => {
                 if attempts > 1 {
@@ -942,6 +990,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
                     .into_response();
             }
             Err(err) => {
+                late = late.max(lateness(&err, attempt_started.elapsed(), remaining));
                 let failure = classify_forward_failure(&err);
                 if should_retry_dial(failure, started.elapsed()) {
                     tokio::time::sleep(DIAL_RETRY_DELAY).await;
@@ -953,6 +1002,9 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
     };
 
     let elapsed_ms = started.elapsed().as_millis() as u64;
+    // Hundreds of ms here means this process couldn't run on time (its host
+    // stalled), not that the plugin was slow — see [`lateness`].
+    let late_ms = late.as_millis() as u64;
     match failure {
         // The dial never succeeded across the whole retry window, so this is
         // not the sub-second gap of a container recreate — the plugin is
@@ -964,6 +1016,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
             failure = failure.as_str(),
             attempts,
             elapsed_ms,
+            late_ms,
             err = %detail,
             "forward failed"
         ),
@@ -981,6 +1034,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
             failure = failure.as_str(),
             attempts,
             elapsed_ms,
+            late_ms,
             err = %detail,
             "forward timed out"
         ),
@@ -993,6 +1047,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
             failure = failure.as_str(),
             attempts,
             elapsed_ms,
+            late_ms,
             err = %detail,
             "forward failed"
         ),
@@ -1930,6 +1985,118 @@ fn should_retry_dial(failure: ForwardFailure, elapsed: Duration) -> bool {
     failure == ForwardFailure::Dial && elapsed + DIAL_RETRY_DELAY < DIAL_RETRY_WINDOW
 }
 
+/// How far past its own deadline a failed attempt came back, logged as
+/// `late_ms` on every failed forward.
+///
+/// Each deadline is a timer in this process: [`FORWARD_CONNECT_TIMEOUT`] for a
+/// dial, the remaining budget for the whole request. A timer that fires late
+/// means this process wasn't running at the moment it was due, because its host
+/// paused or every worker was busy. That says nothing about the plugin. On
+/// 2026-11-10 a page read `attempts=1 elapsed_ms=924` for a 400 ms connect
+/// deadline: the dispatcher's own clock was half a second late, on a day the
+/// host's disk ran 80× slower than usual. Read alone, the line blamed self-role.
+fn lateness(err: &reqwest::Error, took: Duration, remaining: Duration) -> Duration {
+    attempt_lateness(err.is_timeout(), err.is_connect(), took, remaining)
+}
+
+/// [`lateness`] without the error: zero unless the attempt ended on a deadline.
+/// A dial's deadline is the connect timeout (or the budget left, if that's
+/// smaller); any other timeout's is the budget left.
+fn attempt_lateness(timed_out: bool, dial: bool, took: Duration, remaining: Duration) -> Duration {
+    if !timed_out {
+        return Duration::ZERO;
+    }
+    let deadline = if dial {
+        FORWARD_CONNECT_TIMEOUT.min(remaining)
+    } else {
+        remaining
+    };
+    took.saturating_sub(deadline)
+}
+
+/// The client every forward and every keep-warm round goes through. It is one
+/// pool, so the connection a round keeps open is the one the next click gets.
+fn forward_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        // Discord gives the whole chain 3s; leave headroom to still send the
+        // fallback reply if an upstream stalls. The forward hop sets its own
+        // per-attempt deadline from the remaining FORWARD_BUDGET, which
+        // overrides this; this is the backstop for the dispatcher's other,
+        // detached calls (shortlinks, component revival).
+        .timeout(FORWARD_BUDGET)
+        // Bound the dial separately so one unreachable attempt can't eat the
+        // whole budget that the retry in `interactions` needs.
+        .connect_timeout(FORWARD_CONNECT_TIMEOUT)
+        // Long enough that the keep-warm rounds hold one connection per plugin
+        // open for good (see KEEP_WARM_INTERVAL); the forward hop then stays
+        // sub-millisecond even while dialling is slow.
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(16)
+        .build()
+        .expect("reqwest client")
+}
+
+/// Each distinct upstream in `routes`, once, in route order. Several prefixes
+/// may share one plugin, and one connection serves them all.
+fn upstreams(routes: &[(String, String)]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    routes
+        .iter()
+        .filter(|(_, base)| seen.insert(base.as_str()))
+        .map(|(_, base)| base.clone())
+        .collect()
+}
+
+/// One keep-warm round: `GET <base>/health` to every upstream at once, through
+/// the forwarding pool, each body read to its end so its connection goes back
+/// into the pool. (A response dropped half-read takes its connection with it.)
+/// Every plugin's `/health` is a static string, so a round costs the plugins
+/// nothing. It never leaves the compose network.
+///
+/// Never retried and never a page. A plugin that is really down is reported by
+/// Gatus, which probes every `/health` through Caddy, and a click with no warm
+/// connection left still dials, with its own retry. Logged only on a change: a
+/// warn when an upstream stops answering, an info when it answers again. During
+/// a host slowdown that leaves one line per plugin beside any failed click,
+/// rather than one per round.
+async fn keep_warm(client: &reqwest::Client, bases: &[String], answering: &[AtomicBool]) {
+    let mut round = tokio::task::JoinSet::new();
+    for (i, base) in bases.iter().enumerate() {
+        let request = client
+            .get(format!("{base}/health"))
+            .timeout(KEEP_WARM_TIMEOUT);
+        round.spawn(async move {
+            let outcome = match request.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.bytes().await {
+                        Ok(_) if status.is_success() => Ok(()),
+                        Ok(_) => Err(format!("answered {status}")),
+                        Err(err) => Err(forward_detail(&err)),
+                    }
+                }
+                Err(err) => Err(forward_detail(&err)),
+            };
+            (i, outcome)
+        });
+    }
+    while let Some(joined) = round.join_next().await {
+        let Ok((i, outcome)) = joined else { continue };
+        let was_answering = answering[i].swap(outcome.is_ok(), Ordering::Relaxed);
+        match (was_answering, outcome) {
+            (true, Err(detail)) => tracing::warn!(
+                upstream = %bases[i],
+                err = %detail,
+                "keep-warm request failed; clicks to this plugin will dial"
+            ),
+            (false, Ok(())) => {
+                tracing::info!(upstream = %bases[i], "keep-warm request answered again")
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The `source()` chain of an error, flattened onto one line; `None` when the
 /// error has no sources.
 ///
@@ -2294,6 +2461,189 @@ mod tests {
         // Classified apart from a dial failure precisely so it is neither
         // retried (the plugin already has the request) nor paged for.
         assert_eq!(classify_forward_failure(&err), ForwardFailure::Timeout);
+    }
+
+    /// The fix for the 2026-11-10 pages, end to end: after a keep-warm round,
+    /// a click is forwarded over the connection the round opened, so it needs
+    /// no lookup and no handshake. The plugin counts the sockets it accepted.
+    #[tokio::test]
+    async fn a_click_after_a_keep_warm_round_rides_the_warm_connection() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use std::sync::Mutex;
+
+        let peers: Arc<Mutex<Vec<(String, SocketAddr)>>> = Arc::default();
+        let seen = peers.clone();
+        let health_seen = peers.clone();
+        let upstream = axum::Router::new()
+            .route(
+                "/health",
+                get(
+                    move |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<
+                        SocketAddr,
+                    >| async move {
+                        health_seen.lock().unwrap().push(("health".into(), peer));
+                        "ok"
+                    },
+                ),
+            )
+            .route(
+                "/interactions",
+                post(
+                    move |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<
+                        SocketAddr,
+                    >| async move {
+                        seen.lock().unwrap().push(("click".into(), peer));
+                        Json(json!({ "type": 4, "data": { "content": "forwarded" } }))
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                upstream.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+
+        let key = SigningKey::from_bytes(&[3u8; 32]);
+        let app = Arc::new(App {
+            primary_key: key.verifying_key(),
+            primary_key_hex: hex::encode(key.verifying_key().to_bytes()),
+            custom_keys: RwLock::new(HashMap::new()),
+            custom_verified: RwLock::new(HashSet::new()),
+            custom_apps_cap: 1,
+            forward_secret: None,
+            routes: vec![("tickets:".to_string(), base.clone())],
+            component_ttl_ms: Some(7 * 86_400_000),
+            activity_marks: ActivityMarks::new(),
+            permanent_slots: 2,
+            store: store::Store::open(":memory:").unwrap(),
+            internal_token: None,
+            dashboard_url: String::new(),
+            shortlink_api: String::new(),
+            server_url: String::new(),
+            client: forward_client(),
+            toggle_key: [0u8; 32],
+        });
+
+        let bases = upstreams(&app.routes);
+        let answering = [AtomicBool::new(true)];
+        keep_warm(&app.client, &bases, &answering).await;
+        assert!(answering[0].load(Ordering::Relaxed));
+
+        // A ticket's Close button on a bot-posted message: always forwarded.
+        let body = json!({
+            "type": TYPE_MESSAGE_COMPONENT,
+            "application_id": "app",
+            "token": "tok",
+            "data": { "custom_id": "tickets:close:abc", "component_type": 2 },
+            "message": {
+                "id": "1",
+                "author": { "id": "9", "bot": true },
+                "components": [],
+            },
+        })
+        .to_string();
+        let timestamp = "1700000000";
+        let signature = hex::encode(
+            key.sign(&[timestamp.as_bytes(), body.as_bytes()].concat())
+                .to_bytes(),
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert("x-signature-ed25519", signature.parse().unwrap());
+        headers.insert("x-signature-timestamp", timestamp.parse().unwrap());
+        let resp = interactions(State(app.clone()), headers, Bytes::from(body)).await;
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let reply: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reply["data"]["content"], "forwarded", "{reply}");
+
+        let seen = peers.lock().unwrap().clone();
+        let kinds: Vec<&str> = seen.iter().map(|(kind, _)| kind.as_str()).collect();
+        assert_eq!(kinds, ["health", "click"]);
+        assert_eq!(
+            seen[0].1, seen[1].1,
+            "the click opened a new connection instead of taking the warm one"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_keep_warm_round_marks_an_unreachable_plugin_and_never_hangs() {
+        // A live plugin beside one that refuses: the round finishes, and only
+        // the refusing one is marked as not answering.
+        let live = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let live_base = format!("http://{}", live.local_addr().unwrap());
+        tokio::spawn(async move {
+            axum::serve(
+                live,
+                axum::Router::new().route("/health", get(|| async { "ok" })),
+            )
+            .await
+            .unwrap()
+        });
+        let gone = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gone_base = format!("http://{}", gone.local_addr().unwrap());
+        drop(gone);
+
+        let bases = vec![live_base, gone_base];
+        let answering = [AtomicBool::new(true), AtomicBool::new(true)];
+        tokio::time::timeout(
+            KEEP_WARM_TIMEOUT + Duration::from_secs(1),
+            keep_warm(&forward_client(), &bases, &answering),
+        )
+        .await
+        .expect("a round is bounded by its own deadline");
+        assert!(answering[0].load(Ordering::Relaxed));
+        assert!(!answering[1].load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn each_upstream_is_warmed_once_in_route_order() {
+        let routes = vec![
+            (
+                "modalform-v2:".to_string(),
+                "http://modal-form:8090".to_string(),
+            ),
+            ("tickets:".to_string(), "http://tickets:8093".to_string()),
+            (
+                "modalform:".to_string(),
+                "http://modal-form:8090".to_string(),
+            ),
+        ];
+        assert_eq!(
+            upstreams(&routes),
+            ["http://modal-form:8090", "http://tickets:8093"]
+        );
+    }
+
+    #[test]
+    fn lateness_is_how_far_a_deadline_overran() {
+        let ms = Duration::from_millis;
+        // The 2026-11-10 page: a 400 ms connect deadline that fired at 924 ms.
+        assert_eq!(attempt_lateness(true, true, ms(924), ms(2500)), ms(524));
+        // A dial is held to whichever is sooner, its own deadline or the budget.
+        assert_eq!(attempt_lateness(true, true, ms(300), ms(250)), ms(50));
+        // The whole-request deadline is the budget that was left.
+        assert_eq!(attempt_lateness(true, false, ms(2519), ms(2500)), ms(19));
+        // On time is zero, never negative.
+        assert_eq!(attempt_lateness(true, true, ms(401), ms(2500)), ms(1));
+        assert_eq!(
+            attempt_lateness(true, true, ms(10), ms(2500)),
+            Duration::ZERO
+        );
+        // A refusal or a broken connection ended on no deadline at all.
+        assert_eq!(
+            attempt_lateness(false, true, ms(900), ms(2500)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            attempt_lateness(false, false, ms(900), ms(2500)),
+            Duration::ZERO
+        );
     }
 
     fn test_app(routes: Vec<(String, String)>) -> Arc<App> {

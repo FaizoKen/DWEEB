@@ -381,9 +381,13 @@ enum FrameOrigin {
     Page,
     /// Locations, every one of them an extension's.
     Extension,
-    /// Locations, none of them ours, at least one a third-party script's (an
-    /// extension's beside it or not).
+    /// Locations, none of them ours, at least one a third-party script's
+    /// (anyone else's beside it or not).
     ThirdParty,
+    /// Locations, none of them ours or a third-party script's, at least one
+    /// naming the reporting page itself: a script injected into the page as
+    /// text (see [`names_the_page`]), an extension's beside it or not.
+    Injected,
     /// Ours beside someone else's.
     Mixed,
 }
@@ -395,6 +399,7 @@ impl std::fmt::Display for FrameOrigin {
             Self::Page => "page",
             Self::Extension => "extension",
             Self::ThirdParty => "third-party",
+            Self::Injected => "injected",
             Self::Mixed => "mixed",
         })
     }
@@ -403,10 +408,12 @@ impl std::fmt::Display for FrameOrigin {
 /// Whose code one location is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Owner {
-    /// Anything that is neither of the others — a malformed run included.
+    /// Anything that is none of the others — a malformed run included.
     Ours,
     Extension,
     ThirdParty,
+    /// The reporting page's own URL (see [`names_the_page`]).
+    Injected,
 }
 
 /// `[A-Za-z0-9+.-]`: the characters a URL scheme is made of (RFC 3986).
@@ -416,10 +423,12 @@ fn is_scheme_byte(b: u8) -> bool {
 
 /// Whose code each `://` in `stack` names, left to right, judged from the whole
 /// scheme run before it (possibly empty) and, for `https`, the host right after
-/// it. Every byte of a run is ASCII, so both of its ends are char boundaries —
-/// and the client's UTF-16 scan finds exactly the same runs. The host compare
-/// is bytewise, so a non-ASCII character can never fold into a listed host.
-fn location_owners(stack: &str) -> impl Iterator<Item = Owner> + '_ {
+/// it, or for http(s), whether it names `page`, the path the beacon was
+/// reported from. Every byte of a run is ASCII, so both of its ends are char
+/// boundaries — and the client's UTF-16 scan finds exactly the same runs. The
+/// host compare is bytewise, so a non-ASCII character can never fold into a
+/// listed host.
+fn location_owners<'a>(stack: &'a str, page: &'a str) -> impl Iterator<Item = Owner> + 'a {
     let bytes = stack.as_bytes();
     stack.match_indices("://").map(move |(at, _)| {
         let start = bytes[..at]
@@ -444,40 +453,107 @@ fn location_owners(stack: &str) -> impl Iterator<Item = Owner> + '_ {
             })
         {
             Owner::ThirdParty
+        } else if names_the_page(stack, scheme, host_from, page) {
+            Owner::Injected
         } else {
             Owner::Ours
         }
     })
 }
 
-/// Whose code `stack` names. A location is each `://`, read with the **whole**
+/// Whether the http(s) location whose host starts at `host_from` names `page`
+/// (the beacon's `path`, the client's `location.pathname`), followed by a
+/// `:line` (and maybe a `:column`). That is code compiled from the page
+/// document itself rather than from a script file, and the web app ships every
+/// line of its code as a `.js` file: the shell's only inline scripts are its
+/// two CSP-hashed boot snippets, which cannot throw. So such a frame belongs to
+/// a script something else put into the page.
+///
+/// On 2026-11-12 three beacons paged from the live build (`9218cff86e`) within
+/// ten seconds: Safari's `Maximum call stack size exceeded.`, `frames=page`,
+/// every frame at `https://dweeb.faizo.net/:<line>:<col>` (`xk`/`vk` recursing
+/// at "line 230"). The shell's lines 190–230 are JSON-LD and line 230 is 30
+/// characters long, so the positions aren't the shell's. WebKit reports code it
+/// is handed as text under the document's own URL, with lines counted from that
+/// code's start: a native app's `evaluateJavaScript` (an iOS in-app browser's
+/// script), or an inline script inserted at run time.
+///
+/// Narrow on purpose: the path must equal `page` exactly, after the query and
+/// fragment are cut off; the host isn't compared (the Activity's page is on
+/// Discord's host). A script file at an extensionless path — Stripe's `/v3/`,
+/// gtag's `/gtag/js` — can never equal a page's path, so those hosts stay off
+/// [`THIRD_PARTY_SCRIPT_HOSTS`] until a beacon earns them a place. A location
+/// with no `:line` (a clamp can cut it there), or naming another page, reads as
+/// ours and pages. Mirrors `namesThePage` in `src/core/telemetry/crashReport.ts`;
+/// both are pinned to `foreign-code-vectors.json`.
+fn names_the_page(stack: &str, scheme: &str, host_from: usize, page: &str) -> bool {
+    if page.is_empty()
+        || !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http"))
+    {
+        return false;
+    }
+    let rest = &stack[host_from..];
+    let end = rest
+        .find(|c: char| c == ' ' || c == ')' || c.is_control())
+        .unwrap_or(rest.len());
+    let Some(url) = without_source_position(&rest[..end]) else {
+        return false;
+    };
+    let Some(slash) = url.find('/') else {
+        return false;
+    };
+    let path = &url[slash..];
+    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    path == page
+}
+
+/// `token` without the `:line` or `:line:column` every engine prints after a
+/// location's URL, or `None` when it ends in neither.
+fn without_source_position(token: &str) -> Option<&str> {
+    fn strip_number(s: &str) -> Option<&str> {
+        let digits = s.bytes().rev().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        s[..s.len() - digits].strip_suffix(':')
+    }
+    let url = strip_number(token)?;
+    Some(strip_number(url).unwrap_or(url))
+}
+
+/// Whose code `stack` names, for a beacon reported from `page`. A location is
+/// each `://`, read with the **whole**
 /// run of scheme characters before it and compared whole, ASCII-case-
 /// insensitively, against [`EXTENSION_SCHEMES`] — so a malformed run
 /// (`1chrome-extension`, or none at all) counts as ours, the paging side — plus
 /// each [`GECKO_MAIN_WORLD`] token; an `https` one is a third-party script's
-/// when a listed host follows its `://` ([`THIRD_PARTY_SCRIPT_HOSTS`]).
-/// Location-less frames (`<anonymous>`, `[native code]`,
+/// when a listed host follows its `://` ([`THIRD_PARTY_SCRIPT_HOSTS`]), and an
+/// http(s) one naming `page` itself is a script injected into the page
+/// ([`names_the_page`]). Location-less frames (`<anonymous>`, `[native code]`,
 /// `async Promise.all (index 0)`, a bare `fn@`) are ignored, and so is layout:
 /// this reads the clamped stack, whose control characters [`clamp_field`] has
 /// already turned into spaces — the very text the client judges, since it maps
 /// them the same way before reading its own copy.
-fn frame_origin(stack: &str) -> FrameOrigin {
+fn frame_origin(stack: &str, page: &str) -> FrameOrigin {
     let mut extension = stack.contains(GECKO_MAIN_WORLD);
     let mut third_party = false;
+    let mut injected = false;
     let mut ours = false;
-    for owner in location_owners(stack) {
+    for owner in location_owners(stack, page) {
         match owner {
             Owner::Extension => extension = true,
             Owner::ThirdParty => third_party = true,
+            Owner::Injected => injected = true,
             Owner::Ours => ours = true,
         }
     }
-    match (ours, third_party, extension) {
-        (true, false, false) => FrameOrigin::Page,
-        (true, _, _) => FrameOrigin::Mixed,
-        (false, true, _) => FrameOrigin::ThirdParty,
-        (false, false, true) => FrameOrigin::Extension,
-        (false, false, false) => FrameOrigin::None,
+    match (ours, third_party, injected, extension) {
+        (true, false, false, false) => FrameOrigin::Page,
+        (true, _, _, _) => FrameOrigin::Mixed,
+        (false, true, _, _) => FrameOrigin::ThirdParty,
+        (false, false, true, _) => FrameOrigin::Injected,
+        (false, false, false, true) => FrameOrigin::Extension,
+        (false, false, false, false) => FrameOrigin::None,
     }
 }
 
@@ -506,13 +582,16 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 ///  - 2026-10-21: a Safari extension dropped its own failed
 ///    `runtime.sendMessage()` — no stack at all; see
 ///    [`is_web_extension_api_error`].
+///  - 2026-11-12: a script injected into the page as text blew its own stack,
+///    every frame at the page's own URL; see [`names_the_page`].
 ///
 /// Four shapes are demoted to `info` (still greppable under `web_crash`, never
 /// a page):
 ///
 ///  - **Someone else's only** (`error` and `unhandledrejection`): the stack
-///    names at least one location and every one is an extension's or a
-///    third-party script's ([`frame_origin`] = `extension` or `third-party`).
+///    names at least one location and every one is an extension's, a
+///    third-party script's, or the reporting page's own ([`frame_origin`] =
+///    `extension`, `third-party` or `injected`).
 ///    *Every* one, not just the top frame: an extension wrapping an API we call
 ///    sits above our own frame — `History.pushState (chrome-extension://…)` over
 ///    our misuse of it — and that must page.
@@ -550,9 +629,12 @@ fn frame_origin(stack: &str) -> FrameOrigin {
 /// the same way; only our own `gtag()` call can put it there, and nothing on
 /// screen waits on that. Pinned, together with the client's twin, to
 /// `foreign-code-vectors.json`.
-fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
-    let origin = frame_origin(stack);
-    let someone_elses = matches!(origin, FrameOrigin::Extension | FrameOrigin::ThirdParty);
+fn is_foreign_code_error(kind: &str, message: &str, stack: &str, page: &str) -> bool {
+    let origin = frame_origin(stack, page);
+    let someone_elses = matches!(
+        origin,
+        FrameOrigin::Extension | FrameOrigin::ThirdParty | FrameOrigin::Injected
+    );
     match kind {
         "error" => {
             someone_elses
@@ -770,9 +852,10 @@ fn log_crash(
     stack: &str,
 ) {
     // Whose code the stack names, logged on the two lines that turn on it: on a
-    // page, `frames=mixed` says someone else's code — an extension's or a
-    // third-party script's — was in the stack beside ours.
-    let frames = frame_origin(stack);
+    // page, `frames=mixed` says someone else's code — an extension's, a
+    // third-party script's, or a script injected into the page — was in the
+    // stack beside ours.
+    let frames = frame_origin(stack, path);
 
     // Routine deploy skew stays greppable under the same target but at `info`,
     // below the log alerter's paging threshold (which fires on `web_crash`
@@ -827,10 +910,11 @@ fn log_crash(
             %stack,
             "web app damaged chunk (visitor's copy lacked its exports; our host serves it whole)",
         );
-    } else if is_foreign_code_error(kind, message, stack) {
+    } else if is_foreign_code_error(kind, message, stack, path) {
         // Someone else's code crashing in our visitors' pages — a browser
         // extension (`frames=extension`), a third-party script we load, maybe
-        // beside an extension (`frames=third-party`), a userscript or console
+        // beside an extension (`frames=third-party`), a script injected into
+        // the page as text (`frames=injected`), a userscript or console
         // experiment (`frames=none`), a muted cross-origin script. Counted,
         // never paged.
         // The client also declines to send these, but old clients ship from SW
@@ -1043,13 +1127,14 @@ mod tests {
             "Cannot destructure property 'App' of undefined"
         ));
         assert!(!is_repaired_dom_desync("boot"));
-        assert!(!is_foreign_code_error("boot", "boom", "@ @ Pk@"));
+        assert!(!is_foreign_code_error("boot", "boom", "@ @ Pk@", "/"));
         // Not even when an extension's frames are all its stack names: the app
         // never mounted for that visitor, whoever's code it was.
         assert!(!is_foreign_code_error(
             "boot",
             "boom",
-            "i: boom at f (chrome-extension://abc/x.js:1:2)"
+            "i: boom at f (chrome-extension://abc/x.js:1:2)",
+            "/"
         ));
     }
 
@@ -1266,7 +1351,7 @@ mod tests {
             "NotFoundError: … at j (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:3031)";
         assert!(!is_repaired_dom_desync("boundary"));
         assert!(!is_routine_stale_chunk("boundary", msg));
-        assert!(!is_foreign_code_error("boundary", msg, stack));
+        assert!(!is_foreign_code_error("boundary", msg, stack, "/"));
     }
 
     #[test]
@@ -1277,24 +1362,27 @@ mod tests {
         assert!(is_foreign_code_error(
             "error",
             "Maximum call stack size exceeded.",
-            "@ @ @ Pk@ Nk@ Pk@"
+            "@ @ @ Pk@ Nk@ Pk@",
+            "/"
         ));
         // V8's eval wording is equally unattributed.
         assert!(is_foreign_code_error(
             "error",
             "Maximum call stack size exceeded",
-            "at Pk (<anonymous>) at Nk (<anonymous>)"
+            "at Pk (<anonymous>) at Nk (<anonymous>)",
+            "/"
         ));
     }
 
     #[test]
     fn muted_cross_origin_script_error_is_foreign() {
-        assert!(is_foreign_code_error("error", "Script error.", ""));
+        assert!(is_foreign_code_error("error", "Script error.", "", "/"));
         // But only with the empty stack the mute implies — and only verbatim-ish.
         assert!(!is_foreign_code_error(
             "error",
             "Script error.",
-            "Pk@https://dweeb.faizo.net/assets/index-abc.js:1:2"
+            "Pk@https://dweeb.faizo.net/assets/index-abc.js:1:2",
+            "/"
         ));
     }
 
@@ -1305,7 +1393,7 @@ mod tests {
             "error",
             "Maximum call stack size exceeded.",
             "Pk@https://dweeb.faizo.net/assets/useBarWidth-Dcpvcuzg.js:41:9528 Nk@https://dweeb.faizo.net/assets/useBarWidth-Dcpvcuzg.js:41:9600"
-        ));
+        , "/"));
         // …even with an extension's frame above it: a page-world wrapper sits
         // on top of our own call, and that misuse of ours must page. This is
         // why the rule reads every location, never just the top frame.
@@ -1314,7 +1402,8 @@ mod tests {
                 kind,
                 "boom",
                 "Error: boom at History.pushState (chrome-extension://abc/hook.js:1:2) \
-                 at ourPush (https://dweeb.faizo.net/assets/index-a.js:4:49)"
+                 at ourPush (https://dweeb.faizo.net/assets/index-a.js:4:49)",
+                "/"
             ));
         }
     }
@@ -1336,9 +1425,16 @@ mod tests {
         name: String,
         message: String,
         stack: String,
+        /// The page the beacon came from; `/` when the case omits it.
+        #[serde(default = "root_page")]
+        path: String,
         frames: String,
         error: bool,
         unhandledrejection: bool,
+    }
+
+    fn root_page() -> String {
+        "/".into()
     }
 
     /// Every case is judged exactly as the handler reads it — through
@@ -1376,7 +1472,7 @@ mod tests {
         for case in &spec.cases {
             let message = clamp_field(&case.message, MESSAGE_MAX);
             let stack = clamp_field(&case.stack, STACK_MAX);
-            let frames = frame_origin(&stack).to_string();
+            let frames = frame_origin(&stack, &case.path).to_string();
             if frames != case.frames {
                 failures.push(format!("{}: frames={frames}", case.name));
             }
@@ -1384,7 +1480,7 @@ mod tests {
                 ("error", case.error),
                 ("unhandledrejection", case.unhandledrejection),
             ] {
-                if is_foreign_code_error(kind, &message, &stack) != want {
+                if is_foreign_code_error(kind, &message, &stack, &case.path) != want {
                     failures.push(format!("{} [{kind}]: expected foreign={want}", case.name));
                 }
             }
@@ -1395,7 +1491,7 @@ mod tests {
                 .chain(["", "Error", "unhandledRejection"])
                 .filter(|kind| !matches!(*kind, "error" | "unhandledrejection"))
             {
-                if is_foreign_code_error(kind, &message, &stack) {
+                if is_foreign_code_error(kind, &message, &stack, &case.path) {
                     failures.push(format!("{} [{kind}]: only the window traps", case.name));
                 }
             }
@@ -1525,10 +1621,10 @@ mod tests {
         assert!(!is_routine_stale_chunk(&kind, &message));
         assert!(!is_repaired_dom_desync(&kind));
         // …so the foreign-code branch does, at info, with `frames=extension`.
-        assert_eq!(frame_origin(&stack), FrameOrigin::Extension);
-        assert!(is_foreign_code_error(&kind, &message, &stack));
+        assert_eq!(frame_origin(&stack, "/"), FrameOrigin::Extension);
+        assert!(is_foreign_code_error(&kind, &message, &stack, "/"));
         // Thrown rather than dropped, the same code is just as foreign.
-        assert!(is_foreign_code_error("error", &message, &stack));
+        assert!(is_foreign_code_error("error", &message, &stack, "/"));
     }
 
     /// The 2026-10-19 page, byte for byte as build `a3450ef53b` sent it (the
@@ -1555,8 +1651,8 @@ mod tests {
         assert!(!is_routine_stale_chunk(&kind, &message));
         assert!(!is_repaired_dom_desync(&kind));
         // …so the foreign-code branch does, at info, with `frames=third-party`.
-        assert_eq!(frame_origin(&stack), FrameOrigin::ThirdParty);
-        assert!(is_foreign_code_error(&kind, &message, &stack));
+        assert_eq!(frame_origin(&stack, "/"), FrameOrigin::ThirdParty);
+        assert!(is_foreign_code_error(&kind, &message, &stack, "/"));
         let line = logged_line(&kind, &message, &stack);
         assert!(line.contains(" INFO "), "{line}");
         assert!(line.contains("web app foreign-code error"), "{line}");
@@ -1602,8 +1698,8 @@ mod tests {
         assert!(!is_routine_stale_chunk(&kind, &message));
         assert!(!is_repaired_dom_desync(&kind));
         // …so the foreign-code branch does, at info, with `frames=none`.
-        assert_eq!(frame_origin(&stack), FrameOrigin::None);
-        assert!(is_foreign_code_error(&kind, &message, &stack));
+        assert_eq!(frame_origin(&stack, "/"), FrameOrigin::None);
+        assert!(is_foreign_code_error(&kind, &message, &stack, "/"));
         let line = logged_line(&kind, &message, &stack);
         assert!(line.contains(" INFO "), "{line}");
         assert!(line.contains("web app foreign-code error"), "{line}");
@@ -1615,6 +1711,49 @@ mod tests {
         // reads exactly that way.
         let ours = logged_line("unhandledrejection", "Failed to fetch", "");
         assert!(ours.contains(" WARN "), "{ours}");
+    }
+
+    /// The 2026-11-12 page, byte for byte as the live build `9218cff86e` sent
+    /// it: a script injected into the page as text, recursing until Safari's
+    /// stack ran out. Every frame names the page `/` itself, at lines the shell
+    /// doesn't have (its lines 190–230 are JSON-LD), so nothing of ours ran.
+    #[test]
+    fn the_2026_11_12_injected_script_recursion_is_demoted_not_paged() {
+        let body: CrashBody = serde_json::from_str(
+            r#"{"kind":"error","message":"Maximum call stack size exceeded.",
+                "stack":"@https://dweeb.faizo.net/:194:68\n@https://dweeb.faizo.net/:191:249\n@https://dweeb.faizo.net/:194:39\n@https://dweeb.faizo.net/:201:358\nxk@https://dweeb.faizo.net/:230:389\nvk@https://dweeb.faizo.net/:230:69",
+                "version":"1.4.0","build":"9218cff86e","surface":"web","path":"/"}"#,
+        )
+        .expect("payload shape");
+        let kind = clamp_field(&body.kind, KIND_MAX);
+        let message = clamp_field(&body.message, MESSAGE_MAX);
+        let stack = clamp_field(&body.stack, STACK_MAX);
+        let path = clamp_field(&body.path, PATH_MAX);
+        // No earlier branch claims it…
+        assert!(!is_non_crash(&body.message));
+        assert!(!pages_as_broken_deploy(&kind, &message));
+        assert!(!is_routine_stale_chunk(&kind, &message));
+        assert!(!is_repaired_dom_desync(&kind));
+        assert!(!is_damaged_chunk(&kind));
+        // …so the foreign-code branch does, at info, with `frames=injected`.
+        assert_eq!(frame_origin(&stack, &path), FrameOrigin::Injected);
+        let line = logged_line(&kind, &message, &stack);
+        assert!(line.contains(" INFO "), "{line}");
+        assert!(line.contains("web app foreign-code error"), "{line}");
+        assert!(line.contains("kind=error frames=injected"), "{line}");
+        // The same frames under a report from another page are not that page's,
+        // and pages; so does the recursion with a frame of ours beneath it.
+        assert!(!is_foreign_code_error(
+            &kind,
+            &message,
+            &stack,
+            "/s/AbCd1234"
+        ));
+        let under_ours =
+            format!("{stack} Ks@https://dweeb.faizo.net/assets/index-ud2TjsYB.js:1:9528");
+        let paged = logged_line(&kind, &message, &under_ours);
+        assert!(paged.contains(" WARN "), "{paged}");
+        assert!(paged.contains("frames=mixed"), "{paged}");
     }
 
     /// The 2026-09-25 page, byte for byte as build `e87dcd0497` sent it. The
@@ -1639,8 +1778,8 @@ mod tests {
         assert!(!pages_as_broken_deploy(&kind, &message));
         assert!(!is_routine_stale_chunk(&kind, &message));
         assert!(!is_repaired_dom_desync(&kind));
-        assert_eq!(frame_origin(&stack), FrameOrigin::Page);
-        assert!(!is_foreign_code_error(&kind, &message, &stack));
+        assert_eq!(frame_origin(&stack, "/"), FrameOrigin::Page);
+        assert!(!is_foreign_code_error(&kind, &message, &stack, "/"));
         // …so this one does, at info.
         assert!(is_unhandled_abort(&kind, &message));
         let line = logged_line(&kind, &message, &stack);
@@ -1708,8 +1847,8 @@ mod tests {
         assert!(!pages_as_broken_deploy(&kind, &message));
         assert!(!is_routine_stale_chunk(&kind, &message));
         assert!(!is_repaired_dom_desync(&kind));
-        assert_eq!(frame_origin(&stack), FrameOrigin::Page);
-        assert!(!is_foreign_code_error(&kind, &message, &stack));
+        assert_eq!(frame_origin(&stack, "/"), FrameOrigin::Page);
+        assert!(!is_foreign_code_error(&kind, &message, &stack, "/"));
         assert!(!is_unhandled_abort(&kind, &message));
         // …so this one does, at info.
         assert!(is_unhandled_network_failure(&kind, &message));
@@ -1775,7 +1914,7 @@ mod tests {
         for kind in ["unhandledrejection", "error"] {
             // Both branches would claim it, so only their order decides.
             assert!(is_routine_stale_chunk(kind, MSG), "{kind}");
-            assert!(is_foreign_code_error(kind, MSG, STACK), "{kind}");
+            assert!(is_foreign_code_error(kind, MSG, STACK, "/"), "{kind}");
             let line = logged_line(kind, MSG, STACK);
             assert!(line.contains(" INFO "), "{line}");
             assert!(line.contains("web app stale chunk (deploy skew)"), "{line}");
@@ -1802,6 +1941,7 @@ mod tests {
         assert_eq!(FrameOrigin::Page.to_string(), "page");
         assert_eq!(FrameOrigin::Extension.to_string(), "extension");
         assert_eq!(FrameOrigin::ThirdParty.to_string(), "third-party");
+        assert_eq!(FrameOrigin::Injected.to_string(), "injected");
         assert_eq!(FrameOrigin::Mixed.to_string(), "mixed");
     }
 
@@ -1818,7 +1958,12 @@ mod tests {
     fn empty_stack_with_ordinary_message_still_pages() {
         // Our own code can `throw "string"` (no stack attached) — that must
         // keep paging.
-        assert!(!is_foreign_code_error("error", "invalid share token", ""));
+        assert!(!is_foreign_code_error(
+            "error",
+            "invalid share token",
+            "",
+            "/"
+        ));
     }
 
     #[test]
@@ -1829,7 +1974,7 @@ mod tests {
         const EXTENSION_ONLY: &str = "i: boom at f (chrome-extension://abc/x.js:1:2)";
         for kind in CLIENT_KINDS {
             assert_eq!(
-                is_foreign_code_error(kind, "boom", EXTENSION_ONLY),
+                is_foreign_code_error(kind, "boom", EXTENSION_ONLY, "/"),
                 matches!(kind, "error" | "unhandledrejection"),
                 "{kind}"
             );
@@ -1837,17 +1982,19 @@ mod tests {
         // The two shapes that name nobody stay window-error only: a rejection
         // naming no location pages, since our own failed fetch rejects exactly
         // so (a header-only `TypeError`).
-        assert!(!is_foreign_code_error("boundary", "boom", "@ @ Pk@"));
+        assert!(!is_foreign_code_error("boundary", "boom", "@ @ Pk@", "/"));
         assert!(!is_foreign_code_error(
             "unhandledrejection",
             "boom",
-            "@ @ Pk@"
+            "@ @ Pk@",
+            "/"
         ));
-        assert!(!is_foreign_code_error("boundary", "Script error.", ""));
+        assert!(!is_foreign_code_error("boundary", "Script error.", "", "/"));
         assert!(!is_foreign_code_error(
             "unhandledrejection",
             "Script error.",
-            ""
+            "",
+            "/"
         ));
     }
 }

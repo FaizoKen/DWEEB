@@ -1,5 +1,5 @@
 {
-  "about": "Hand-written spec for which crash beacons report someone else's code: browser extensions, third-party scripts we load but don't ship (each one matched as an exact https://<host>/ prefix), userscripts, muted cross-origin scripts. server/src/telemetry.rs judges every case as its handler does, through clamp_field (control characters turned into spaces); src/core/telemetry/crashReport.test.ts judges it twice, as written (the client's newline-joined stack) and flattened that same way, since the client must reach the proxy's verdict from either. 'frames' is frameOrigin / frame_origin; 'error' and 'unhandledrejection' are isForeignCodeError / is_foreign_code_error for that kind. Every other kind is never foreign, for any of these stacks. The verdicts ARE the policy: edit this file first, then both implementations, and never regenerate it from either one. See AGENTS.md, 'A crash beacon must be *our* crash before it may page'.",
+  "about": "Hand-written spec for which crash beacons report someone else's code: browser extensions, third-party scripts we load but don't ship (each one matched as an exact https://<host>/ prefix), userscripts, muted cross-origin scripts. server/src/telemetry.rs judges every case as its handler does, through clamp_field (control characters turned into spaces); src/core/telemetry/crashReport.test.ts judges it twice, as written (the client's newline-joined stack) and flattened that same way, since the client must reach the proxy's verdict from either. 'path' is the page the beacon was reported from (its 'path' field, location.pathname), \"/\" when a case omits it: a location naming that page itself is a script injected into it ('injected'). 'frames' is frameOrigin / frame_origin; 'error' and 'unhandledrejection' are isForeignCodeError / is_foreign_code_error for that kind. Every other kind is never foreign, for any of these stacks. The verdicts ARE the policy: edit this file first, then both implementations, and never regenerate it from either one. See AGENTS.md, 'A crash beacon must be *our* crash before it may page'.",
   "extensionSchemes": [
     "chrome-extension",
     "moz-extension",
@@ -663,6 +663,168 @@
       "message": "Invalid call to runtime.send Message(). Tab not found.",
       "stack": "",
       "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "2026-11-12 page: a script injected into the page recursing, exactly as the proxy logged build 9218cff86e's beacon",
+      "message": "Maximum call stack size exceeded.",
+      "stack": "@https://dweeb.faizo.net/:194:68 @https://dweeb.faizo.net/:191:249 @https://dweeb.faizo.net/:194:39 @https://dweeb.faizo.net/:201:358 xk@https://dweeb.faizo.net/:230:389 vk@https://dweeb.faizo.net/:230:69",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the second of those beacons as the client sends it, one frame per line",
+      "message": "Maximum call stack size exceeded.",
+      "stack": "@https://dweeb.faizo.net/:190:146\n@https://dweeb.faizo.net/:201:263\n@https://dweeb.faizo.net/:202:110\nvk@https://dweeb.faizo.net/:230:25\nxk@https://dweeb.faizo.net/:230:415\nvk@https://dweeb.faizo.net/:230:69",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "V8's rendering of a script injected into the page, named frame and anonymous",
+      "message": "Maximum call stack size exceeded",
+      "stack": "RangeError: Maximum call stack size exceeded\nat xk (https://dweeb.faizo.net/:230:389)\nat https://dweeb.faizo.net/:194:68",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a script injected into a short-link page names that page",
+      "message": "boom",
+      "stack": "f@https://dweeb.faizo.net/s/AbCd1234:3:12",
+      "path": "/s/AbCd1234",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the page's query is not part of its path, even with colons in it",
+      "message": "boom",
+      "stack": "f@https://dweeb.faizo.net/?entry=guide:discord-timestamp-format:12:7",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the Activity's page on Discord's host, with its launch query",
+      "message": "boom",
+      "stack": "f@https://1511769679096447016.discordsays.com/?frame_id=abc&instance_id=i-1:40:2",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a page location with a line and no column still names the page",
+      "message": "boom",
+      "stack": "f@https://dweeb.faizo.net/:230",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "scheme and host may be any case; only the path is compared",
+      "message": "boom",
+      "stack": "f@HTTPS://DWEEB.FAIZO.NET/:5:6",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "plain http names the page too (a self-hosted copy)",
+      "message": "boom",
+      "stack": "f@http://localhost:4173/:12:5",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an injected frame beside an extension's: nothing of ours",
+      "message": "boom",
+      "stack": "xk@https://dweeb.faizo.net/:230:389\nw@webkit-masked-url://hidden/:2:2930760",
+      "path": "/",
+      "frames": "injected",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an injected frame beside gtag's reads as the third-party script's",
+      "message": "Failed to fetch",
+      "stack": "xk@https://dweeb.faizo.net/:1:1\nwd@https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:295:391",
+      "path": "/",
+      "frames": "third-party",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an injected frame over one of ours stays ours",
+      "message": "Maximum call stack size exceeded.",
+      "stack": "xk@https://dweeb.faizo.net/:230:389\nKs@https://dweeb.faizo.net/assets/index-ud2TjsYB.js:1:9528",
+      "path": "/",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "another page's location under this page's report is ours: only the reporting page counts",
+      "message": "boom",
+      "stack": "f@https://dweeb.faizo.net/s/AbCd1234:3:12",
+      "path": "/",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a path that differs only by its trailing slash is not the page",
+      "message": "boom",
+      "stack": "f@https://dweeb.faizo.net/discord-message-builder:1:1",
+      "path": "/discord-message-builder/",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a page location with no line is ours, wherever a clamp cut it",
+      "message": "boom",
+      "stack": "xk@https://dweeb.faizo.net/ vk@https://dweeb.faizo.net/:",
+      "path": "/",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a script served from an extensionless path is not the page (Stripe.js stays unlisted)",
+      "message": "boom",
+      "stack": "at e (https://js.stripe.com/v3/:1:12345)",
+      "path": "/",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a blob script is never the page",
+      "message": "boom",
+      "stack": "at w (blob:https://dweeb.faizo.net/1f0e7a52-3c1d-4d5e-9b7a-2c4f6e8d0a11:1:2)",
+      "path": "/",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a report that names no page never matches one",
+      "message": "boom",
+      "stack": "xk@https://dweeb.faizo.net/:230:389",
+      "path": "",
+      "frames": "page",
       "error": false,
       "unhandledrejection": false
     }
