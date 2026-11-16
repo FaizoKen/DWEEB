@@ -2997,7 +2997,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   deliberately not offered**: the uploads are ephemeral interaction attachments, so forwarding
   them durably means downloading and re-uploading up to 10 × 20 MiB per submission on a small
   host — a product decision, not a missing field. No deploy ordering (the config page ships
-  inside the service). (2) **Channel obfuscation**: from **2026-11-16** `GET
+  inside the service). **An invalid modal fails silently**: Modal Form answers the click with
+  the modal in its HTTP reply, and when Discord refuses it the member reads "DWEEB didn't
+  respond in time" while nothing reaches any log of ours. Found 2026-11-16 from a support
+  report: a form whose single-line ("short") question carried a multi-line prefill worked when
+  created, then never opened again after an edit; 2 of 136 prod forms had that shape. So a
+  short box with a line break in its prefill is sent as a paragraph (`text_input_is_paragraph`),
+  a prefill is clamped to the box's `max_length` (and refused at save past it), and the config
+  page says line breaks make the box multi-line. Any new modal field rule belongs at both
+  save and send, since the click path can't report a rejection. (2) **Channel obfuscation**: from **2026-11-16** `GET
   /guilds/{id}/channels` omits every channel the bot can't view (the Gateway already sends them as
   `___hidden___` with flag `CHANNEL_OBFUSCATED`, `1 << 17`). The proxy (`visible_channels`),
   Directory and Tickets drop any channel carrying that flag — **the flag, never the name**, as the

@@ -117,6 +117,13 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
             if v.chars().count() > TEXT_INPUT_MAX as usize {
                 return Err("A field's prefilled text is too long (max 4000).".into());
             }
+            if let Some(max) = f.max_length {
+                if v.chars().count() > max as usize {
+                    return Err(format!(
+                        "Field “{label}”: the prefilled text is longer than its max length."
+                    ));
+                }
+            }
         }
     }
 
@@ -471,6 +478,16 @@ mod tests {
         f.min_length = Some(100);
         f.max_length = Some(10);
         assert!(validate_config(&cfg(vec![f])).is_err());
+    }
+
+    #[test]
+    fn rejects_a_prefill_longer_than_max_length() {
+        let mut f = field("f1");
+        f.value = Some("hello".into());
+        f.max_length = Some(4);
+        assert!(validate_config(&cfg(vec![f.clone()])).is_err());
+        f.max_length = Some(5);
+        assert!(validate_config(&cfg(vec![f])).is_ok());
     }
 
     #[test]

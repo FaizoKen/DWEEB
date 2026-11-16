@@ -451,7 +451,8 @@ fn field_input(f: &ModalField) -> Value {
         }
         // kind::TEXT, and anything validation would have refused.
         _ => {
-            let style = if f.style == "paragraph" {
+            let prefill = f.value.as_deref().filter(|v| !v.is_empty());
+            let style = if text_input_is_paragraph(f) {
                 TEXT_INPUT_PARAGRAPH
             } else {
                 TEXT_INPUT_SHORT
@@ -465,10 +466,14 @@ fn field_input(f: &ModalField) -> Value {
             if let Some(p) = f.placeholder.as_deref().filter(|p| !p.is_empty()) {
                 input["placeholder"] = json!(clamp(p, 100));
             }
-            if let Some(v) = &f.value {
-                if !v.is_empty() {
-                    input["value"] = json!(clamp(v, TEXT_INPUT_MAX as usize));
-                }
+            if let Some(v) = prefill {
+                // A prefill longer than the box allows is one Discord could
+                // refuse the whole modal over; validation refuses it at save,
+                // and this covers a form saved before that check.
+                let cap = f
+                    .max_length
+                    .map_or(TEXT_INPUT_MAX, |m| m.clamp(1, TEXT_INPUT_MAX));
+                input["value"] = json!(clamp(v, cap as usize));
             }
             if let Some(m) = f.min_length {
                 input["min_length"] = json!(m.min(TEXT_INPUT_MAX));
@@ -479,6 +484,16 @@ fn field_input(f: &ModalField) -> Value {
             input
         }
     }
+}
+
+/// Whether a text question opens as a multi-line box. A single-line box whose
+/// prefilled text has line breaks is sent as a paragraph instead. A form saved
+/// that way stopped opening on 2026-11-16 (every click read "didn't respond in
+/// time", and nothing reached our logs, since Discord refuses an invalid modal
+/// silently); a single-line box can't show the lines anyway, and the line
+/// breaks say which box the author meant.
+pub fn text_input_is_paragraph(f: &ModalField) -> bool {
+    f.style == "paragraph" || f.value.as_deref().is_some_and(|v| v.contains(['\n', '\r']))
 }
 
 /// Reply to the user (ephemeral) with whichever the instance is configured for:
@@ -934,5 +949,58 @@ mod tests {
         assert_eq!(input["placeholder"], "Describe");
         assert_eq!(input["required"], true);
         assert_eq!(v["data"]["title"], "Report");
+    }
+
+    #[test]
+    fn a_short_box_with_a_multi_line_prefill_opens_as_a_paragraph() {
+        // The 2026-11-16 form: a "short" question prefilled with a template of
+        // lines. Sent as a single-line box, the modal stopped opening and every
+        // click read "didn't respond in time".
+        let mut f = field("f1", "Favorites");
+        f.style = "short".into();
+        f.value = Some("Food: \n⛧| Drink: ".into());
+        let modal = ModalDef {
+            title: "Introduce Yourself!".into(),
+            intro: None,
+            fields: vec![f],
+        };
+        let v = modal_response("modalform:submit:x", &modal);
+        let input = &v["data"]["components"][0]["component"];
+        assert_eq!(input["style"], TEXT_INPUT_PARAGRAPH);
+        assert_eq!(input["value"], "Food: \n⛧| Drink: ");
+
+        // A carriage return alone counts too; a one-line prefill stays short.
+        let mut cr = field("f2", "x");
+        cr.value = Some("a\rb".into());
+        assert!(text_input_is_paragraph(&cr));
+        let mut one = field("f3", "x");
+        one.value = Some("one line".into());
+        assert!(!text_input_is_paragraph(&one));
+        let modal = ModalDef {
+            title: "t".into(),
+            intro: None,
+            fields: vec![one],
+        };
+        let v = modal_response("modalform:submit:x", &modal);
+        assert_eq!(
+            v["data"]["components"][0]["component"]["style"],
+            TEXT_INPUT_SHORT
+        );
+    }
+
+    #[test]
+    fn a_prefill_never_outgrows_the_box_it_sits_in() {
+        let mut f = field("f1", "Name");
+        f.value = Some("abcdefghij".into());
+        f.max_length = Some(4);
+        let modal = ModalDef {
+            title: "t".into(),
+            intro: None,
+            fields: vec![f],
+        };
+        let v = modal_response("modalform:submit:x", &modal);
+        let input = &v["data"]["components"][0]["component"];
+        assert_eq!(input["value"], "abcd");
+        assert_eq!(input["max_length"], 4);
     }
 }

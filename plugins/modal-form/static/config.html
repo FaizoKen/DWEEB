@@ -1285,6 +1285,7 @@ summary .sub {
               ${isText(a) ? `
               <label class="lbl">Prefilled text</label>
               <textarea rows="2" maxlength="4000" placeholder="optional" data-k="value"></textarea>
+              ${a === "short" ? `<p class="hint">Line breaks here make this a multi-line box.</p>` : ""}
               <div class="grid">
                 <div>
                   <label class="lbl">Min length</label>
