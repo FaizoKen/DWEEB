@@ -106,6 +106,71 @@
   color: var(--app-text-subtle);
 }
 
+/* A toned row (`tone`): the icon sits in a tile tinted with its group's colour,
+   so the eye finds a group before it reads a word, and the label carries the row
+   over its quieter description. Semibold on purpose, and only here: 600 is a
+   real face in every shell font, Segoe UI included. The trouble described above
+   was 500 rounding up to it across a whole plain list, where nothing was quieter
+   beside it. */
+.item[data-tone] {
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+}
+.item[data-tone] .itemIcon {
+  width: 32px;
+  height: 32px;
+  margin-top: 0;
+  border-radius: 8px;
+  background: var(--menu-tone-soft);
+  color: var(--menu-tone-text);
+}
+.item[data-tone]:hover:not(:disabled) .itemIcon,
+.item[data-tone]:focus-visible .itemIcon {
+  background: var(--menu-tone-strong);
+}
+.item[data-tone] .itemLabel {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.item[data-tone] .itemDescription {
+  margin-top: 2px;
+  font-weight: 400;
+}
+/* Discord's brand hues (Blurple #5865F2, Green #57F287, Fuchsia #EB459E,
+   Yellow #FEE75C) as low-alpha fills, with a lighter tint of each for the glyph
+   so it clears 4.5:1 on its own tile. */
+.item[data-tone="blurple"] {
+  --menu-tone-soft: rgba(88, 101, 242, 0.18);
+  --menu-tone-strong: rgba(88, 101, 242, 0.3);
+  --menu-tone-text: #b4bbff;
+}
+.item[data-tone="green"] {
+  --menu-tone-soft: rgba(87, 242, 135, 0.12);
+  --menu-tone-strong: rgba(87, 242, 135, 0.22);
+  --menu-tone-text: #7fe9a2;
+}
+.item[data-tone="fuchsia"] {
+  --menu-tone-soft: rgba(235, 69, 158, 0.15);
+  --menu-tone-strong: rgba(235, 69, 158, 0.27);
+  --menu-tone-text: #f794c9;
+}
+.item[data-tone="yellow"] {
+  --menu-tone-soft: rgba(254, 231, 92, 0.12);
+  --menu-tone-strong: rgba(254, 231, 92, 0.22);
+  --menu-tone-text: #f6e27d;
+}
+
+.item[data-danger]:hover:not(:disabled),
+.item[data-danger]:focus-visible {
+  background: var(--app-danger-soft);
+  color: var(--app-danger-text);
+}
+.item[data-danger]:hover:not(:disabled) .itemIcon,
+.item[data-danger]:focus-visible .itemIcon {
+  color: var(--app-danger-text);
+}
+
 .divider {
   height: 1px;
   background: var(--app-border);

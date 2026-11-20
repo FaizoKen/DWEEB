@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placeMenu } from "./menuPlacement";
+import { placeMenu, scrollMovesAnchor } from "./menuPlacement";
 
 const viewport = { width: 1280, height: 720 };
 /** A trigger in a top bar, near the right edge. */
@@ -50,5 +50,21 @@ describe("placeMenu", () => {
     expect(
       placeMenu(topBar, { width: 300, height: 100 }, { width: 1100, height: 640 }, "start").left,
     ).toBe(792);
+  });
+});
+
+describe("scrollMovesAnchor", () => {
+  const inside = { id: "row" } as unknown as Node;
+  const outside = { id: "page" } as unknown as Node;
+  const panel = { contains: (node: Node | null) => node === inside };
+
+  it("ignores the panel's own scroll, which would snap a capped list back to the top", () => {
+    expect(scrollMovesAnchor(inside, panel)).toBe(false);
+  });
+
+  it("follows a scroll anywhere else, which may carry the trigger with it", () => {
+    expect(scrollMovesAnchor(outside, panel)).toBe(true);
+    expect(scrollMovesAnchor(null, panel)).toBe(true);
+    expect(scrollMovesAnchor(outside, null)).toBe(true);
   });
 });

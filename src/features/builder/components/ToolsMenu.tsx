@@ -4,10 +4,12 @@
  * of names, so someone who did open it learned little about what they'd found.
  *
  * A row here says what it's for in a line of its own, and the rows are grouped
- * by the job. Features get a description; housekeeping (feedback, about, clear)
- * doesn't, which is what makes the features stand out. Keep the descriptions
- * true to what the feature's own dialog promises, and short enough for one line
- * at this width.
+ * by the job. Features get a description and an icon tile tinted with their
+ * group's colour (one hue per group, never per row, so the colour says what
+ * goes together); housekeeping (feedback, about, clear) gets neither and sits
+ * in a strip along the foot, which is what makes the features stand out. Keep
+ * the descriptions true to what the feature's own dialog promises, and short
+ * enough for one line beside the tile.
  *
  * Two columns on anything wider than a phone: at one, the whole list ran past
  * the fold of a 768px-tall laptop, and a feature you have to scroll a menu to
@@ -167,6 +169,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<ShareIcon />}
                   description="Send anyone an editable copy"
+                  tone="blurple"
                   onSelect={pick("share_link", onShare)}
                 >
                   Share link
@@ -175,6 +178,7 @@ export function ToolsMenu({
                   <MenuItem
                     icon={<UsersIcon />}
                     description="Build this message together, live"
+                    tone="blurple"
                     // Mints a Discord Activity invite for a channel so the whole
                     // group lands in one shared instance. A bare launcher link
                     // only ever opens a solo call (see CollaborateDialog).
@@ -186,6 +190,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<ClockIcon />}
                   description="Post at a set time, once or on repeat"
+                  tone="blurple"
                   onSelect={pick("schedule", onSchedule)}
                 >
                   Schedule a post
@@ -195,6 +200,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<CodeIcon />}
                   description="discord.js, discord.py, cURL, fetch, Python"
+                  tone="green"
                   onSelect={pick("code", onCode)}
                 >
                   Export as code
@@ -202,6 +208,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<BracesIcon />}
                   description="Copy the payload, or paste one in"
+                  tone="green"
                   onSelect={pick("json", onJson)}
                 >
                   Import / export JSON
@@ -214,6 +221,7 @@ export function ToolsMenu({
                   <MenuItem
                     icon={<SparkleIcon />}
                     description="Have Claude build and post for you"
+                    tone="fuchsia"
                     // Hands over the hosted connector URL and the steps that add
                     // it to an AI client (see ConnectAiDialog).
                     onSelect={pick("ai_client", openMcp)}
@@ -225,6 +233,7 @@ export function ToolsMenu({
                   <MenuItem
                     icon={<InstallIcon />}
                     description="Add DWEEB to your desktop or phone"
+                    tone="fuchsia"
                     // Replays the captured native PWA prompt on Chromium, or shows
                     // per-platform steps elsewhere (see InstallDialog).
                     onSelect={pick("install", openInstall)}
@@ -235,6 +244,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<FilmIcon />}
                   description="See how DWEEB works in a minute"
+                  tone="fuchsia"
                   // Always available, so closing the film on a first visit is
                   // never a one-way door.
                   onSelect={pick("intro", () => useWelcomeStore.getState().openWelcome())}
@@ -244,6 +254,7 @@ export function ToolsMenu({
                 <MenuItem
                   icon={<CompassIcon />}
                   description="Plugins, polls, tickets and more"
+                  tone="fuchsia"
                   trailing={<ExternalLinkIcon size={13} />}
                   // These rows are what a menu can reach; plugins live on the
                   // buttons they power, so the catalogue is what introduces them.
@@ -254,34 +265,34 @@ export function ToolsMenu({
                 >
                   See all features
                 </MenuItem>
-
-                <MenuDivider />
-                {feedbackOn ? (
-                  <MenuItem icon={<SupportIcon />} onSelect={pick("feedback", openFeedback)}>
-                    Send feedback
-                  </MenuItem>
-                ) : null}
-                <MenuItem icon={<InfoIcon />} onSelect={pick("about", onAbout)}>
-                  About
-                </MenuItem>
               </div>
             </div>
 
-            {/* The one destructive row sits in a group of its own, last, so it's
-                never a slip away from an export or from "Send feedback". */}
-            <MenuDivider />
-            <MenuItem
-              icon={<TrashIcon />}
-              onSelect={pick("clear", () => {
-                // One click wipes the draft and every message-level option; the
-                // toast's Undo is the acknowledgement that it's recoverable.
-                const before = useMessageStore.getState().message;
-                clearAll();
-                toastWithUndo("Message cleared", before);
-              })}
-            >
-              Clear current message
-            </MenuItem>
+            {/* Housekeeping: a strip along the foot, with the one destructive
+                row at its far end, apart from the rest. */}
+            <div className={styles.footer}>
+              {feedbackOn ? (
+                <MenuItem icon={<SupportIcon />} onSelect={pick("feedback", openFeedback)}>
+                  Send feedback
+                </MenuItem>
+              ) : null}
+              <MenuItem icon={<InfoIcon />} onSelect={pick("about", onAbout)}>
+                About
+              </MenuItem>
+              <MenuItem
+                icon={<TrashIcon />}
+                danger
+                onSelect={pick("clear", () => {
+                  // One click wipes the draft and every message-level option; the
+                  // toast's Undo is the acknowledgement that it's recoverable.
+                  const before = useMessageStore.getState().message;
+                  clearAll();
+                  toastWithUndo("Message cleared", before);
+                })}
+              >
+                Clear current message
+              </MenuItem>
+            </div>
           </>
         );
       }}

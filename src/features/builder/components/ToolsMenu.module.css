@@ -1,7 +1,8 @@
 /* `[role]` outweighs `Menu`'s own `.panel`, whose 320px cap is for a list of
-   names. Whichever stylesheet loads last must not decide this. */
+   names. Whichever stylesheet loads last must not decide this. The width holds
+   every description to one line beside its 32px tile. */
 .panel[role="menu"] {
-  width: 584px;
+  width: 616px;
   max-width: calc(100vw - 16px);
 }
 
@@ -19,15 +20,69 @@
   min-width: 0;
 }
 
-/* One column on a phone, where `Menu` caps the height and the list scrolls. The
-   width holds each description to one line. */
+/* Air above a group that follows another in the same column. `MenuLabel` is
+   the only presentation-role child a column holds. */
+.column > [role="presentation"]:not(:first-child) {
+  margin-top: 8px;
+}
+
+/* Housekeeping (feedback, about, clear) is a strip across the foot of the
+   panel, not three more rows: it is used rarely, and as full rows it weighed
+   as much as the features above it. Bled to the panel's edges so it reads as
+   the menu's floor rather than one more group. */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 4px -5px -5px;
+  padding: 5px;
+  border-top: 1px solid var(--app-border);
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 0 0 calc(var(--app-radius) - 1px) calc(var(--app-radius) - 1px);
+}
+
+.footer > [role="menuitem"] {
+  width: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  gap: 8px;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-muted);
+}
+
+.footer > [role="menuitem"]:not([data-danger]):hover,
+.footer > [role="menuitem"]:not([data-danger]):focus-visible {
+  color: var(--app-text);
+}
+
+/* The one destructive row keeps to the far end, apart from the other two, so
+   it is never a slip away from "Send feedback". */
+.footer > [data-danger] {
+  margin-left: auto;
+}
+
+@media (pointer: coarse) {
+  .footer > [role="menuitem"] {
+    min-height: 44px;
+  }
+}
+
+/* One column on a phone, where `Menu` caps the height and the list scrolls. */
 @media (max-width: 640px) {
   .panel[role="menu"] {
-    width: 300px;
+    width: 320px;
   }
 
   .columns,
   .folded {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The strip can't hold all three at this width; Clear takes a line of its
+     own rather than wrapping to wherever it lands. */
+  .footer > [data-danger] {
+    flex-basis: 100%;
+    margin-left: 0;
   }
 }

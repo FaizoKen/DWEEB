@@ -45,3 +45,20 @@ export function placeMenu(
 
   return { left, top, maxHeight: panel.height > room ? room : null };
 }
+
+/**
+ * Whether a scroll can have moved the trigger, so the panel must be placed
+ * again. The page listens in the capture phase to hear scrolls in any container
+ * that holds the trigger, which means it also hears the panel's own: a capped
+ * panel being scrolled to its lower rows. Placing it again then measures its
+ * natural height by lifting the cap for a moment, the browser clamps the scroll
+ * to the top while nothing overflows, and the lower rows snap back out of reach
+ * on every scroll. The panel is portalled out of every container that holds the
+ * trigger, so a scroll inside it never moves the trigger.
+ */
+export function scrollMovesAnchor(
+  target: EventTarget | null,
+  panel: { contains(node: Node | null): boolean } | null,
+): boolean {
+  return !panel?.contains(target as Node | null);
+}

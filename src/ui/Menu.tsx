@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
-import { placeMenu, type MenuAnchor, type MenuPlacement } from "./menuPlacement";
+import { placeMenu, scrollMovesAnchor, type MenuAnchor, type MenuPlacement } from "./menuPlacement";
 import { typeaheadIndex } from "./menuTypeahead";
 import styles from "./Menu.module.css";
 
@@ -131,15 +131,20 @@ export function Menu({ trigger, align = "end", className, onOpen, children }: Me
     };
     // Keep the floating panel pinned to the trigger as the page scrolls/resizes.
     const onReflow = () => measureAnchor();
+    // Not on the panel's own scroll (`scrollMovesAnchor`): that snapped a capped
+    // list back to its top on every scroll, so its lower rows were out of reach.
+    const onScroll = (e: Event) => {
+      if (scrollMovesAnchor(e.target, panelRef.current)) measureAnchor();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     window.addEventListener("resize", onReflow);
-    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onReflow);
-      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
     // Listeners are (re)bound once per open/close. The handlers only touch
     // stable refs and setters (`setOpen`, `triggerElement()`, `panelRef`), so
@@ -153,10 +158,14 @@ export function Menu({ trigger, align = "end", className, onOpen, children }: Me
     const panel = panelRef.current;
     // Read the natural height, not the cap an earlier pass left on the panel,
     // so a window that grew gets its whole list back.
+    // Lifting the cap clamps the scroll to the top, so put it back: a page
+    // scroll or resize while the list is scrolled must not lose the place.
     const cap = panel.style.maxHeight;
+    const scrolled = panel.scrollTop;
     panel.style.maxHeight = "none";
     const size = { width: panel.offsetWidth, height: panel.offsetHeight };
     panel.style.maxHeight = cap;
+    panel.scrollTop = scrolled;
     setPos(
       placeMenu(anchor, size, { width: window.innerWidth, height: window.innerHeight }, align),
     );
@@ -306,12 +315,25 @@ export function Menu({ trigger, align = "end", className, onOpen, children }: Me
   );
 }
 
+/**
+ * The colour of a feature row's icon tile: Discord's own brand hues, so the
+ * menu reads as part of the same product as the message it builds. One hue
+ * per group of rows, not per row, or the tiles stop saying what goes together.
+ */
+export type MenuTone = "blurple" | "green" | "fuchsia" | "yellow";
+
 interface MenuItemProps {
   icon?: ReactNode;
   children: ReactNode;
   /** One line under the label saying what the row is for. It follows the label
    *  in the row's text, so typeahead still matches on the label. */
   description?: string;
+  /** Sets the icon in a tinted tile and gives the label more weight: for rows
+   *  that are features to find, not a list of names. */
+  tone?: MenuTone;
+  /** A row that throws work away. It turns red under the pointer or the
+   *  keyboard, so the colour says so at the moment it's chosen. */
+  danger?: boolean;
   /** Marker at the row's far edge, such as the glyph for "opens a new tab". */
   trailing?: ReactNode;
   onSelect: () => void;
@@ -322,6 +344,8 @@ export function MenuItem({
   icon,
   children,
   description,
+  tone,
+  danger,
   trailing,
   onSelect,
   disabled,
@@ -333,6 +357,8 @@ export function MenuItem({
       tabIndex={-1}
       className={styles.item}
       data-described={description ? "" : undefined}
+      data-tone={tone}
+      data-danger={danger ? "" : undefined}
       onClick={onSelect}
       disabled={disabled}
     >

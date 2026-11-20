@@ -2275,11 +2275,18 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and the fit check relies on that. Folded, the button is pixel-identical to the icon button it
   replaced (30px, 36px on touch), so no phone layout lost anything: signed in below ~560px it is
   icon-only (the plan pill and chip take the room), which is accepted, and the dot and the tile
-  glyph carry it there. (2) **Features get a one-line description and housekeeping doesn't**;
-  keep each true to what the feature's own dialog promises, and short enough for one line, which
-  the 300px phone width sets (~36 characters). (3) **Two columns above 640px, on purpose.** One
+  glyph carry it there. (2) **Features get a one-line description and a tinted icon tile;
+  housekeeping gets neither** (redesign 2026-11-21, maintainer: the first cut read "bored and hard
+  to identify/read"). `MenuItem`'s `tone` puts the icon in a 32px tile with a **Semibold** label
+  over a quieter description, one Discord brand hue **per group, never per row** (Share & publish
+  blurple, For developers green, Get more fuchsia), so the colour says what goes together. Feedback,
+  About and Clear are a strip along the panel's foot, not rows (as rows they weighed as much as the
+  features), with Clear at its far end, red only under the pointer or keyboard (`danger`). Keep
+  each description true to what the feature's own dialog promises, and short enough for one line
+  beside its tile: the 616px two-column panel and the 320px phone panel both fit the longest
+  ("discord.js, discord.py, cURL, fetch, Python"). (3) **Two columns above 640px, on purpose.** One
   column ran ~660px tall with every production row, past the fold of a 1366×768 laptop, and a
-  feature you must scroll a menu to find is half hidden again; two come to 369px. (4) **The dot
+  feature you must scroll a menu to find is half hidden again; two come to ~380px. (4) **The dot
   is the only nudge**: passive, gone on the first open, static (a pulse beside the editor would
   never stop asking), and absent when storage can't be read, since nothing could ever clear it.
   The interrupting slots are taken (Send coach-mark, intro offer, rating card). Bump
@@ -2293,7 +2300,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   2026-11-02; `rowVisibility: hidden, tookFocus: false` on a reduced-motion machine). `focus()` on
   a just-revealed element has this hazard anywhere. (7) A panel too tall for the viewport gets a
   `maxHeight` from `placeMenu` and scrolls; before that, rows past the edge could not be reached at
-  all.
+  all. **And the scroll must survive re-placement** (2026-11-21): `Menu` re-places on every scroll
+  in the capture phase, which also heard the panel's *own* scroll, and re-placing lifts the cap to
+  measure, which clamps the scroll to 0, so a capped list snapped back to its top on every scroll
+  and its lower rows were out of reach after all (on a 390×844 phone, the Tools menu's last row).
+  `scrollMovesAnchor` skips scrolls inside the panel, and the measuring pass restores `scrollTop`.
 - **Built-in AI is a server-relayed Groq key with layered spend guards** (2026-07-19). The
   default AI provider is `dweeb`: `POST /api/ai/chat` on the proxy (`server/src/ai.rs`)
   relays a streamed completion under a server-held `GROQ_API_KEY` (unset ⇒ 501 and the FE
