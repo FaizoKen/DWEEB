@@ -127,6 +127,14 @@
 
 /* A folded utility that can't run: its overflow-menu row is disabled (menus
    skip those), so the reason is spelled out under the label instead. */
+/* The Tools panel: one width at every fold level, so it doesn't change size as
+   the bar folds its icons in, and room for each description on one line beside
+   its tile. `[role]` outweighs `Menu`'s own `.panel` whatever loads last. */
+.toolsPanel[role="menu"] {
+  width: 300px;
+  max-width: calc(100vw - 16px);
+}
+
 .menuRow {
   display: flex;
   flex-direction: column;

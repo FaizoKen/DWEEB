@@ -49,7 +49,7 @@ import {
   TrashIcon,
   UsersIcon,
 } from "@/ui/Icon";
-import { Menu, MenuDivider, MenuItem, MenuLabel } from "@/ui/Menu";
+import { Menu, MenuDivider, MenuFooter, MenuItem, MenuLabel } from "@/ui/Menu";
 import styles from "./ToolsMenu.module.css";
 
 /** A bar control the fit check moved into this menu. */
@@ -270,7 +270,7 @@ export function ToolsMenu({
 
             {/* Housekeeping: a strip along the foot, with the one destructive
                 row at its far end, apart from the rest. */}
-            <div className={styles.footer}>
+            <MenuFooter className={styles.footer}>
               {feedbackOn ? (
                 <MenuItem icon={<SupportIcon />} onSelect={pick("feedback", openFeedback)}>
                   Send feedback
@@ -292,7 +292,7 @@ export function ToolsMenu({
               >
                 Clear current message
               </MenuItem>
-            </div>
+            </MenuFooter>
           </>
         );
       }}

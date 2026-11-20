@@ -2280,8 +2280,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   to identify/read"). `MenuItem`'s `tone` puts the icon in a 32px tile with a **Semibold** label
   over a quieter description, one Discord brand hue **per group, never per row** (Share & publish
   blurple, For developers green, Get more fuchsia), so the colour says what goes together. Feedback,
-  About and Clear are a strip along the panel's foot, not rows (as rows they weighed as much as the
-  features), with Clear at its far end, red only under the pointer or keyboard (`danger`). Keep
+  About and Clear are a strip along the panel's foot (`MenuFooter`), not rows (as rows they weighed
+  as much as the features), with Clear at its far end, red only under the pointer or keyboard
+  (`danger`). The Activity's Tools menu is laid out the same way (2026-11-21): the bar's own folded
+  icons first as plain rows, then Open on web and JSON as tiles, then feedback in the footer strip.
+  A feature present on both surfaces wears the **same** tone on both (JSON is green in each), set on
+  its `UtilityAction`. Keep
   each description true to what the feature's own dialog promises, and short enough for one line
   beside its tile: the 616px two-column panel and the 320px phone panel both fit the longest
   ("discord.js, discord.py, cURL, fetch, Python"). (3) **Two columns above 640px, on purpose.** One

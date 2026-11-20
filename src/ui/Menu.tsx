@@ -372,6 +372,16 @@ export function MenuItem({
   );
 }
 
+/**
+ * A strip along the panel's foot for housekeeping rows (feedback, about, a
+ * destructive clear): used rarely, and as full rows they weighed as much as
+ * the features above them. Its rows sit side by side, and a `danger` row keeps
+ * to the far end, apart from the rest.
+ */
+export function MenuFooter({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn(styles.footer, className)}>{children}</div>;
+}
+
 export function MenuDivider() {
   return <div className={styles.divider} role="separator" />;
 }

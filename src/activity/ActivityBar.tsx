@@ -25,7 +25,7 @@ import { useFeedbackConfigured } from "@/core/feedback/submit";
 import { useMergedValidationView } from "@/features/builder/useValidation";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import { Menu, MenuItem } from "@/ui/Menu";
+import { Menu, MenuDivider, MenuFooter, MenuItem, type MenuTone } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
 import {
   BookmarkIcon,
@@ -91,6 +91,12 @@ interface UtilityAction {
   menuLabel: string;
   /** What the row is for, under its label in the Tools menu. */
   description?: string;
+  /** A feature row's tile colour, matching the same row in the web Tools menu
+   *  so one feature wears one colour on both surfaces. Unset, a folded row
+   *  stays plain: it is a bar icon that didn't fit, not a feature to find. */
+  tone?: MenuTone;
+  /** Housekeeping (feedback): a row in the menu's footer strip. */
+  housekeeping?: boolean;
   /** Set while the action can't run, saying why. */
   unavailable?: Unavailable | null;
   run: () => void;
@@ -441,6 +447,7 @@ export function ActivityBar() {
       label: "Open on web for full features",
       menuLabel: "Open on web",
       description: "Keep going in the full web app",
+      tone: "fuchsia",
       run: () => void openOnWeb(),
     },
     {
@@ -449,6 +456,7 @@ export function ActivityBar() {
       label: "Import or export the message as JSON",
       menuLabel: "Import / export JSON",
       description: "Copy the payload, or paste one in",
+      tone: "green",
       run: () => setJsonOpen(true),
     },
     ...(feedbackOn
@@ -458,6 +466,7 @@ export function ActivityBar() {
             icon: SupportIcon,
             label: "Send feedback",
             menuLabel: "Send feedback",
+            housekeeping: true,
             run: openFeedback,
           } satisfies UtilityAction,
         ]
@@ -692,6 +701,7 @@ export function ActivityBar() {
         {foldedUtilities.length > 0 || viewFolded ? (
           <Menu
             align="end"
+            className={styles.toolsPanel}
             onOpen={markToolsSeen}
             trigger={
               <ToolsButton
@@ -701,50 +711,63 @@ export function ActivityBar() {
               />
             }
           >
-            {(close) => (
-              <>
-                {viewFolded ? (
+            {(close) => {
+              // Laid out like the web Tools menu: the bar's own icons that
+              // didn't fit come first as plain rows, then the features in
+              // tinted tiles, then housekeeping in a strip along the foot.
+              const barRows = foldedUtilities.filter((a) => !a.tone && !a.housekeeping);
+              const featureRows = foldedUtilities.filter((a) => a.tone && !a.housekeeping);
+              const footerRows = foldedUtilities.filter((a) => a.housekeeping);
+              const row = (action: UtilityAction) =>
+                action.unavailable ? (
+                  // A disabled menu row can't be tapped, so it carries its
+                  // reason in plain sight instead.
                   <MenuItem
-                    icon={<ExternalLinkIcon size={16} />}
+                    key={action.key}
+                    icon={<action.icon size={16} />}
+                    disabled
+                    onSelect={() => {}}
+                  >
+                    <span className={styles.menuRow}>
+                      {action.menuLabel}
+                      <span className={styles.menuReason}>{action.unavailable.short}</span>
+                    </span>
+                  </MenuItem>
+                ) : (
+                  <MenuItem
+                    key={action.key}
+                    icon={<action.icon size={16} />}
+                    description={action.description}
+                    tone={action.tone}
                     onSelect={() => {
                       close();
-                      void openLastPost();
+                      action.run();
                     }}
                   >
-                    View posted message
+                    {action.menuLabel}
                   </MenuItem>
-                ) : null}
-                {foldedUtilities.map((action) =>
-                  action.unavailable ? (
-                    // A disabled menu row can't be tapped, so it carries its
-                    // reason in plain sight instead.
+                );
+              const topRows = viewFolded || barRows.length > 0;
+              return (
+                <>
+                  {viewFolded ? (
                     <MenuItem
-                      key={action.key}
-                      icon={<action.icon size={16} />}
-                      disabled
-                      onSelect={() => {}}
-                    >
-                      <span className={styles.menuRow}>
-                        {action.menuLabel}
-                        <span className={styles.menuReason}>{action.unavailable.short}</span>
-                      </span>
-                    </MenuItem>
-                  ) : (
-                    <MenuItem
-                      key={action.key}
-                      icon={<action.icon size={16} />}
-                      description={action.description}
+                      icon={<ExternalLinkIcon size={16} />}
                       onSelect={() => {
                         close();
-                        action.run();
+                        void openLastPost();
                       }}
                     >
-                      {action.menuLabel}
+                      View posted message
                     </MenuItem>
-                  ),
-                )}
-              </>
-            )}
+                  ) : null}
+                  {barRows.map(row)}
+                  {topRows && featureRows.length > 0 ? <MenuDivider /> : null}
+                  {featureRows.map(row)}
+                  {footerRows.length > 0 ? <MenuFooter>{footerRows.map(row)}</MenuFooter> : null}
+                </>
+              );
+            }}
           </Menu>
         ) : null}
 

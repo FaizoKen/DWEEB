@@ -26,48 +26,6 @@
   margin-top: 8px;
 }
 
-/* Housekeeping (feedback, about, clear) is a strip across the foot of the
-   panel, not three more rows: it is used rarely, and as full rows it weighed
-   as much as the features above it. Bled to the panel's edges so it reads as
-   the menu's floor rather than one more group. */
-.footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  margin: 4px -5px -5px;
-  padding: 5px;
-  border-top: 1px solid var(--app-border);
-  background: rgba(0, 0, 0, 0.16);
-  border-radius: 0 0 calc(var(--app-radius) - 1px) calc(var(--app-radius) - 1px);
-}
-
-.footer > [role="menuitem"] {
-  width: auto;
-  min-height: 32px;
-  padding: 6px 10px;
-  gap: 8px;
-  font-size: var(--app-text-sm);
-  color: var(--app-text-muted);
-}
-
-.footer > [role="menuitem"]:not([data-danger]):hover,
-.footer > [role="menuitem"]:not([data-danger]):focus-visible {
-  color: var(--app-text);
-}
-
-/* The one destructive row keeps to the far end, apart from the other two, so
-   it is never a slip away from "Send feedback". */
-.footer > [data-danger] {
-  margin-left: auto;
-}
-
-@media (pointer: coarse) {
-  .footer > [role="menuitem"] {
-    min-height: 44px;
-  }
-}
-
 /* One column on a phone, where `Menu` caps the height and the list scrolls. */
 @media (max-width: 640px) {
   .panel[role="menu"] {
@@ -79,9 +37,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* The strip can't hold all three at this width; Clear takes a line of its
-     own rather than wrapping to wherever it lands. */
-  .footer > [data-danger] {
+  /* The footer strip can't hold all three at this width; Clear takes a line
+     of its own rather than wrapping to wherever it lands. Scoped through the
+     panel so it outweighs `MenuFooter`'s own far-end rule. */
+  .panel[role="menu"] .footer > [data-danger] {
     flex-basis: 100%;
     margin-left: 0;
   }

@@ -171,6 +171,40 @@
   color: var(--app-danger-text);
 }
 
+/* `MenuFooter`: bled to the panel's edges so it reads as the menu's floor
+   rather than one more group. */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 4px -5px -5px;
+  padding: 5px;
+  border-top: 1px solid var(--app-border);
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 0 0 calc(var(--app-radius) - 1px) calc(var(--app-radius) - 1px);
+}
+.footer > .item {
+  width: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  gap: 8px;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-muted);
+}
+.footer > .item:not([data-danger]):hover,
+.footer > .item:not([data-danger]):focus-visible {
+  color: var(--app-text);
+}
+.footer > [data-danger] {
+  margin-left: auto;
+}
+@media (pointer: coarse) {
+  .footer > .item {
+    min-height: 44px;
+  }
+}
+
 .divider {
   height: 1px;
   background: var(--app-border);
