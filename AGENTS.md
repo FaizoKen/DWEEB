@@ -2757,6 +2757,22 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   local Lighthouse runs: one-off lab numbers on a dev machine swing ±150 ms, and `lhci` itself
   crashes on Windows cleaning its temp profile (EPERM), so drive `lighthouse` directly and read
   the JSON.
+  **What the landing page's blocking time is made of** (2026-11-21, traces from `--save-assets`;
+  live `/` median of 5: performance 87, TBT ~510 ms, LCP the boot H1 at 0.92 s in 3 runs and a
+  gallery banner/subtitle at 2.0–2.2 s in 2). One task carries most of it: the frame that first
+  lays out the directory's cards, ~185 ms unthrottled, ×4 in Lighthouse's CPU model. Inside it,
+  `content-visibility` brings the on-screen cards' contents into a single ~140 ms layout, ~100 ms
+  of which is the live `Preview` thumbnails. That cost is first-time work only (emoji font
+  fallback ~40 ms; the same trees re-lay out warm in <0.1 ms); hiding images or forcing Arial or
+  `text-rendering: auto` changed nothing. Shipped: phones (one column, two cards on screen) mount
+  two eager previews, not three; the chip row is read one task after the first paint, not
+  inside an animation frame (that forced the shell's layout ahead of the frame's own); emoji
+  name their fonts first (`.unicodeEmoji`). Longest task median 192 → 178 ms, LCP unchanged.
+  **Rejected, measured:** mounting every preview one per task after paint shortened the task
+  but made the welcome template's lazy banner the LCP, 1.1 → 2.9 s. A larger cut needs a product
+  decision, not a tweak: static image thumbnails for templates on first visit, or not opening the
+  directory on arrival. Compare the *longest task* across ≥5 traces, not TBT medians: TBT swung
+  ±100 ms between identical runs here.
 - **Send, Update and Schedule say what they'll do** (2026-09-23). `features/builder/jumpToIssue.ts`
   is the one issue-jump routine: the header chip and the Send panel's "Fix before sending" rows
   (each a button that closes the dialog and lands on the component or its Message-options field).
