@@ -377,9 +377,9 @@ export const FEATURES: FeatureSeo[] = [
     h1: "Discord Giveaway Bot",
     tagline: "Run a giveaway from a button with a live count and fair draw.",
     description:
-      "Build a Discord giveaway with one-click button entry, live counts, eligibility rules, automatic winner draws, rerolls and cancellation.",
+      "Build a Discord giveaway with one-click button entry, a live entrant count, role and account-age rules, a fair one-click winner draw, rerolls and cancellation.",
     intro:
-      "Giveaway turns a button into a complete raffle. Members enter in a single tap, the entrant count updates live, and when time's up the plugin draws a fair random winner — or several — automatically. No reactions to tally, no manual picking. Set entry requirements, reroll if you need to, and cancel any time. Design the giveaway message in DWEEB and attach the plugin.",
+      "Giveaway turns a button into a complete raffle. Members enter in a single tap, the entrant count updates live, and entries close on their own at the end time you set. Then the host draws a fair random winner — or several — with one click. No reactions to tally, no picking names by hand. Set entry requirements, reroll if you need to, and cancel any time. Design the giveaway message in DWEEB and attach the plugin.",
     howItWorks: [
       {
         name: "Design the giveaway",
@@ -391,7 +391,7 @@ export const FEATURES: FeatureSeo[] = [
       },
       {
         name: "Draw a winner",
-        text: "Members enter in one click. When the timer ends, the host draws a fair random winner with one click — reroll or cancel if you need to.",
+        text: "Members enter in one click. When entries close, the host draws a fair random winner with one click — reroll or cancel if you need to.",
       },
     ],
     configurable: [
@@ -677,56 +677,62 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "✨",
     category: "Publishing",
     accent: 0xc9659a,
-    title: "AI Discord Message Generator for Components V2 | DWEEB",
+    title: "Free AI Discord Message Generator (No API Key) | DWEEB",
     h1: "AI Discord Message Writer",
     tagline: "Describe what you want and let the assistant draft it.",
     description:
-      "Use your own AI provider or Ollama endpoint to draft editable Discord Components V2 messages directly in DWEEB's visual editor.",
+      "Describe a Discord message and DWEEB's built-in AI drafts it as an editable Components V2 layout. Free daily allowance with a Discord sign-in, no API key.",
     intro:
-      "Not sure where to start? Connect your own AI provider or local Ollama endpoint, then tell DWEEB's assistant what you're after — 'a welcome message with a banner and three get-started steps' or 'an event announcement with RSVP buttons'. The draft drops into the visual editor, where every word, colour and link stays editable before sending.",
+      "Not sure where to start? Tell DWEEB's assistant what you're after — 'a welcome message with a banner and three get-started steps' or 'an event announcement with RSVP buttons' — and the draft drops into the visual editor, where every word, colour and link stays editable before you send it. The built-in DWEEB AI needs no API key: sign in with Discord and use the free daily allowance. Prefer your own model? Switch to Groq, OpenAI, Anthropic, Google Gemini, OpenRouter, any OpenAI-compatible endpoint or a local Ollama server in AI settings.",
     howItWorks: [
       {
-        name: "Describe it",
-        text: "Open the AI assistant and describe the message you want in plain language.",
+        name: "Open the assistant",
+        text: "Open the AI assistant in the editor and sign in with Discord to use the built-in DWEEB AI, or pick your own provider in AI settings.",
       },
       {
-        name: "Get a draft",
-        text: "The assistant builds it as a Components V2 message — containers, sections, buttons and media — in the editor.",
+        name: "Describe it",
+        text: "Say what the message is for in plain language. The assistant also reads the message already in the editor, so you can ask it to change what you have.",
       },
       {
         name: "Refine and send",
-        text: "Adjust the copy, colours and links in the visual editor, then send it through your webhook.",
+        text: "The draft lands in the visual editor as containers, sections, buttons and media. Adjust it, then send it through your webhook.",
       },
     ],
     configurable: [
+      "Built-in DWEEB AI: no API key, a free daily allowance after a Discord sign-in",
+      "Or your own provider: Groq, OpenAI, Anthropic, Google Gemini, OpenRouter, an OpenAI-compatible endpoint or local Ollama",
       "Generate a full Components V2 message from a plain-language prompt",
-      "Drafts land in the visual editor for you to refine",
-      "Iterate by asking for changes",
-      "Everything stays editable — nothing is locked",
+      "Ask for changes to the current message: shorter copy, a new colour, more buttons",
+      "Every AI edit can be undone, and everything stays editable",
     ],
     whenToUse: [
       "Starting a message from a blank canvas",
-      "Drafting an announcement or welcome quickly",
+      "Drafting an announcement, welcome post or rules card quickly",
+      "Rewording or restyling a message you already built",
       "Exploring layouts before committing",
     ],
     faq: [
       {
-        q: "What do I need to use the AI writer?",
-        a: "Bring an API key for Groq, OpenAI, Anthropic, Google Gemini or OpenRouter, or connect an OpenAI-compatible endpoint. A local Ollama endpoint can be used without a key. The key stays in your browser and requests go directly to the provider you choose.",
+        q: "Is the AI writer free?",
+        a: "Yes. The built-in DWEEB AI has a free daily allowance for everyone who signs in with Discord, and it resets at midnight UTC. Servers on Plus and Pro get bigger shared pools. If you use your own API key instead, those requests count against your account with that provider, not against DWEEB's allowance.",
+      },
+      {
+        q: "Do I need an API key?",
+        a: "No. The built-in DWEEB AI only needs a Discord sign-in. A key is optional, for when you would rather use Groq, OpenAI, Anthropic, Google Gemini, OpenRouter or an OpenAI-compatible endpoint; a local Ollama server can run without one. A key you add stays in your browser, and those requests go straight to that provider.",
       },
       {
         q: "Does the AI send anything to Discord by itself?",
         a: "No. The assistant only drafts the message into the editor. Nothing is posted until you review it and hit Send through your webhook.",
       },
       {
-        q: "Can I edit what the AI produces?",
-        a: "Yes. Everything the assistant makes is a normal DWEEB message — every word, colour and link stays fully editable.",
+        q: "Can I edit or undo what the AI produces?",
+        a: "Yes. Everything the assistant makes is a normal DWEEB message, so every word, colour and link stays editable, and each AI change can be undone from the chat.",
       },
     ],
     setupNote: {
-      badge: "Bring your own AI provider",
-      title: "Connect a provider before generating.",
-      text: "Choose Groq, OpenAI, Anthropic, Google Gemini, OpenRouter, an OpenAI-compatible endpoint or local Ollama. Most need your own API key; Ollama can be keyless. DWEEB stores the setting only in this browser and sends prompts directly to that provider.",
+      badge: "Built-in AI, no key needed",
+      title: "Sign in with Discord to start drafting.",
+      text: "The built-in DWEEB AI is ready out of the box with a free daily allowance. To use your own model instead, choose Groq, OpenAI, Anthropic, Google Gemini, OpenRouter, an OpenAI-compatible endpoint or local Ollama in AI settings; that key is stored only in this browser.",
     },
     keywords: [
       "ai discord message",
@@ -976,6 +982,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
  *  2026-10-22: Discord granted that intent, so the answer promises the
  *  conversation again.
  *  2026-10-23: the ticket bot can open private threads instead of channels. */
-export const FEATURES_LASTMOD = "2026-11-05";
+export const FEATURES_LASTMOD = "2026-11-21";
 
 export { ACCENT_BLURPLE };

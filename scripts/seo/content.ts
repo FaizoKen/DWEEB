@@ -60,7 +60,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-10-16";
+export const TEMPLATES_LASTMOD = "2026-11-21";
 
 // 2026-09-11: every detail page gained its source-derived JSON and compatibility
 // reference. 2026-09-16: every detail page gained the "Read next" guide row.
@@ -77,6 +77,9 @@ const DEFAULT_TEMPLATE_LASTMOD = "2026-10-15";
 const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
   // 2026-10-16: retitled and re-introduced as a ticket panel (see its entry).
   "help-center": "2026-10-16",
+  // 2026-11-21: no longer claims an automatic draw — the plugin closes entries
+  // at the end time and the host draws (plugins/giveaway store.rs `ends_at`).
+  "giveaway-button": "2026-11-21",
 };
 
 /** Meaningful content date for one generated template page. */
@@ -641,13 +644,13 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Giveaway Template — one-click button entry | DWEEB",
     h1: "Discord Giveaway Template",
     description:
-      "A Discord giveaway template with one-click button entry, a live entrant count and an automatic winner draw. Pairs with the Giveaway plugin.",
+      "A Discord giveaway template with one-click button entry, a live entrant count and a fair one-click winner draw. Pairs with the Giveaway plugin.",
     intro:
       "Run a giveaway your members can enter in one tap. The prize, live entrant count and winners fill themselves in, and when it closes the host draws a fair random winner in one click — no reactions to count and no picking names by hand.",
     whenToUse: [
       "Hosting a prize giveaway or raffle",
       "Boosting engagement with one-click entry",
-      "Drawing a fair winner automatically",
+      "Drawing a fair random winner without counting reactions",
     ],
     keywords: [
       "discord giveaway bot",
