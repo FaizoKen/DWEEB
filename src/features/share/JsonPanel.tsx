@@ -37,6 +37,7 @@ import {
 } from "@/core/serialization";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import { cn } from "@/lib/cn";
 import styles from "./ShareDialog.module.css";
 
@@ -140,11 +141,14 @@ export function JsonPanel({
   }
 
   const copyJson = async () => {
-    if (await copyText(text)) pushToast("JSON copied", "success");
-    else pushToast("Copy failed", "error");
+    if (await copyText(text)) {
+      trackAnalytics("code_exported", { language: "json", action: "copy" });
+      pushToast("JSON copied", "success");
+    } else pushToast("Copy failed", "error");
   };
 
   const downloadJson = () => {
+    trackAnalytics("code_exported", { language: "json", action: "download" });
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

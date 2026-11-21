@@ -42,6 +42,7 @@ import { syncGuildIdentity } from "@/core/guild/identityCache";
 import { startLoginPopup } from "@/core/oauth/flows";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePlanStore } from "@/core/plan/planStore";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import { pushToast } from "@/ui/Toast";
 
 /** Set right before a popup-blocked full-page login redirect so we greet the user
@@ -181,6 +182,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
     set({ status: "authed", user: outcome });
     if (greetOnSuccess) {
       greetOnSuccess = false;
+      // Only a sign-in that just finished greets, so this counts sign-ins, not
+      // page loads with a live session.
+      trackAnalytics("login", { method: "discord" });
       pushToast(`Signed in as ${outcome.name}`, "success");
     }
     void get().loadGuilds();

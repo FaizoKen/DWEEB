@@ -66,6 +66,7 @@ import { LockIcon } from "@/ui/Icon";
 import { type IncomingWebhook } from "@/core/guild/config";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import { JsonPanel } from "./JsonPanel";
@@ -303,6 +304,7 @@ function ShareLinkPanel() {
     setCreating(false);
     if (result.ok) {
       setShortUrl(result.url);
+      trackAnalytics("share_link_created", { kind: "short" });
       pushToast("Short link created — expires in 7 days.", "success");
     } else {
       pushToast(`Couldn't create short link: ${result.error}`, "error");
@@ -324,8 +326,10 @@ function ShareLinkPanel() {
         <Button
           variant="primary"
           onClick={async () => {
-            if (await copyText(url)) pushToast("Share URL copied", "success");
-            else pushToast("Copy failed — your browser blocked the clipboard.", "error");
+            if (await copyText(url)) {
+              trackAnalytics("share_link_created", { kind: "url" });
+              pushToast("Share URL copied", "success");
+            } else pushToast("Copy failed — your browser blocked the clipboard.", "error");
           }}
         >
           Copy URL

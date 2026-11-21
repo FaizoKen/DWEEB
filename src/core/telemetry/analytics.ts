@@ -9,6 +9,8 @@ export type AnalyticsEvent =
   | "message_posted"
   | "message_scheduled"
   | "code_exported"
+  | "share_link_created"
+  | "login"
   | "tools_opened"
   | "tools_used"
   | "pricing_opened"
@@ -44,7 +46,15 @@ const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   send_dialog_opened: new Set(["mode", "when"]),
   message_posted: new Set(["mode"]),
   message_scheduled: new Set(["recurrence"]),
+  // `language` is a code target from the Code tab, or "json" for the JSON tab's
+  // Copy / Download — both are the same "took the message somewhere" outcome.
   code_exported: new Set(["language", "action"]),
+  // A share link someone actually took away: the hash URL copied ("url"), or a
+  // `/s/…` short link created ("short"). Never the link or its token.
+  share_link_created: new Set(["kind"]),
+  // GA4's recommended sign-in event, sent once when a Discord sign-in completes
+  // (not on every reload with a live session). `method` is always "discord".
+  login: new Set(["method"]),
   // Whether people find the Tools menu, and which of its rows they came for.
   // `tool` is a fixed slug from the menu (`ToolsMenu.tsx`), never free text.
   tools_opened: new Set(),

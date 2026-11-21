@@ -158,3 +158,68 @@ describe("analytics page-location privacy", () => {
     });
   });
 });
+
+describe("source-repository clicks", () => {
+  function clickHandler(): { click: (href: string) => void; events: unknown[][] } {
+    const dataLayer: IArguments[] = [];
+    let handler: ((event: { target: unknown }) => void) | null = null;
+    runInNewContext(loaderSource, {
+      window: {
+        location: new URL("https://dweeb.faizo.net/guides/"),
+        dataLayer,
+        doNotTrack: "0",
+        addEventListener() {},
+        removeEventListener() {},
+        sessionStorage: { setItem() {} },
+      },
+      navigator: { doNotTrack: "0", globalPrivacyControl: false },
+      document: {
+        referrer: "",
+        documentElement: { getAttribute: () => null, hasAttribute: () => false },
+        querySelector: () => null,
+        addEventListener: (type: string, fn: (event: { target: unknown }) => void) => {
+          if (type === "click") handler = fn;
+        },
+        createElement: () => ({}),
+        head: { appendChild() {} },
+      },
+      URL,
+      URLSearchParams,
+      Date,
+      setTimeout: () => 0,
+    });
+    return {
+      click(href) {
+        const anchor = {
+          href,
+          getAttribute: () => null,
+          closest: (selector: string) => (selector === "a[href]" ? anchor : null),
+        };
+        handler?.({ target: { nodeType: 1, closest: anchor.closest } });
+      },
+      get events() {
+        return dataLayer
+          .map((args) => Array.from(args))
+          .filter((args) => args[0] === "event" && args[1] === "github_click");
+      },
+    };
+  }
+
+  it("counts a click through to the DWEEB repository without sending the URL", () => {
+    const page = clickHandler();
+    page.click("https://github.com/FaizoKen/DWEEB");
+    page.click("https://github.com/FaizoKen/DWEEB/blob/main/README.md");
+    expect(page.events).toEqual([
+      ["event", "github_click", {}],
+      ["event", "github_click", {}],
+    ]);
+  });
+
+  it("ignores every other link, including look-alike repositories", () => {
+    const page = clickHandler();
+    page.click("https://github.com/FaizoKen/DWEEB-fork");
+    page.click("https://github.com/someone/DWEEB");
+    page.click("https://example.com/?u=https://github.com/FaizoKen/DWEEB");
+    expect(page.events).toEqual([]);
+  });
+});

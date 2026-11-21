@@ -91,6 +91,14 @@
   document.addEventListener("click", function (event) {
     var node = event.target;
     if (!node || node.nodeType !== 1) node = node && node.parentElement;
+    // A click through to the source repository is the one outbound link worth
+    // counting (Enhanced Measurement's outbound clicks stay off: they would send
+    // every external URL). The event carries no URL — GA already has the page's
+    // canonical — so nothing about where on GitHub leaves the page.
+    var anchor = node && node.closest ? node.closest("a[href]") : null;
+    if (anchor && /^https:\/\/github\.com\/FaizoKen\/DWEEB(?:[/?#]|$)/i.test(anchor.href)) {
+      window.gtag("event", "github_click", {});
+    }
     var link = node && node.closest ? node.closest("a[data-analytics]") : null;
     if (!link) return;
     try {
