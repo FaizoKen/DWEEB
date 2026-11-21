@@ -1550,6 +1550,27 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   templates drop, give them page-specific substance, not more shared boilerplate. Many guide
   impressions come from AI-Mode-style follow-ups ("still nothing", "method 1 isnt working", in
   several languages) — a citation, not a ranking, so judge guide CTR with that in mind.
+- **Guides turn readers into builders; site copy follows the product, not memory** (2026-11-21
+  pass; 28 days to Nov 19: 694 clicks / 25.3K impressions / position 10.7, down from 807 /
+  25.2K / 8.5 the 28 days before). (1) GA4 showed the copy-and-paste guides converting at 1–2%
+  of sessions against 28.7% on `/`: their examples were bare `<pre>` blocks. A `GuideSection`
+  with **`message: true`** renders "Open this message in DWEEB" under its `code`, a plain link
+  whose share fragment (`tools/share-link.ts`) holds exactly that text and whose `entry` is the
+  guide's, and `artifact-audit.ts` decodes every such link with the app's own `decodeShare` +
+  `parseSeoEntry` and fails the build if it doesn't open the example above it. Flag only whole
+  messages someone came to copy (welcome posts, rules sets, giveaway rules), never syntax or
+  JSON. (2) **Static message previews render headings as `<p class="dwx-h">`, never `<h*>`**
+  (`render-message.ts`): a message opening with `###` jumped from the page's `<h2>` to an
+  `<h4>` and failed Lighthouse's heading-order audit on five pages. (3) Two pages had drifted
+  from the product: the AI writer page still said to bring your own key (the built-in DWEEB AI
+  needs none since July), and the giveaway feature/template promised an **automatic draw — the
+  plugin has none**: entries close at `ends_at` and a host draws (`plugins/giveaway`
+  `store.rs`). Before a page states what a plugin or feature does, read its source. (4) GA4
+  events added: `share_link_created {kind: url|short}`, `login {method: discord}` (only when a
+  sign-in just finished, from `authStore`'s greeting branch), JSON copy/download as
+  `code_exported {language: json}`, and a parameter-free `github_click` from `gtag-init.js`'s
+  shared click listener (repository URL only — outbound clicks stay off). Marking them as key
+  events is a GA4 setting, the maintainer's to change.
 - **Discord colored text (```ansi) is parsed the way Discord parses it, with measured colors**
   (2026-10-16). `src/features/preview/markdown/ansi.ts` is a port of the parser in
   discord.com's own web bundle (the module whose CSI regex is `\x1B\[([0-?]*)([ -/]*)([@-~])`);
