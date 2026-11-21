@@ -77,6 +77,31 @@ describe("analytics page-location privacy", () => {
     ).toBe("https://dweeb.faizo.net/guides/discord-components-v2/");
   });
 
+  it("keeps the utm_source an AI assistant tags its links with, and nothing else", () => {
+    // ChatGPT sends no Referer since October 2026; its utm_source is the only
+    // signal GA has left to put the visit in the AI Assistant channel.
+    expect(
+      configuredPageLocation(
+        "https://dweeb.faizo.net/guides/discord-welcome-messages/?utm_source=chatgpt.com",
+        "https://dweeb.faizo.net/guides/discord-welcome-messages/",
+      ),
+    ).toBe("https://dweeb.faizo.net/guides/discord-welcome-messages/?utm_source=chatgpt.com");
+    expect(
+      configuredPageLocation(
+        "https://dweeb.faizo.net/?state=csrf-secret&utm_source=ChatGPT.com&utm_campaign=x#s=draft",
+      ),
+    ).toBe("https://dweeb.faizo.net/?utm_source=chatgpt.com");
+  });
+
+  it.each([
+    "https://dweeb.faizo.net/?utm_source=newsletter",
+    "https://dweeb.faizo.net/?utm_source=chatgpt.com.example",
+    "https://dweeb.faizo.net/?utm_source=123456789012345678",
+    "https://dweeb.faizo.net/?ref=chatgpt.com",
+  ])("drops any other source tag (%s)", (href) => {
+    expect(configuredPageLocation(href)).toBe("https://dweeb.faizo.net/");
+  });
+
   it("keeps third-party analytics behind the app-shell paint window", () => {
     expect(runLoader("https://dweeb.faizo.net/", { appShell: true }).delays).toContain(8000);
   });

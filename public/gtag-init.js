@@ -47,15 +47,38 @@
   // ids, arbitrary 404 paths and attacker-supplied query strings in one rule.
   // Generated discovery pages have exact canonicals; the SPA/404 shell points
   // to `/` and records bounded product events for its internal state instead.
+  //
+  // One exception, an exact allowlist: the `utm_source` an AI assistant puts
+  // on the links it cites. ChatGPT stopped sending a Referer in October 2026
+  // (on RoleLogic, which keeps its query strings, ChatGPT visits carrying a
+  // chatgpt.com referrer went from about half in August to none in November,
+  // while visits tagged utm_source=chatgpt.com held steady), so with only the
+  // canonical, GA counted every ChatGPT visit to DWEEB as Direct: the "AI
+  // Assistant" channel fell from ~7 sessions a day to zero. The tag names the
+  // assistant and nothing else. Add a value only once a visit shows it.
+  var AI_SOURCES = ["chatgpt.com"];
+
+  function aiSource(loc) {
+    try {
+      var value = new URL(loc.href).searchParams.get("utm_source");
+      value = value ? value.toLowerCase() : "";
+      return AI_SOURCES.indexOf(value) >= 0 ? value : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   function safePageLocation(loc) {
+    var source = aiSource(loc);
+    var tag = source ? "?utm_source=" + source : "";
     var node = document.querySelector('link[rel="canonical"]');
-    if (!node || !node.href) return loc.origin + "/";
+    if (!node || !node.href) return loc.origin + "/" + tag;
     try {
       var canonical = new URL(node.href, loc.origin);
-      if (canonical.origin !== loc.origin) return loc.origin + "/";
-      return canonical.origin + canonical.pathname;
+      if (canonical.origin !== loc.origin) return loc.origin + "/" + tag;
+      return canonical.origin + canonical.pathname + tag;
     } catch (_) {
-      return loc.origin + "/";
+      return loc.origin + "/" + tag;
     }
   }
 
