@@ -1559,7 +1559,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   guide's, and `artifact-audit.ts` decodes every such link with the app's own `decodeShare` +
   `parseSeoEntry` and fails the build if it doesn't open the example above it. Flag only whole
   messages someone came to copy (welcome posts, rules sets, giveaway rules), never syntax or
-  JSON. (2) **Static message previews render headings as `<p class="dwx-h">`, never `<h*>`**
+  JSON. Every `pre.code-block` on a generated page also gets a **Copy button**, added by
+  `tools/copy-code.client.ts` only where the Clipboard API exists (no dead button without JS),
+  overlaid so it causes no layout shift; `htmlDocument` attaches the script to any page with a
+  code block. A refused clipboard selects the block instead. It sends a parameter-free
+  `code_copied` GA event. (2) **Static message previews render headings as `<p class="dwx-h">`, never `<h*>`**
   (`render-message.ts`): a message opening with `###` jumped from the page's `<h2>` to an
   `<h4>` and failed Lighthouse's heading-order audit on five pages. (3) Two pages had drifted
   from the product: the AI writer page still said to bring your own key (the built-in DWEEB AI
