@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Pin to the stable toolchain and pull in the components the checks need.
       - name: Set up Rust

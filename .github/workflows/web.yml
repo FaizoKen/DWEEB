@@ -70,7 +70,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Pinned exact version: `latest` makes setup-bun list oven-sh/bun's
       # tags via api.github.com on every run, which fails the whole deploy
@@ -155,9 +155,13 @@ jobs:
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
+          # v4+ leaves dotfiles out by default. The only one in dist is
+          # Vite's .vite/manifest.json; keep it so the deployed site stays
+          # byte-for-byte what v3 published.
+          include-hidden-files: true
 
   deploy:
     name: Deploy to GitHub Pages
@@ -181,10 +185,10 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Check out indexing notifier
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Public key verification + the live post-deploy sitemap let Bing and
       # other IndexNow engines discover additions/updates immediately. Search
