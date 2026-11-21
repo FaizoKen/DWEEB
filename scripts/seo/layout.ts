@@ -883,6 +883,9 @@ th{color:#f2f3f5;background:#292b30}
 td{color:var(--muted)}
 tbody tr:last-child td{border-bottom:0}
 .code-block{overflow:auto;margin:16px 0 20px;padding:18px;background:#111214;border:1px solid var(--border);border-radius:12px;color:#e3e5e8;line-height:1.55;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
+.message-open{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:-8px 0 24px}
+.message-open .btn{padding:9px 16px;font-size:14px}
+.message-open span{color:var(--muted);font-size:14px}
 .code-wrap{white-space:pre-wrap;overflow-wrap:anywhere}
 .sources ul{margin:0;padding-left:22px;display:grid;gap:8px}
 

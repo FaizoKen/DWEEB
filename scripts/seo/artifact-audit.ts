@@ -2,7 +2,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { TEMPLATES } from "@/data/presets";
-import { decodeJson, encodeJson } from "@/core/serialization/encode";
+import { decodeJson, decodeShare, encodeJson } from "@/core/serialization/encode";
+import { parseSeoEntry } from "@/core/seo/acquisition";
 import { resolveSeo, SITE } from "./content";
 import { createHash } from "node:crypto";
 import { DEFAULT_MEDIA } from "@/core/media/defaultMedia";
@@ -96,6 +97,24 @@ export async function auditDiscoveryArtifacts(
     }
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]!);
     if (new Set(ids).size !== ids.length) errors.push(`${path}: duplicate HTML IDs`);
+    // "Open this message in DWEEB" must open the very text printed above it, and
+    // count as this page's builder visit — decoded with the app's own readers.
+    for (const match of html.matchAll(
+      /<code>([\s\S]*?)<\/code><\/pre><p class="message-open"><a [^>]*href="([^"]+)"/g,
+    )) {
+      const fragment = new URLSearchParams(decodeHtml(match[2]!).split("#")[1] ?? "");
+      const decoded = decodeShare(fragment.get("s") ?? "");
+      const card = decoded.ok ? decoded.message.components[0] : undefined;
+      const text =
+        card && "components" in card ? (card.components[0] as { content?: string }).content : "";
+      if (text !== decodeHtml(match[1]!)) {
+        errors.push(`${path}: an "Open this message" link doesn't open the example above it`);
+      }
+      const entry = parseSeoEntry("", `#${fragment.toString()}`);
+      if (`/${entry?.sourceType}s/${entry?.sourceId}/` !== path) {
+        errors.push(`${path}: an "Open this message" link isn't attributed to this page`);
+      }
+    }
   }
   for (const path of scriptSources) {
     if (!(await fileExists(path))) errors.push(`Missing first-party script: ${path}`);

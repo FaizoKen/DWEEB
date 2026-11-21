@@ -21,13 +21,20 @@ function colorRow(name: string, value: number, note?: string): string[] {
   return note === undefined ? [name, f.hex, f.decimal] : [name, f.hex, f.decimal, note];
 }
 
-export const GUIDES_LASTMOD = "2026-10-16";
+export const GUIDES_LASTMOD = "2026-11-21";
 
 export interface GuideSection {
   heading: string;
   paragraphs?: string[];
   bullets?: string[];
   code?: string;
+  /**
+   * `code` is a whole Discord message someone came to copy (a welcome post, a
+   * rules set), not syntax or JSON. The guide then renders an "Open this message
+   * in DWEEB" link under it that loads exactly that text into the editor, so a
+   * reader can customise and send it instead of copying it out of a `<pre>`.
+   */
+  message?: boolean;
   table?: { headers: string[]; rows: string[][] };
 }
 
@@ -2559,7 +2566,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
     eyebrow: "Community guide · Server rules",
     lede: "Good rules are short, numbered and impossible to miss. Build your own set with the generator below, or take a complete rule set you can paste into your #rules channel today — a general template, versions for gaming, creator and study servers, add-ons for voice chat and age-restricted channels — plus the formatting that makes them readable and a way to keep them editable after you post.",
     published: "2026-09-16",
-    modified: "2026-10-15",
+    modified: "2026-11-21",
     keywords: [
       "discord server rules template",
       "discord rules template",
@@ -2589,6 +2596,7 @@ requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1
         paragraphs: [
           "This is the all-purpose set. It works for a friend group, a hobby community or a public server, and it is the same wording the [server rules template](/templates/discord-server-rules-template/) in DWEEB starts from, expanded to ten rules. Discord markdown is already applied: the heading, bold rule names, the quote for consequences and the small subtext line all render as-is.",
         ],
+        message: true,
         code: `# 📜 Server Rules
 Being here means you agree to follow these.
 
@@ -2611,6 +2619,7 @@ Being here means you agree to follow these.
         paragraphs: [
           "A server with thirty people does not need ten rules. Five is enough to set the tone without reading like a legal notice.",
         ],
+        message: true,
         code: `# Rules
 **1.** Be kind. No harassment, hate or personal attacks.
 **2.** No spam, mass pings or advertising.
@@ -2625,6 +2634,7 @@ Being here means you agree to follow these.
         paragraphs: [
           "Gaming communities need the general rules plus a few that only come up around matches, voice chat and account trading. Keep the game-specific etiquette in its own block so casual members can skip it.",
         ],
+        message: true,
         code: `# 🎮 Server Rules
 **1. Respect everyone.** No harassment, slurs, hate speech or personal attacks — in text or in voice.
 **2. Good sportsmanship.** No rage-quitting mid-match, griefing teammates or trash talk that crosses into abuse.
@@ -2644,6 +2654,7 @@ Being here means you agree to follow these.
         paragraphs: [
           "A creator's server has two audiences — fans who want to hang out, and people who want something from the creator. The rules should protect the first group from the second without making the place feel policed.",
         ],
+        message: true,
         code: `# ✨ Community Rules
 **1. Be respectful to everyone,** including the creator, the mods and each other. No harassment, hate speech or drama.
 **2. No begging or demanding.** Don't ask for follows, shout-outs, free stuff, DMs or replies.
@@ -2663,6 +2674,7 @@ Being here means you agree to follow these.
         paragraphs: [
           "Servers built around a course, a study group or a professional community need rules about honesty and shared material more than rules about memes.",
         ],
+        message: true,
         code: `# 📚 Server Rules
 **1. Be professional and respectful.** Disagree with arguments, not people.
 **2. No academic dishonesty.** Don't ask for or share answers to graded work. Explaining a concept is fine; posting a solution is not.
@@ -2786,7 +2798,7 @@ Being here means you agree to follow these.
     eyebrow: "Community guide · Welcome messages",
     lede: "A welcome message is the first thing a new member reads, so it has one job: take someone from “just joined” to “knows where to go” in a few seconds. Below are complete welcome messages you can paste into your #welcome channel today — general, short, gaming, creator, study and support versions, plus lines in other languages — with the syntax that turns channel names into real links and a plain map of what Discord's own welcome features already do.",
     published: "2026-09-23",
-    modified: "2026-09-23",
+    modified: "2026-11-21",
     keywords: [
       "discord welcome message",
       "discord welcome message template copy and paste",
@@ -2812,6 +2824,7 @@ Being here means you agree to follow these.
         paragraphs: [
           "This is the all-purpose version. It is the wording the [welcome message template](/templates/discord-welcome-message/) in DWEEB starts from, with a line about the server added at the top. Discord markdown is already applied: the heading, the bold step label, the bullets and the small subtext line all render as-is. Replace the bracketed parts and the channel names with your own.",
         ],
+        message: true,
         code: `# 👋 Welcome to [Server Name]!
 We're really glad you found us. This is a community for [who the server is for], and here's everything you need to settle in.
 
@@ -2828,6 +2841,7 @@ Stuck on anything? A friendly mod is only a message away — just ask in **#help
         paragraphs: [
           "A server of friends or a small hobby group does not need a checklist. Three lines set the tone and point at the one channel that matters.",
         ],
+        message: true,
         code: `# Welcome! 👋
 Glad you're here. Have a quick look at #rules, then come say hi in #general.
 -# Questions? Any of the mods can help.`,
@@ -2837,6 +2851,7 @@ Glad you're here. Have a quick look at #rules, then come say hi in #general.
         paragraphs: [
           "New members of a gaming community usually want to find people to play with, fast. Lead with the group-finding channel and the game roles, and keep the etiquette to a single line that points at the rules.",
         ],
+        message: true,
         code: `# 🎮 Welcome to [Server Name]!
 You made it. Here's how to find people to play with.
 
@@ -2854,6 +2869,7 @@ Clips go in **#clips**, bugs and feedback in **#feedback**.
         paragraphs: [
           "A creator's server welcomes fans, so the message should sound like the creator and set expectations early: when new content lands, which pings are optional, and where self-promotion is allowed.",
         ],
+        message: true,
         code: `# ✨ Welcome to the [Creator Name] community!
 This is the place to hang out between streams and uploads — thank you for being here.
 
@@ -2871,6 +2887,7 @@ Say hi in **#general** — we'd love to know how you found us.
         paragraphs: [
           "Servers built around a course, a study group or a profession need less decoration and more direction: where the material is, where to ask, and which honesty rules apply.",
         ],
+        message: true,
         code: `# 📚 Welcome to [Server Name]
 A shared space for [course, subject or profession]. Here's how it's organized.
 
@@ -2888,6 +2905,7 @@ Study sessions run in the voice channels; check **#schedule** for times.
         paragraphs: [
           "A server for a product, an open-source project or a paid community is mostly a help desk. The welcome message should route people to the right channel before a bug report lands in general chat.",
         ],
+        message: true,
         code: `# 👋 Welcome to the [Product] community
 Thanks for joining! This is where users swap tips, get help and hear about updates first.
 
@@ -2929,6 +2947,7 @@ Please don't DM staff for support; answers in public channels help the next pers
             ],
           ],
         },
+        message: true,
         code: `# 👋 Welcome to [Server Name]!
 - 📜 Start with the rules: <#RULES_CHANNEL_ID>
 - 🎭 Choose your roles and channels: <id:customize>

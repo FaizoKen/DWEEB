@@ -4,6 +4,7 @@ import { escapeHtml } from "./render-message";
 import { SITE } from "./content";
 import { GUIDES_LASTMOD, type GuidePage, type GuideSection, type LandingPage } from "./guides";
 import { withClientParams } from "@/core/seo/clientParams";
+import { openInDweebHref } from "./tools/share-link";
 import {
   attr,
   breadcrumbLd,
@@ -137,7 +138,19 @@ function tableOfContents(sections: readonly GuideSection[], withFaq = false): st
   return `<nav class="page-contents" aria-label="On this page"><strong>On this page</strong><ol>${sections.map((section, index) => entry(ids[index]!, section.heading)).join("")}${withFaq ? entry(GUIDE_FAQ_ID, "Frequently asked questions") : ""}</ol></nav>`;
 }
 
-function renderSections(sections: readonly GuideSection[]): string {
+/**
+ * The "open it in the editor" link under a copy-and-paste message. Plain HTML —
+ * the message rides in the share fragment the guide tools already use — so it
+ * works without JavaScript, and the guide's `entry` token counts the open as
+ * this guide's builder visit.
+ */
+function openMessageLink(section: GuideSection, guideSlug: string): string {
+  if (!section.message || !section.code) return "";
+  const href = openInDweebHref(section.code, `guide:${guideSlug}`);
+  return `<p class="message-open"><a class="btn btn-ghost" href="${attr(href)}" data-analytics="guide" data-analytics-id="${attr(guideSlug)}" data-analytics-location="body">Open this message in DWEEB →</a> <span>Edit it with a live preview, then send it through a webhook.</span></p>`;
+}
+
+function renderSections(sections: readonly GuideSection[], guideSlug?: string): string {
   const ids = sectionIds(sections);
   return sections
     .map((section, index) => {
@@ -148,7 +161,7 @@ function renderSections(sections: readonly GuideSection[]): string {
         ? `<ul class="ticks">${section.bullets.map((item) => `<li>${renderProse(item)}</li>`).join("")}</ul>`
         : "";
       const code = section.code
-        ? `<pre class="code-block" tabindex="0" role="region" aria-label="${attr(section.heading)} code example"><code>${escapeHtml(section.code)}</code></pre>`
+        ? `<pre class="code-block" tabindex="0" role="region" aria-label="${attr(section.heading)} code example"><code>${escapeHtml(section.code)}</code></pre>${guideSlug ? openMessageLink(section, guideSlug) : ""}`
         : "";
       const table = section.table
         ? `<div class="table-scroll" tabindex="0" role="region" aria-label="${attr(section.heading)}"><table><caption class="sr-only">${escapeHtml(section.heading)}</caption><thead><tr>${section.table.headers
@@ -229,7 +242,7 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
       </header>
       ${tool ? tool.html() : ""}
       ${tableOfContents(guide.sections, !!faq)}
-      ${renderSections(guide.sections)}
+      ${renderSections(guide.sections, guide.slug)}
       ${faq ? faqSection(faq, GUIDE_FAQ_ID) : ""}
       ${productContext(guide)}
       <section class="cta-band">
