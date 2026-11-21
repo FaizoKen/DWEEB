@@ -109,9 +109,17 @@ export function renderInline(raw: string): string {
 
 /**
  * Render a TextDisplay's full markdown to block HTML. Supports headings
- * (`#`/`##`/`###` → `<h2>`/`<h3>`/`<h4>` so they nest under the page `<h1>`),
- * subtext (`-#`), blockquotes, bullet lists, and paragraphs (a single newline is
- * a soft break, matching Discord).
+ * (`#`/`##`/`###`), subtext (`-#`), blockquotes, bullet lists, and paragraphs (a
+ * single newline is a soft break, matching Discord).
+ *
+ * Message headings are styled blocks, never `<h*>`: the preview is a picture of
+ * a Discord message, and its headings are not the page's outline. As real
+ * `<h2>`–`<h4>` a message starting at `###` (giveaway, changelog, pricing
+ * cards) jumped straight from the page's `<h2>` to an `<h4>` — Lighthouse's
+ * heading-order audit failed on five pages — and every preview added the
+ * message's own words to the outline beside the page's real section headings.
+ * The guide tools' renderer (`tools/markdown-html.ts`) keeps its output out of
+ * the outline for the same reason.
  */
 export function renderMarkdown(content: string): string {
   const out: string[] = [];
@@ -161,7 +169,7 @@ export function renderMarkdown(content: string): string {
     if (h) {
       flushPara();
       const lvl = h[1]!.length;
-      out.push(`<h${lvl + 1} class="dwx-h dwx-h${lvl}">${renderInline(h[2]!)}</h${lvl + 1}>`);
+      out.push(`<p class="dwx-h dwx-h${lvl}">${renderInline(h[2]!)}</p>`);
       continue;
     }
 
