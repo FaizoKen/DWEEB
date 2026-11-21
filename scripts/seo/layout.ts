@@ -21,6 +21,7 @@ import type { ResolvedFeature } from "./features";
 import { withClientParams } from "@/core/seo/clientParams";
 import { buildComponentEmbed, componentEmbedScript } from "@/core/linkPreview/componentEmbed";
 import type { TemplatePayload } from "./template-payload";
+import { COPY_CODE_CSS, COPY_CODE_SCRIPT, hasCodeBlocks } from "./tools/copy-code";
 
 const TEMPLATES_INDEX_PATH = "/templates/";
 const TEMPLATES_INDEX_URL = `${SITE.origin}${TEMPLATES_INDEX_PATH}`;
@@ -223,6 +224,9 @@ export function htmlDocument(opts: {
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
+  // Any page with a code block gets its Copy buttons (tools/copy-code.ts).
+  const copyButtons = hasCodeBlocks(opts.body);
+  const moduleScripts = [...(opts.moduleScripts ?? []), ...(copyButtons ? [COPY_CODE_SCRIPT] : [])];
   const builderUrl = withClientParams("/", { entry: `${opts.pageType}:${opts.pageId}` });
   const previewCard = linkPreviewCard({
     title: opts.title,
@@ -275,10 +279,10 @@ export function htmlDocument(opts: {
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <script defer src="/gtag-init.js"></script>
-    ${(opts.moduleScripts ?? []).map((src) => `<script type="module" src="${attr(src)}"></script>`).join("\n    ")}
+    ${moduleScripts.map((src) => `<script type="module" src="${attr(src)}"></script>`).join("\n    ")}
 
     ${[...identityLd().map(jsonLd), ...opts.jsonLd].join("\n    ")}
-    <style>${PAGE_CSS}${opts.extraCss ?? ""}</style>
+    <style>${PAGE_CSS}${opts.extraCss ?? ""}${copyButtons ? COPY_CODE_CSS : ""}</style>
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>

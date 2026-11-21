@@ -18,6 +18,7 @@ import { COLOR_CONVERTER_SCRIPT } from "./color-converter";
 import { COLORED_TEXT_SCRIPT } from "./colored-text";
 import { RULES_GENERATOR_SCRIPT } from "./rules-generator";
 import { TIMESTAMP_TOOL_SCRIPT } from "./timestamp-generator";
+import { COPY_CODE_SCRIPT } from "./copy-code";
 
 /** The slice of `Bun.build` this uses; bun-types is not a project dependency. */
 interface BunBundler {
@@ -53,6 +54,12 @@ const TOOL_ENTRIES: readonly { entry: string; publicPath: string }[] = [
   {
     entry: fileURLToPath(new URL("./color-converter.client.ts", import.meta.url)),
     publicPath: COLOR_CONVERTER_SCRIPT,
+  },
+  // Not a guide tool: the Copy buttons every page with a code block loads
+  // (attached by `htmlDocument`).
+  {
+    entry: fileURLToPath(new URL("./copy-code.client.ts", import.meta.url)),
+    publicPath: COPY_CODE_SCRIPT,
   },
 ];
 
