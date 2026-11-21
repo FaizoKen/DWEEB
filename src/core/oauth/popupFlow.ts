@@ -340,8 +340,8 @@ function watchPopup<R>(flow: PopupFlow<R>, popup: Window): void {
       stop();
       return;
     }
-    let hash = "";
-    let search = "";
+    let hash: string;
+    let search: string;
     try {
       // Both throw while cross-origin, or if the handle was severed.
       hash = popup.location.hash;
@@ -514,7 +514,7 @@ export function subscribePopupResult<R>(
 
   // Read a result sitting in localStorage (poll + storage-event path).
   const consumeStored = () => {
-    let raw: string | null = null;
+    let raw: string | null;
     try {
       raw = localStorage.getItem(resultKey(flow.kind));
     } catch {
