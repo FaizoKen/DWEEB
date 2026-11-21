@@ -80,6 +80,14 @@ const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
   // 2026-11-21: no longer claims an automatic draw — the plugin closes entries
   // at the end time and the host draws (plugins/giveaway store.rs `ends_at`).
   "giveaway-button": "2026-11-21",
+  // 2026-11-21: page-specific FAQs for the six templates Google had crawled
+  // but left out of the index; their only unique copy was a short intro.
+  poll: "2026-11-21",
+  links: "2026-11-21",
+  faq: "2026-11-21",
+  "twitch-follower": "2026-11-21",
+  "topgg-vote": "2026-11-21",
+  "referral-code": "2026-11-21",
 };
 
 /** Meaningful content date for one generated template page. */
@@ -296,6 +304,25 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Growing your server's Top.gg ranking with a standing vote reminder",
       "Rewarding bot voters with a cosmetic or perk role",
       "Running vote-gated perks that expire between vote cooldowns",
+      "Reminding members to vote again when their voter role runs out",
+    ],
+    faq: [
+      {
+        q: "How do I give Top.gg voters a role on Discord?",
+        a: "Connect your Top.gg project to RoleLogic's Top.gg Voter Role with its webhook URL, secret and API token, then post this panel with your vote link. When someone votes, Top.gg notifies RoleLogic and the voter gets the role straight away.",
+      },
+      {
+        q: "How long does the voter role last?",
+        a: "As long as you choose, from 1 to 168 hours (a week). The default is 12 hours, the same as the wait between Top.gg votes, so the role ends about when the member can vote again.",
+      },
+      {
+        q: "What happens if a vote notification is missed?",
+        a: "RoleLogic also reads the vote list from Top.gg's API when you save the settings and again at regular intervals, so a vote whose notification never arrived still earns the role.",
+      },
+      {
+        q: "Does the role come off on its own?",
+        a: "Yes. When a voter's time is up, RoleLogic removes the role automatically, which gives members a reason to come back and vote again.",
+      },
     ],
   },
   "genshin-verify": {
@@ -338,6 +365,25 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Syncing Twitch sub tiers to Discord perk roles",
       "Rewarding followers with access to stream-crew channels",
       "Keeping sub roles accurate without nightly re-checks",
+      "Giving long-time followers a role once they have followed for a set time",
+    ],
+    faq: [
+      {
+        q: "How do I give Twitch subscribers a role on Discord?",
+        a: "Discord's own Twitch integration gives subscriber roles to Twitch Affiliate and Partner channels. RoleLogic's Twitch Follower Role goes further, with roles for followers, for how long someone has followed, for subscribers and for each sub tier, combined with AND/OR rules. Post this panel so members can link their Twitch account.",
+      },
+      {
+        q: "Do members need to link their Twitch account?",
+        a: "Yes, once. A member signs in with Discord and Twitch on RoleLogic's page, and from then on their roles follow what they do on Twitch.",
+      },
+      {
+        q: "How quickly do the roles update?",
+        a: "In real time. The channel owner connects the channel once, and Twitch then sends follow and subscribe events as they happen, so a new sub, an upgrade or a lapsed sub changes the member's roles without a nightly re-check.",
+      },
+      {
+        q: "Can I reward followers who have followed for a while?",
+        a: "Yes. Rules can use how long someone has followed as well as follower status, subscriber status and sub tier, so a role can go to, for example, followers of at least six months.",
+      },
     ],
   },
   "steam-verify": {
@@ -366,6 +412,25 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Granting attendee roles at IRL events via QR codes",
       "Rewarding backers or podcast listeners with a code",
       "Running limited-time promo roles that expire",
+      "Sharing one code in a stream, newsletter or podcast for listeners to redeem",
+    ],
+    faq: [
+      {
+        q: "How do members redeem a code for a Discord role?",
+        a: "They open the code's link or scan its QR code, sign in with Discord and enter the code. RoleLogic checks it, records the redemption and gives them the role.",
+      },
+      {
+        q: "What kinds of codes can I create?",
+        a: "Three: one-time codes that work once for one person; per-person codes, where many people can use the same code but each person only once per group (one code printed on every wristband); and a single shared code that anyone can redeem once until a cap or expiry date is reached.",
+      },
+      {
+        q: "Can the role expire?",
+        a: "Yes. Give a code group a role duration in hours and the role is removed automatically when it runs out. A group can also have an expiry date and a cap on total redemptions.",
+      },
+      {
+        q: "Can I print the codes?",
+        a: "Yes. Codes can be random or worded your way, every code has a share link and a downloadable QR code, and a group's codes and redemptions download as CSV.",
+      },
     ],
   },
   "roblox-verify": {
@@ -636,6 +701,29 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Letting members choose the next event or topic",
       "Running votes with live result bars on the message",
       "Collecting feedback with results hidden until close",
+      "Votes only certain roles should take part in, such as staff or verified members",
+    ],
+    faq: [
+      {
+        q: "How is this different from Discord's built-in polls?",
+        a: "Discord's own polls are quick to start and fine for a casual question. This template is for when you need more: up to 25 options (Discord's polls stop at 10), voting limited to certain roles or older accounts, results hidden until the poll closes, a deadline, and a message you design yourself, with your own heading, colours and images.",
+      },
+      {
+        q: "Can members change their vote?",
+        a: "Yes, by default. A member can change or take back their vote while the poll is open, and the counts on the message update. Turn that off in the Poll plugin if a first vote should be final.",
+      },
+      {
+        q: "Can members pick more than one option?",
+        a: "Yes. Set how many options one vote may include, and members choose them from the same menu.",
+      },
+      {
+        q: "Can people see who voted for what?",
+        a: "No. The message shows only counts, bars and percentages. Each member's vote is stored once so nobody can vote twice, but DWEEB never shows who picked which option.",
+      },
+      {
+        q: "How do I end the poll and announce the results?",
+        a: "Set a deadline and votes are refused once it passes; the poll closes on the next click, or a host closes it from the host panel at any time and can reopen it. Closing posts a results announcement, which you can word yourself.",
+      },
     ],
     keywords: ["discord poll bot", "voting menu", "live results", "ballot"],
   },
@@ -738,6 +826,25 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Heading off frequently asked questions",
       "Reducing repeat questions in support",
       "Pinning quick answers for new members",
+      "Answering the questions every new member asks in their first week",
+    ],
+    faq: [
+      {
+        q: "How do I make an FAQ channel on Discord?",
+        a: "Create a channel such as #faq where members can read but not post, send this FAQ message there, and pin it. Then link the channel from your welcome message so new members find it before they ask.",
+      },
+      {
+        q: "How long can a Discord FAQ message be?",
+        a: "A Components V2 message holds up to 4,000 characters of text in total. If your answers run longer, split them into two messages by topic, or link to a fuller guide instead of pasting it in.",
+      },
+      {
+        q: "Can I update the FAQ after posting it?",
+        a: "Yes. Load the posted message back into DWEEB, edit the answers and update it in place, so the pin stays and nobody sees a second copy.",
+      },
+      {
+        q: "Can an answer link to a channel or mention a role?",
+        a: "Yes. Write a channel as <#CHANNEL_ID> and a role as <@&ROLE_ID>. In a webhook message a role mention shows as a coloured pill but doesn't notify anyone unless you allow role mentions.",
+      },
     ],
   },
   product: {
@@ -780,6 +887,25 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Collecting all your social links in one post",
       "Building a Linktree-style hub inside Discord",
       "Helping members follow you across platforms",
+      "Pinning your stream, store and community links where new members look first",
+    ],
+    faq: [
+      {
+        q: "How many links can a Discord link hub hold?",
+        a: "Each row holds up to five link buttons, and one message can have up to 40 components in total, with every row, button and container counting toward that. That is room for well over twenty links, though a hub of six to twelve is easier to scan.",
+      },
+      {
+        q: "Do link buttons need a bot?",
+        a: "No. A link button only opens a web address, so it works on a message posted through any webhook. Only buttons that do something inside Discord, such as giving a role, need an app behind them.",
+      },
+      {
+        q: "What can a link button point to?",
+        a: "Any https:// address up to 512 characters: your site, a store, a stream or a profile. Each button's label can be up to 80 characters and can carry an emoji.",
+      },
+      {
+        q: "Is this a Linktree alternative for Discord?",
+        a: "It does the same job inside your server: one post that collects every link, so members find your profiles without leaving Discord. Keep your link-in-bio page for other platforms and pin this hub in Discord.",
+      },
     ],
     keywords: ["linktree", "social links", "link in bio"],
   },
