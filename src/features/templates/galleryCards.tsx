@@ -102,8 +102,12 @@ export function messageSearchText(message: WebhookMessage): string {
  *  as the user scrolls (see the load-more sentinel). */
 export const CARD_PAGE_SIZE = 24;
 /** The first screenful of thumbnails mounts eagerly so the gallery never opens
- *  onto blank preview windows; everything past it lazy-mounts on approach. */
-export const EAGER_THUMBNAILS = 3;
+ *  onto blank preview windows; everything past it lazy-mounts on approach.
+ *  A phone shows the grid as one column, with two cards on the first screen:
+ *  there the third eager preview was below the fold yet still laid out in the
+ *  landing page's longest task (measured 2026-11-21 at 412×823), so phones
+ *  mount two and let the third arrive on approach, in a task of its own. */
+export const EAGER_THUMBNAILS = typeof window !== "undefined" && window.innerWidth < 560 ? 2 : 3;
 
 /** Compact "2m ago" / "yesterday" / "Mar 4" stamp for continue/saved cards. */
 export function formatRelative(savedAt: number): string {

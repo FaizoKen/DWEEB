@@ -968,7 +968,16 @@ export function TemplateGallery() {
     const row = chipsRef.current;
     if (!row) return;
 
+    // Read the chips one task *after* the frame paints, when layout is already
+    // clean. Reading offsets inside the animation frame forced a layout of the
+    // whole gallery ahead of the frame's own (~25 ms of the landing page's
+    // longest task, measured 2026-11-21); nothing on screen needs it sooner.
+    let timer = 0;
     const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(revealActiveChip, 0);
+    });
+    function revealActiveChip() {
+      if (!row) return;
       const activeChip = row.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
       if (activeChip) {
         const chipLeft = activeChip.offsetLeft;
@@ -980,12 +989,13 @@ export function TemplateGallery() {
         }
       }
       updateChipScroll();
-    });
+    }
 
     const resizeObserver = new ResizeObserver(updateChipScroll);
     resizeObserver.observe(row);
     return () => {
       cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
       resizeObserver.disconnect();
     };
   }, [activeFilter, filters, updateChipScroll]);

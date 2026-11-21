@@ -196,8 +196,14 @@
 
 /* Unicode emoji rendered as native glyphs at Discord's 1.375em emoji size
    (22px on 16px text). line-height 1 keeps the line box at its normal
-   height, matching Discord's 22px image emoji. */
+   height, matching Discord's 22px image emoji.
+   The emoji fonts are named first so the browser finds the glyph by family
+   name instead of walking the text stack and then asking the OS for a
+   fallback font, which is the slow part of laying out the first emoji on a
+   page (measured 2026-11-21: the gallery's first layout fell ~8%, every run).
+   It also keeps characters that text fonts happen to cover in colour. */
 .unicodeEmoji {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", var(--discord-font);
   font-size: 1.375em;
   line-height: 1;
   vertical-align: bottom;
