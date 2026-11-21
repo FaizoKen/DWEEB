@@ -678,6 +678,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       },
     ],
     guides: [
+      "how-to-do-a-giveaway-on-discord",
       "discord-timestamp-format",
       "how-to-create-a-discord-webhook",
       "discord-webhook-mentions",

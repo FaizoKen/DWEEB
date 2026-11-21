@@ -3118,6 +3118,180 @@ Please don't DM staff for support; answers in public channels help the next pers
     ctaLabel: "Open the welcome template",
     ctaPath: "/#template=welcome",
   }),
+  guide({
+    slug: "how-to-do-a-giveaway-on-discord",
+    title: "How to Do a Giveaway on Discord: Steps, Rules & Winners | DWEEB",
+    h1: "How to Do a Giveaway on Discord",
+    description:
+      "Run a fair Discord giveaway: choose how people enter, set rules, post it with a countdown and draw winners at random. Includes copy-and-paste giveaway rules.",
+    eyebrow: "Community guide · Giveaways",
+    lede: "Discord has no giveaway button of its own, so every giveaway is one of three things: reactions you count by hand, a giveaway bot, or a message with an Enter button wired to something that keeps the entries. Below is how each works, the five decisions to make before you post, giveaway rules and an announcement you can paste, and how to draw a winner people trust.",
+    published: "2026-11-21",
+    modified: "2026-11-21",
+    keywords: [
+      "how to do a giveaway on discord",
+      "how to host a giveaway on discord",
+      "discord giveaway rules",
+      "discord giveaway bot",
+      "pick a random winner discord",
+    ],
+    sections: [
+      {
+        heading: "Three ways to run a Discord giveaway",
+        paragraphs: [
+          "All three work. They differ in how much counting you do yourself and how easy it is to check that the draw was fair.",
+        ],
+        table: {
+          headers: ["Method", "How people enter", "How the winner is picked", "Good for"],
+          rows: [
+            [
+              "Reactions by hand",
+              "React to the post with an emoji",
+              "You go through the reaction list and pick at random yourself",
+              "A tiny one-off between friends",
+            ],
+            [
+              "A giveaway bot",
+              "A reaction or a button the bot watches",
+              "The bot draws when the timer ends",
+              "Servers that already run that bot",
+            ],
+            [
+              "A button giveaway built in [DWEEB](/features/discord-giveaway-bot/)",
+              "One click on an Enter button, with a live entrant count",
+              "The host draws at random from eligible entrants with one click",
+              "A designed giveaway post with entry rules and rerolls, no bot to self-host",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Decide five things before you post",
+        paragraphs: [
+          "Most giveaway arguments start with something the post never said. Settle these first and write each one into the announcement.",
+        ],
+        bullets: [
+          "The prize, exactly. “A one-month Nitro Basic gift” or “a Steam key for [game], [region]”, never just “Nitro”.",
+          "Who can enter. Everyone, a role (for example members who passed verification), or accounts older than a set number of days to keep alt accounts out.",
+          "When entries close. Give a date and time, and show it as a Discord timestamp so everyone sees their own time zone.",
+          "How many winners, and how they are picked: at random from everyone eligible.",
+          "How a winner claims the prize, and how long they have before you reroll.",
+        ],
+      },
+      {
+        heading: "Discord giveaway rules (copy and paste)",
+        paragraphs: [
+          "Post these with the giveaway or pin them in your giveaway channel. Replace the bracketed parts and the example timestamp; the [timestamp guide](/guides/discord-timestamp-format/) makes the code from a date you pick.",
+        ],
+        message: true,
+        code: `# 🎉 Giveaway Rules
+**1.** One entry per person. Alt accounts are disqualified, and so is their main.
+**2.** You must stay in the server until the winner is drawn.
+**3.** Entries close <t:1767225600:F>. Late entries don't count.
+**4.** Winners are drawn at random from everyone who entered and meets the requirements.
+**5.** Winners have **48 hours** to claim the prize by messaging [@host]. After that we reroll.
+**6.** Prizes can't be exchanged for cash or another item.
+**7.** Staff decisions on eligibility are final. Breaking the server rules removes your entry.
+-# Not affiliated with Discord or any brand named in the prize.`,
+      },
+      {
+        heading: "Giveaway announcement message (copy and paste)",
+        paragraphs: [
+          "Lead with the prize and the deadline; people decide in a second whether to enter. The relative timestamp counts down on its own.",
+        ],
+        message: true,
+        code: `# 🎁 GIVEAWAY: [Prize]
+We're giving away **[prize]** to **[number] winner(s)**!
+
+**How to enter**
+- Click **Enter** below (one click, that's it)
+- You need the **[@Role]** role to be eligible
+
+⏰ Entries close <t:1767225600:R>, on <t:1767225600:F>
+-# Winners are drawn at random and announced in this channel. Read the giveaway rules before entering.`,
+      },
+      {
+        heading: "Run it with one-click entry in DWEEB",
+        paragraphs: [
+          "DWEEB's [Giveaway plugin](/features/discord-giveaway-bot/) adds an Enter button to a message you design, so the post carries your own layout, banner and colours instead of a bot's fixed embed. There is nothing to install or host: DWEEB's hosted plugin handles the button.",
+        ],
+        bullets: [
+          "Open the [giveaway template](/templates/discord-giveaway-template/) in DWEEB and write the prize, the rules line and the end time.",
+          "Pair the Enter button with the Giveaway plugin. Set the number of winners (up to 20), and optionally require one or more roles (any one, or all of them) and a minimum account age.",
+          "Send the message through a webhook to your giveaway channel. Members enter with one click and the entrant count on the message updates as they join; clicking again lets someone leave.",
+          "Entries close at the end time you set. A server manager, or a host role you chose, then draws the winners from the host panel with one click.",
+          "If a winner doesn't claim the prize, reroll: people already drawn are never drawn again. You can also cancel a giveaway at any time.",
+        ],
+      },
+      {
+        heading: "Picking a winner people trust",
+        paragraphs: [
+          "A fair draw is random among everyone who was eligible when entries closed, and it happens in the open. Announce the winner in the same channel as the giveaway, tag them, and say when they have to claim by.",
+          "Reaction giveaways are the hardest to keep fair: anyone can react, a reaction can be removed and added again, and the list gives you no account age to check. If you do pick from reactions by hand, take a screenshot of the list when entries close and use a random number generator on it, so you can show how the winner was chosen.",
+          "Rerolling is normal, not a failure. Say in the rules how long a winner has to claim, and reroll after that without drawing anyone who already won.",
+        ],
+      },
+      {
+        heading: "Keep alt accounts and spam entries out",
+        bullets: [
+          "Require an account age. Most alt accounts are made for the giveaway, so a minimum of a week or a month removes them without bothering real members.",
+          "Require a role that takes effort to get, such as the role members receive after passing verification or reading the rules.",
+          "Allow one entry per person. A button giveaway records each member once; with reactions, you have to check for duplicates yourself.",
+          "Raise the server's verification level while the giveaway runs if raids are a problem, so new accounts must verify an email or phone first.",
+        ],
+      },
+      {
+        heading: "After the draw",
+        paragraphs: [
+          "Make sure the giveaway post shows the winners and that entries are closed, so late arrivals stop asking; a DWEEB button giveaway fills its winners into the message on its own. Keep a short record of what was drawn and when; it settles disputes, and it shows the next giveaway is run the same way. For the next one, reuse the same message: in DWEEB a posted message can be loaded again and edited, so your giveaway layout becomes a template.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does Discord have a built-in giveaway feature?",
+        a: "No. Discord has built-in polls, but no giveaway or raffle feature. Giveaways are run by hand with reactions, with a giveaway bot, or with a message whose Enter button is handled by an app such as DWEEB's Giveaway plugin.",
+      },
+      {
+        q: "How do I pick a random winner on Discord?",
+        a: "Draw from everyone who entered and met the requirements when entries closed. A button giveaway in DWEEB does this with one click from the host panel; with a reaction giveaway, list the people who reacted and use a random number generator, then announce how the winner was chosen.",
+      },
+      {
+        q: "Can I do a Discord giveaway without a bot?",
+        a: "Yes. A reaction giveaway needs no bot, only manual counting. DWEEB's button giveaway also needs no bot to install or host: you post the message through a webhook and DWEEB's hosted plugin handles the Enter button and the draw.",
+      },
+      {
+        q: "How long should a Discord giveaway last?",
+        a: "Long enough that members in every time zone see it, so at least 24 hours. Three to seven days suits most servers; much longer and people forget they entered. Show the end time as a Discord timestamp so it reads in each member's own time zone.",
+      },
+      {
+        q: "Can I require a role or a minimum account age to enter?",
+        a: "Yes, with a giveaway bot or plugin that checks it at entry. DWEEB's Giveaway plugin can require one or more roles, either any one of them or all of them, and a minimum Discord account age in days.",
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Message formatting — timestamps",
+        url: "https://docs.discord.com/developers/reference#message-formatting",
+      },
+      {
+        label: "Discord API: Component reference — buttons",
+        url: "https://docs.discord.com/developers/components/reference",
+      },
+      {
+        label: "Discord Community Guidelines",
+        url: "https://discord.com/guidelines",
+      },
+    ],
+    related: [
+      "discord-server-rules",
+      "discord-timestamp-format",
+      "discord-welcome-messages",
+      "discord-webhook-mentions",
+    ],
+    ctaLabel: "Open the giveaway template",
+    ctaPath: "/#template=giveaway-button",
+  }),
   // The developer cluster — sending a Components V2 message from code — lives
   // in its own file; every code block in it is generated at build time.
   ...CODE_GUIDE_INPUTS.map(guide),

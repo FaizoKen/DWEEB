@@ -123,14 +123,20 @@
       "height": 630
     },
     "/guides-og/guides.png": {
-      "sourceSvgSha256": "819a834cae05241a89a5ef7b94d773b388a0ae5db1c7564da4ff2ec10d68bc90",
-      "pngSha256": "11a92258eb656b05519577e5973a2ecc7d42486fd99fcf555741970321785424",
+      "sourceSvgSha256": "12dbe4c3c568a063e06a119bfb5ebb0eba1ff153e48c7129162731d595c2847b",
+      "pngSha256": "bc4334d3268445e3f49c49c7ad5b55dc0479811b1eedb10cf46774c53b050087",
       "width": 1200,
       "height": 630
     },
     "/guides-og/how-to-create-a-discord-webhook.png": {
       "sourceSvgSha256": "65944816d089bcfb4c4c0449620b5b3058ba446981165afca2f588b6a902197e",
       "pngSha256": "f3b03b3db702c27958e77bcd50b5a13760492a4a32fcc0118eea99e3d1efe5a0",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/how-to-do-a-giveaway-on-discord.png": {
+      "sourceSvgSha256": "50c569e3baea2dc675dd46946fe0b10c6a14f311c03e7129927bfe702af46709",
+      "pngSha256": "1fc496e34363ef6ecc40c7919c9995b49f00acf745f49c0c30b82048d5539495",
       "width": 1200,
       "height": 630
     },

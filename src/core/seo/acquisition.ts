@@ -101,6 +101,7 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-webhook-forum-threads",
     "discord-server-rules",
     "discord-welcome-messages",
+    "how-to-do-a-giveaway-on-discord",
     "discord-js-components-v2",
     "discord-py-components-v2",
     "discord-webhook-python",
