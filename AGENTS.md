@@ -1858,7 +1858,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `gtag-init.js` drops hashes,
   Discord/OAuth/billing identifiers, arbitrary queries, and exact short-link ids by sending only
   the controlled canonical plus a referrer's origin; acquisition ids and product-event fields use
-  exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
+  exact allowlists. **The one query value kept is an AI assistant's `utm_source`, from an exact
+  list (`AI_SOURCES`, today `chatgpt.com`)** (2026-11-21): ChatGPT stopped sending a Referer in
+  October 2026 and tags its links `?utm_source=chatgpt.com` instead. On RoleLogic, whose tag keeps
+  query strings, ChatGPT visits with a chatgpt.com referrer went from about half in August to none
+  in November while the tagged visits held steady (~250–300 a month). DWEEB, sending only the
+  canonical, filed every one as Direct: GA4's AI Assistant channel fell from 214 sessions in
+  August to 3 in Nov 1–20. Data before 2026-11-21 undercounts AI-assistant traffic and overcounts
+  Direct accordingly. Add another assistant's value only on evidence (a landing URL in GA or the
+  logs), never a pattern. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
   and history pageviews), because those automatic events bypass the repository's field filters.
   **`gtag-init.js` starts from analytics-only consent** (2026-09-23): `gtag("consent", "default",
   …)` denies `ad_storage`, `ad_user_data` and `ad_personalization` and grants `analytics_storage`,
