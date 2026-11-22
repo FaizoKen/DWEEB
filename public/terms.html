@@ -65,7 +65,7 @@
         "@id": "https://dweeb.faizo.net/terms#webpage",
         "name": "Terms of Service — DWEEB",
         "url": "https://dweeb.faizo.net/terms",
-        "dateModified": "2026-07-13",
+        "dateModified": "2026-11-22",
         "inLanguage": "en",
         "isPartOf": { "@id": "https://dweeb.faizo.net/#website" }
       }
@@ -130,6 +130,10 @@
         line-height: 1.2;
         margin: 0 0 0.35rem;
       }
+      h3 {
+        font-size: 1.05rem;
+        margin: 1.5rem 0 0.4rem;
+      }
       h2 {
         font-size: 1.25rem;
         margin: 2.25rem 0 0.75rem;
@@ -184,13 +188,15 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Terms of Service</h1>
-      <p class="meta">Last updated: 13 July 2026</p>
+      <p class="meta">Last updated: 22 November 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> DWEEB is a free, source-available tool for building and
         sending Discord webhook messages, provided as-is. It's free for noncommercial use only —
         commercial use is not permitted. Use it lawfully, only with webhooks you're allowed to use,
         and follow Discord's rules. You're responsible for the messages you create and send.
+        Optional paid plans raise a server's limits. They renew until canceled, and you can get a
+        full refund of a payment within 14 days of making it.
       </div>
 
       <p>
@@ -205,8 +211,9 @@
         DWEEB is a free, browser-based visual editor that lets you build, preview, share, save,
         schedule, and send Discord messages using Components V2. No account is required for the core
         editor. Signing in is optional and enables connected-server features such as guild data,
-        schedules, message libraries, collaboration, and plan management. The Service is
-        source-available under the
+        schedules, message libraries, collaboration, and plan management. Optional paid plans raise
+        limits, as described in <a href="#paid-plans">section 4</a>. The Service is source-available
+        under the
         <a
           href="https://github.com/FaizoKen/DWEEB/blob/main/LICENSE"
           target="_blank"
@@ -256,7 +263,103 @@
         it.
       </p>
 
-      <h2>4. Third-party services</h2>
+      <h2 id="paid-plans">4. Paid plans</h2>
+      <p>
+        DWEEB Plus and Pro are optional subscriptions that raise one Discord server's limits. The
+        current limits and prices are shown under <strong>Plans</strong> in DWEEB.
+      </p>
+
+      <h3>Price, tax and renewal</h3>
+      <ul>
+        <li>
+          Plans are billed in advance, monthly or yearly, through Stripe. Prices in DWEEB are in US
+          dollars and exclude tax. Any tax is added at checkout and shown before you pay.
+        </li>
+        <li>
+          Plans <strong>renew automatically</strong> at the end of each billing period until you
+          cancel. A first-payment discount applies to that payment only, and the plan then renews at
+          the regular price.
+        </li>
+        <li>
+          Each subscription is billed separately. The person who bought it manages it, and can move
+          it to another server they manage once every 7 days.
+        </li>
+        <li>
+          If a payment fails, the server loses that plan's limits until it's paid. Stripe may retry
+          the payment, and the subscription may be canceled if the retries fail.
+        </li>
+      </ul>
+
+      <h3>Changing or canceling</h3>
+      <ul>
+        <li>
+          You can cancel at any time under <strong>Plans → Manage billing</strong>, or by
+          <a href="#contact">contacting us</a>. The plan keeps working until the end of the period
+          you paid for, then stops. Removing DWEEB from a server, leaving it, or deleting it does
+          <strong>not</strong> cancel the subscription.
+        </li>
+        <li>
+          An upgrade starts right away. The unused time on your old plan is credited, and Stripe
+          shows the exact charge before you confirm. A downgrade to a cheaper plan starts at the end
+          of the period.
+        </li>
+      </ul>
+
+      <h3 id="refunds">Refunds</h3>
+      <ul>
+        <li>
+          You can get a <strong>full refund, including tax</strong>, of any plan payment, including
+          a renewal or an upgrade charge, if you ask <strong>within 14 days</strong> of that
+          payment. You don't need to give a reason.
+        </li>
+        <li>
+          To ask, email <a href="mailto:mail@faizo.net">mail@faizo.net</a> or contact us in the
+          <a href="https://discord.gg/2wB7rHRDg2" target="_blank" rel="noopener noreferrer"
+            >DWEEB support server</a
+          >
+          with your Discord username and the date of the payment. Never send card details. Canceling
+          doesn't request a refund by itself.
+        </li>
+        <li>
+          Refunds go back to the original payment method. A refunded plan ends right away. If only
+          an upgrade is refunded, you go back to the plan you had before it.
+        </li>
+        <li>
+          After 14 days, payments aren't refunded, in full or in part, except where the law requires
+          it. Nothing here limits rights the law gives you.
+        </li>
+      </ul>
+
+      <h3>When a server's limits go down</h3>
+      <p>
+        This applies when a plan ends, is downgraded, refunded, moved to another server, or has a
+        failed payment:
+      </p>
+      <ul>
+        <li>
+          Scheduled posts, custom bots and never-expire slots over the new limit are paused, newest
+          first, and resume when the limit allows. A message whose never-expire slot is paused can
+          expire. A scheduled post whose time passed while it was paused is sent when it resumes.
+        </li>
+        <li>
+          Saved messages over the limit are kept, but their content can't be edited, and no new ones
+          can be saved, until the server is back within its limit.
+        </li>
+        <li>
+          <strong>Posted history over the limit is permanently deleted</strong>, oldest first, the
+          next time a post is recorded. History of never-expire messages is kept. This doesn't
+          delete the messages in Discord.
+        </li>
+      </ul>
+
+      <h3>RoleLogic</h3>
+      <p>
+        DWEEB and RoleLogic, both operated by Faizo, share subscriptions. One subscription works in
+        both on the same Discord account: Plus is called Medium there, and Pro is called Expanded.
+        Canceling, changing or refunding it affects both.
+      </p>
+
+      <h2>5. Third-party services</h2>
       <p>
         The Service interacts with third parties — including Discord, Google (analytics), GitHub
         (hosting), Stripe (optional billing), external media hosts, any AI provider you choose, and
@@ -266,7 +369,7 @@
         Service is not affiliated with or endorsed by Discord.
       </p>
 
-      <h2>5. Intellectual property</h2>
+      <h2>6. Intellectual property</h2>
       <p>
         The DWEEB software is licensed under the
         <a
@@ -282,7 +385,7 @@
         "Discord") belong to their respective owners.
       </p>
 
-      <h2>6. Privacy</h2>
+      <h2>7. Privacy</h2>
       <p>
         Your use of the Service is also subject to our
         <a href="/privacy">Privacy Policy</a>, which explains how data is handled. In short, the
@@ -291,7 +394,7 @@
         need to work.
       </p>
 
-      <h2>7. Disclaimer of warranties</h2>
+      <h2>8. Disclaimer of warranties</h2>
       <p>
         The Service is provided
         <strong>"as is" and "as available," without warranties of any kind</strong>, express or
@@ -301,36 +404,36 @@
         time without notice.
       </p>
 
-      <h2>8. Limitation of liability</h2>
+      <h2>9. Limitation of liability</h2>
       <p>
         To the maximum extent permitted by law, the operator and contributors will not be liable for
         any indirect, incidental, special, consequential, or exemplary damages, or for any loss of
         data, messages, or profits, arising out of or relating to your use of (or inability to use)
-        the Service — even if advised of the possibility. The Service is free, and your use of it is
-        at your own risk.
+        the Service — even if advised of the possibility. Your use of the Service is at your own
+        risk. This doesn't affect the refunds in <a href="#refunds">section 4</a>.
       </p>
 
-      <h2>9. Indemnification</h2>
+      <h2>10. Indemnification</h2>
       <p>
         You agree to indemnify and hold harmless the operator and contributors from any claims,
         damages, or expenses arising from your use of the Service or your violation of these Terms.
       </p>
 
-      <h2>10. Changes to these Terms</h2>
+      <h2>11. Changes to these Terms</h2>
       <p>
         We may update these Terms from time to time. Material changes will be reflected by updating
         the "Last updated" date above. Continued use of the Service after a change means you accept
         the revised Terms.
       </p>
 
-      <h2>11. Governing law</h2>
+      <h2>12. Governing law</h2>
       <p>
         These Terms are governed by the laws applicable in the operator's place of residence,
         without regard to conflict-of-law rules. Nothing here limits any mandatory
         consumer-protection rights you may have under the laws of your own country.
       </p>
 
-      <h2>12. Contact</h2>
+      <h2 id="contact">13. Contact</h2>
       <p>
         Questions about these Terms? Email
         <a href="mailto:mail@faizo.net">mail@faizo.net</a> or join the
