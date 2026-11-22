@@ -467,12 +467,11 @@ export function PricingModal() {
             wrong plan unless it's explained before the buyer gets to it. */}
         <p className={styles.billingNote}>
           The form below calls DWEEB {tierName(checkout.tier)}{" "}
-          <strong>{ROLELOGIC_PLAN[checkout.tier]}</strong>, its name in RoleLogic. To use it there
-          too,{" "}
+          <strong>{ROLELOGIC_PLAN[checkout.tier]}</strong>, its name in{" "}
           <a href={ROLELOGIC_URL} target="_blank" rel="noopener noreferrer">
-            sign in to RoleLogic
-          </a>{" "}
-          before you pay.
+            RoleLogic
+          </a>
+          . It works there too, on the same Discord account.
         </p>
         {checkout.noCardNeeded ? (
           <p className={styles.noCardNote}>
@@ -756,8 +755,8 @@ export function PricingModal() {
         <a href={ROLELOGIC_URL} target="_blank" rel="noopener noreferrer">
           RoleLogic
         </a>{" "}
-        by Faizo, where Plus is {ROLELOGIC_PLAN.plus} and Pro is {ROLELOGIC_PLAN.pro}. Sign in there
-        before you buy.
+        by Faizo, where Plus is {ROLELOGIC_PLAN.plus} and Pro is {ROLELOGIC_PLAN.pro}. Use the same
+        Discord account there.
       </p>
     </Modal>
   );

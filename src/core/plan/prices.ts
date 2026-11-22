@@ -21,7 +21,8 @@ export const LIST_PRICES: Record<PaidTier, { month: number; year: number }> = {
  *  name Stripe's payment form prints for a DWEEB plan. */
 export const ROLELOGIC_PLAN: Record<PaidTier, string> = { plus: "Medium", pro: "Expanded" };
 
-/** RoleLogic honours a subscription only for someone who had signed in there
- *  before it was created (its webhook skips unknown users and never backfills),
- *  so every mention of the bundle links here and says to sign in first. */
+/** RoleLogic honours a subscription for the Discord account that bought it,
+ *  whether they signed in there before or after paying (its first quota read
+ *  backfills from Stripe), so every mention of the bundle links here and names
+ *  that one condition: the same Discord account. */
 export const ROLELOGIC_URL = "https://rolelogic.faizo.net/";

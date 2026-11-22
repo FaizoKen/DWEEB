@@ -96,11 +96,11 @@ export function SendOffer({ guildId }: SendOfferProps) {
       </p>
       <p className={styles.price}>{plusPriceLine()}</p>
       <p className={styles.text}>
-        Includes RoleLogic {ROLELOGIC_PLAN.plus} if you{" "}
+        Includes{" "}
         <a className={styles.link} href={ROLELOGIC_URL} target="_blank" rel="noopener noreferrer">
-          sign in to RoleLogic
+          RoleLogic {ROLELOGIC_PLAN.plus}
         </a>{" "}
-        before paying.
+        on the same Discord account.
       </p>
       <div className={styles.actions}>
         <Button size="sm" variant="ghost" onClick={dismiss}>

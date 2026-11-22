@@ -2113,10 +2113,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   nothing third-party; `send_offer { result: shown|dismissed }` and
   `pricing_opened { opened_from: send_offer }` measure it. (5) **Prices are before tax and say
   so** (`core/plan/prices.ts`): live checkout charged $2.70 under a card reading $2.50 (8% SST),
-  and titles Plus "Medium", so the checkout view explains that name. (6) **Never promise the
-  RoleLogic bundle unconditionally**: RoleLogic's `upsertSubscription` skips a buyer with no
-  RoleLogic user row and has no backfill, so every mention says to sign in there *before* paying.
-  Drop that condition only after RoleLogic itself is fixed. (7) **It shows only if it fits
+  and titles Plus "Medium", so the checkout view explains that name. (6) **The RoleLogic
+  bundle's one condition is the same Discord account**, and every mention says it. Signing in
+  there before paying stopped mattering on 2026-11-22 (RoleLogic API 1.14.25: `backfillUser`
+  recovers the subscription on that person's first quota read). Never promise it to a different
+  account, and bring the old condition back if RoleLogic ever drops that backfill. (7) **It shows only if it fits
   without moving the footer** (a layout effect measures before paint): at the dialog's height cap
   a `below` strip squeezes the body and lifts Done from under the finger. The same test found
   `.dialogTop`'s height cap losing to the phone rule's `max-height: 100%` since `ec1a260`, which
