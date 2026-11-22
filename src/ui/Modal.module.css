@@ -150,6 +150,12 @@
     padding: 12px 14px;
     flex-wrap: wrap-reverse;
   }
+  /* The `max-height: 100%` above comes later than `.dialogTop`, so it replaced
+     that rule's cap and left the top margin: every tall top-anchored dialog
+     (Send, Plans, checkout) ended below the screen, its actions cut off. */
+  .dialog.dialogTop {
+    max-height: calc(100dvh - 32px - min(6vh, 48px) - var(--app-sait) - var(--app-saib));
+  }
 
   /* Compact variant stays a small centered card on mobile too. */
   .dialogSm {
