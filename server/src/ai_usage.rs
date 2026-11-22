@@ -1,10 +1,8 @@
 //! Usage ledger for the built-in AI assistant (see `ai.rs`).
 //!
 //! One tiny SQLite table of daily/monthly rollups keyed by scope:
-//!   - `u:<uid>` + `YYYY-MM-DD` — a user's daily consumption (the Free
-//!     allowance, and the per-member ceiling inside a paid server's pool);
-//!   - `g:<guild>` + `YYYY-MM-DD` — a server's pooled daily consumption
-//!     (the Plus/Pro allowance);
+//!   - `u:<uid>` + `YYYY-MM-DD` — a person's daily consumption, what every
+//!     tier's allowance binds;
 //!   - `global` + `YYYY-MM`     — the whole deployment's monthly consumption,
 //!     checked against `AI_MONTHLY_TOKEN_BUDGET` so the feature can never cost
 //!     more than the number written in the env file.

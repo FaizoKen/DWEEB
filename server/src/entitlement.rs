@@ -196,8 +196,8 @@ impl Entitlement {
                 "coeditors": lim(limits.coeditors),
                 "library": lim(limits.library),
                 "library_posted": lim(limits.library_posted),
-                // Built-in AI: requests/tokens per UTC day. Per-user on Free,
-                // pooled per server on paid tiers (see `ai.rs`).
+                // Built-in AI: requests/tokens per UTC day, per person on every
+                // tier (see `ai.rs`).
                 "ai_requests": lim(limits.ai_requests),
                 "ai_tokens": lim(limits.ai_tokens),
             },
@@ -451,7 +451,6 @@ mod tests {
             library_posted: 10,
             ai_requests: 30,
             ai_tokens: 150_000,
-            ai_member_requests: 0,
         };
         let unlimited = TierLimits {
             schedules: 0,
@@ -462,7 +461,6 @@ mod tests {
             library_posted: 0,
             ai_requests: 0,
             ai_tokens: 0,
-            ai_member_requests: 0,
         };
         let ent = Entitlement {
             stripe: None,

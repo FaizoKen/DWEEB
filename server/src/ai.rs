@@ -12,8 +12,8 @@
 //!    for bring-your-own-key providers) and the model/max_tokens/temperature
 //!    are pinned server-side. Without this, the route is a free general-purpose
 //!    LLM API wearing our key.
-//!  - **Sign-in required.** Free usage is a per-user daily allowance; a Plus or
-//!    Pro *server* gets a bigger pooled allowance (with a per-member ceiling)
+//!  - **Sign-in required.** The daily allowance is per person on every tier. A
+//!    Plus or Pro *server* gives each person who can load it a bigger one,
 //!    resolved through the existing entitlement gates.
 //!  - **Layered abuse controls**: a route-local per-IP limiter (mounted in
 //!    `main`), a per-user token bucket + one-in-flight rule here, a global
@@ -293,23 +293,19 @@ fn kinded_error(status: StatusCode, kind: &str, message: &str, extra: Value) -> 
 enum QuotaDenied {
     /// The deployment's monthly token budget is exhausted.
     Budget,
-    /// The binding daily allowance (user on Free, server pool on paid) is
-    /// spent — either its request count or its token budget.
+    /// The person's daily allowance is spent — either its request count or its
+    /// token budget.
     Daily { used: i64, limit: i64 },
-    /// A paid server's pool has room, but this member hit their ceiling.
-    Member { used: i64, limit: i64 },
 }
 
 /// Pure quota decision, so it's unit-testable without SQLite:
-///  - Free (or no guild): the *user's* daily requests/tokens bind.
-///  - Plus/Pro with a guild: the *server pool* binds, plus a per-member
-///    request ceiling so one member can't drain a community's pool.
+///  - The person's own day binds, against the limits of the tier they're
+///    working under. Never a total the server shares: that made upgrading a
+///    *cut* for any server with a few people using the assistant.
 ///  - The global monthly token budget binds everyone (0 = uncapped).
 fn evaluate_quota(
-    tier: Tier,
     limits: &TierLimits,
     user: UsageRow,
-    guild: Option<UsageRow>,
     global: UsageRow,
     monthly_token_budget: u64,
 ) -> Result<(), QuotaDenied> {
@@ -318,31 +314,22 @@ fn evaluate_quota(
     }
     let req_limit = unlimited_to_max(limits.ai_requests);
     let tok_limit = unlimited_to_max(limits.ai_tokens);
-    match (tier, guild) {
-        (Tier::Free, _) | (_, None) => {
-            if user.requests >= req_limit || user.tokens >= tok_limit {
-                return Err(QuotaDenied::Daily {
-                    used: user.requests,
-                    limit: req_limit,
-                });
-            }
-        }
-        (_, Some(pool)) => {
-            if pool.requests >= req_limit || pool.tokens >= tok_limit {
-                return Err(QuotaDenied::Daily {
-                    used: pool.requests,
-                    limit: req_limit,
-                });
-            }
-            if limits.ai_member_requests > 0 && user.requests >= limits.ai_member_requests {
-                return Err(QuotaDenied::Member {
-                    used: user.requests,
-                    limit: limits.ai_member_requests,
-                });
-            }
-        }
+    if user.requests >= req_limit || user.tokens >= tok_limit {
+        return Err(QuotaDenied::Daily {
+            used: user.requests,
+            limit: req_limit,
+        });
     }
     Ok(())
+}
+
+/// What a spent allowance says: whose it is, and the next step up where one exists.
+fn quota_message(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Free => "Your free daily AI allowance is used up. It resets at midnight UTC, or upgrade the server for more per person.",
+        Tier::Plus => "You've used your daily AI allowance on Plus. It resets at midnight UTC, or upgrade the server to Pro for more.",
+        Tier::Pro => "You've used your daily AI allowance on Pro. It resets at midnight UTC.",
+    }
 }
 
 // ── SSE usage scanning ──────────────────────────────────────────────────────
@@ -501,34 +488,22 @@ pub async fn ai_chat(
     let day = utc_day(now);
     let month = utc_month(now);
     let resets_at = next_utc_midnight(now);
-    let (user_row, guild_row, global_row) = {
+    let (user_row, global_row) = {
         let store = Arc::clone(&ai.store);
         let uid = uid.clone();
-        let guild = guild.clone();
         let day_key = day.clone();
         let month_key = month.clone();
         tokio::task::spawn_blocking(move || -> Result<_, String> {
             let user = store.read(&format!("u:{uid}"), &day_key)?;
-            let guild = match &guild {
-                Some(g) => Some(store.read(&format!("g:{g}"), &day_key)?),
-                None => None,
-            };
             let global = store.read("global", &month_key)?;
-            Ok((user, guild, global))
+            Ok((user, global))
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(|e| AppError::Internal(format!("ai usage store: {e}")))?
     };
     let paid_guild = tier != Tier::Free && guild.is_some();
-    if let Err(denied) = evaluate_quota(
-        tier,
-        &limits,
-        user_row,
-        if paid_guild { guild_row } else { None },
-        global_row,
-        ai.monthly_token_budget,
-    ) {
+    if let Err(denied) = evaluate_quota(&limits, user_row, global_row, ai.monthly_token_budget) {
         return Ok(match denied {
             QuotaDenied::Budget => kinded_error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -539,17 +514,7 @@ pub async fn ai_chat(
             QuotaDenied::Daily { used, limit } => kinded_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "quota",
-                if paid_guild {
-                    "This server's daily AI allowance is used up. It resets at midnight UTC."
-                } else {
-                    "Your free daily AI allowance is used up. It resets at midnight UTC — or upgrade the server for a bigger shared pool."
-                },
-                json!({ "resets_at": resets_at, "used": used, "limit": limit, "tier": tier.as_str() }),
-            ),
-            QuotaDenied::Member { used, limit } => kinded_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "quota",
-                "You've hit your personal daily share of this server's AI pool. It resets at midnight UTC.",
+                quota_message(tier),
                 json!({ "resets_at": resets_at, "used": used, "limit": limit, "tier": tier.as_str() }),
             ),
         });
@@ -605,14 +570,9 @@ pub async fn ai_chat(
     let used_model = response.1;
     let upstream = response.0;
 
-    // Remaining-today hint for the FE meter (binding scope, counting this
-    // request). Best-effort — the authoritative number is `/api/ai/usage`.
-    let binding = if paid_guild {
-        guild_row.unwrap_or_default()
-    } else {
-        user_row
-    };
-    let remaining = (unlimited_to_max(limits.ai_requests) - binding.requests - 1).max(0);
+    // Remaining-today hint for the FE meter (counting this request).
+    // Best-effort — the authoritative number is `/api/ai/usage`.
+    let remaining = (unlimited_to_max(limits.ai_requests) - user_row.requests - 1).max(0);
 
     // ── Relay the stream; account for it when it ends ───────────────────
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
@@ -645,13 +605,10 @@ pub async fn ai_chat(
         let (tokens_in, tokens_out) = scan
             .usage
             .unwrap_or((estimated_in, estimate_tokens(scan.out_chars)));
-        let mut entries = vec![
+        let entries = vec![
             (format!("u:{uid}"), day.clone()),
             ("global".to_string(), month.clone()),
         ];
-        if let Some(g) = &guild {
-            entries.push((format!("g:{g}"), day.clone()));
-        }
         let record =
             tokio::task::spawn_blocking(move || store.record(&entries, tokens_in, tokens_out))
                 .await;
@@ -978,9 +935,8 @@ pub struct UsageQuery {
 }
 
 /// `GET /api/ai/usage?guild_id=…` — the signed-in user's remaining built-in AI
-/// allowance, for the panel meter. With a paid `guild_id` the binding scope is
-/// the server pool (plus the member ceiling); otherwise the user's free
-/// allowance. `null` limits mean unlimited.
+/// allowance, for the panel meter. Always the person's own day; a paid
+/// `guild_id` only raises the limits. `null` limits mean unlimited.
 pub async fn ai_usage_summary(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -1007,42 +963,24 @@ pub async fn ai_usage_summary(
         None => Tier::Free,
     };
     let limits = st.entitlements.limits_for(tier);
-    let paid_guild = tier != Tier::Free && guild.is_some();
-
     let now = unix_now();
     let day = utc_day(now);
-    let (user_row, guild_row) = {
+    let user_row = {
         let store = Arc::clone(&ai.store);
-        let uid = uid.clone();
-        let guild = guild.clone();
-        let day_key = day.clone();
-        tokio::task::spawn_blocking(move || -> Result<_, String> {
-            let user = store.read(&format!("u:{uid}"), &day_key)?;
-            let guild = match &guild {
-                Some(g) => Some(store.read(&format!("g:{g}"), &day_key)?),
-                None => None,
-            };
-            Ok((user, guild))
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(|e| AppError::Internal(format!("ai usage store: {e}")))?
+        tokio::task::spawn_blocking(move || store.read(&format!("u:{uid}"), &day))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .map_err(|e| AppError::Internal(format!("ai usage store: {e}")))?
     };
 
-    let binding = if paid_guild {
-        guild_row.unwrap_or_default()
-    } else {
-        user_row
-    };
     let body = json!({
         "tier": tier.as_str(),
-        "scope": if paid_guild { "guild" } else { "user" },
-        "requests_used": binding.requests,
+        // Older clients label the meter from this; nothing is server-scoped now.
+        "scope": "user",
+        "requests_used": user_row.requests,
         "requests_limit": lim_json(limits.ai_requests),
-        "tokens_used": binding.tokens,
+        "tokens_used": user_row.tokens,
         "tokens_limit": lim_json(limits.ai_tokens),
-        "member_requests_used": if paid_guild { json!(user_row.requests) } else { Value::Null },
-        "member_requests_limit": if paid_guild { lim_json(limits.ai_member_requests) } else { Value::Null },
         "resets_at": next_utc_midnight(now),
     });
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response())
@@ -1061,7 +999,7 @@ fn lim_json(n: i64) -> Value {
 mod tests {
     use super::*;
 
-    fn limits(requests: i64, tokens: i64, member: i64) -> TierLimits {
+    fn limits(requests: i64, tokens: i64) -> TierLimits {
         TierLimits {
             schedules: 0,
             permanent: 0,
@@ -1071,7 +1009,6 @@ mod tests {
             library_posted: 0,
             ai_requests: requests,
             ai_tokens: tokens,
-            ai_member_requests: member,
         }
     }
 
@@ -1080,11 +1017,11 @@ mod tests {
     }
 
     #[test]
-    fn free_tier_binds_on_the_user_row() {
-        let l = limits(30, 150_000, 0);
-        assert!(evaluate_quota(Tier::Free, &l, row(29, 0), None, row(0, 0), 0).is_ok());
+    fn the_persons_own_day_binds_requests_and_tokens() {
+        let l = limits(30, 150_000);
+        assert!(evaluate_quota(&l, row(29, 0), row(0, 0), 0).is_ok());
         assert_eq!(
-            evaluate_quota(Tier::Free, &l, row(30, 0), None, row(0, 0), 0),
+            evaluate_quota(&l, row(30, 0), row(0, 0), 0),
             Err(QuotaDenied::Daily {
                 used: 30,
                 limit: 30
@@ -1092,63 +1029,31 @@ mod tests {
         );
         // The token budget binds independently of the request count.
         assert!(matches!(
-            evaluate_quota(Tier::Free, &l, row(3, 150_000), None, row(0, 0), 0),
+            evaluate_quota(&l, row(3, 150_000), row(0, 0), 0),
             Err(QuotaDenied::Daily { .. })
         ));
     }
 
     #[test]
-    fn paid_tier_binds_on_the_pool_and_the_member_ceiling() {
-        let l = limits(400, 2_000_000, 150);
-        // Pool has room, member under ceiling → allowed.
-        assert!(
-            evaluate_quota(Tier::Plus, &l, row(10, 0), Some(row(200, 0)), row(0, 0), 0).is_ok()
-        );
-        // Pool spent → denied regardless of the member's own count.
-        assert!(matches!(
-            evaluate_quota(Tier::Plus, &l, row(0, 0), Some(row(400, 0)), row(0, 0), 0),
-            Err(QuotaDenied::Daily { .. })
-        ));
-        // Member ceiling inside a roomy pool.
-        assert_eq!(
-            evaluate_quota(Tier::Plus, &l, row(150, 0), Some(row(200, 0)), row(0, 0), 0),
-            Err(QuotaDenied::Member {
-                used: 150,
-                limit: 150
-            })
-        );
-        // A paid tier with no guild scope falls back to the user row.
-        assert!(matches!(
-            evaluate_quota(Tier::Pro, &l, row(400, 0), None, row(0, 0), 0),
-            Err(QuotaDenied::Daily { .. })
-        ));
+    fn a_spent_allowance_never_speaks_of_a_shared_pool() {
+        for tier in [Tier::Free, Tier::Plus, Tier::Pro] {
+            let text = quota_message(tier);
+            assert!(text.contains("midnight UTC"), "{text}");
+            assert!(!text.contains("pool"), "{text}");
+            assert_eq!(text.contains("upgrade"), tier != Tier::Pro, "{text}");
+        }
     }
 
     #[test]
     fn zero_limits_mean_unlimited_and_budget_binds_everyone() {
-        let l = limits(0, 0, 0);
-        assert!(evaluate_quota(Tier::Free, &l, row(9_999, 9_999_999), None, row(0, 0), 0).is_ok());
+        let l = limits(0, 0);
+        assert!(evaluate_quota(&l, row(9_999, 9_999_999), row(0, 0), 0).is_ok());
         assert_eq!(
-            evaluate_quota(
-                Tier::Pro,
-                &l,
-                row(0, 0),
-                Some(row(0, 0)),
-                row(0, 20_000_000),
-                20_000_000
-            ),
+            evaluate_quota(&l, row(0, 0), row(0, 20_000_000), 20_000_000),
             Err(QuotaDenied::Budget)
         );
         // Budget 0 = uncapped.
-        assert!(evaluate_quota(
-            Tier::Pro,
-            &l,
-            row(0, 0),
-            Some(row(0, 0)),
-            row(0, i64::MAX / 2),
-            0
-        )
-        .is_ok());
+        assert!(evaluate_quota(&l, row(0, 0), row(0, i64::MAX / 2), 0).is_ok());
     }
 
     #[test]

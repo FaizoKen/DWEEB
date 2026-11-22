@@ -2401,9 +2401,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   limit numbers against `LIMITS` drift, and `build_system`/`buildSystemPrompt` must stay
   byte-identical). Guards, outermost in: route-local per-IP limiter → sign-in (cookie;
   needs an `/api/activity/*` bearer twin before the assistant ever ships in the Activity) →
-  per-user pacing bucket + one-in-flight → daily quotas (Free = per-user
-  `PLAN_FREE_AI_REQUESTS/_TOKENS`; Plus/Pro = per-server pool + per-member ceiling,
-  resolved via `authorize_member_session` + entitlement) → concurrency semaphore
+  per-user pacing bucket + one-in-flight → daily quotas (**per person on every tier,
+  never a pool**, 2026-11-22: a Plus pool of 20 gave three people less than Free's 8 each. Free =
+  `PLAN_FREE_AI_REQUESTS`, Plus/Pro = `PLAN_*_AI_MEMBER_REQUESTS` (the name outlived the pool),
+  resolved via `authorize_member_session` (managers only, which bounds a paid server's cost) +
+  entitlement; `keep_ai_rising` raises each tier to at least the one below) → concurrency semaphore
   (`AI_CONCURRENCY`, plus `AI_RESERVED_CONCURRENCY` permits only paid servers may spill
   into) → `AI_MONTHLY_TOKEN_BUDGET`, the monthly global token ceiling that makes the
   feature's worst-case cost the number in the env file (distinct 503, FE steers to BYOK).

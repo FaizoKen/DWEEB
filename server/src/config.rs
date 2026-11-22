@@ -32,16 +32,32 @@ pub struct TierLimits {
     /// Posted-message history window (per server): the library keeps the last
     /// N posted messages, auto-recorded and auto-evicted oldest-first.
     pub library_posted: i64,
-    /// Built-in AI requests per UTC day. On Free this is a **per-user**
-    /// allowance; on Plus/Pro it's the server's **pooled** allowance.
+    /// Built-in AI requests per UTC day, **per person** on every tier.
     pub ai_requests: i64,
     /// Built-in AI tokens (input + output) per UTC day, same scoping as
     /// `ai_requests` — the cost-side bound the request count alone can't give.
     pub ai_tokens: i64,
-    /// Per-member daily request ceiling inside a paid server's pool, so one
-    /// member can't drain a community's allowance. Unused on Free (the whole
-    /// allowance is already per-user there).
-    pub ai_member_requests: i64,
+}
+
+/// A paid tier's AI requests per person. The `_MEMBER_` variable is the name
+/// from when paid servers shared a pool, where it already was each person's
+/// share; an explicit 0 there meant "only the pool binds", so it reads the
+/// pool's number rather than turning into unlimited.
+fn paid_ai_requests(member: i64, pool: i64) -> i64 {
+    if member > 0 {
+        member
+    } else {
+        pool
+    }
+}
+
+/// `limit`, never under `floor` (0 = unlimited, for both).
+fn at_least(limit: i64, floor: i64) -> i64 {
+    if limit <= 0 || floor <= 0 {
+        0
+    } else {
+        limit.max(floor)
+    }
 }
 
 /// The Free / Plus / Pro quota table read by `entitlement.rs`.
@@ -557,7 +573,7 @@ impl Config {
                 coeditors: parse_or("PLAN_FREE_COEDITORS", 2)?,
                 library: parse_or("PLAN_FREE_LIBRARY", 10)?,
                 library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10)?,
-                // Free AI is per USER per day (paid tiers pool per server).
+                // AI is per PERSON per day on every tier.
                 // Sized for PROFITABILITY, not generosity: on gpt-oss-120b a
                 // request costs ~$0.002 worst case, i.e. ~$0.06/month for every
                 // request-per-day granted. Free earns no revenue at all, so its
@@ -566,7 +582,6 @@ impl Config {
                 // token cap is the backstop against huge-context abuse.
                 ai_requests: parse_or("PLAN_FREE_AI_REQUESTS", 8)?,
                 ai_tokens: parse_or("PLAN_FREE_AI_TOKENS", 60_000)?,
-                ai_member_requests: parse_or("PLAN_FREE_AI_MEMBER_REQUESTS", 0)?,
             },
             plus: TierLimits {
                 schedules: parse_or("PLAN_PLUS_SCHEDULES", 30)?,
@@ -575,10 +590,14 @@ impl Config {
                 coeditors: parse_or("PLAN_PLUS_COEDITORS", 6)?,
                 library: parse_or("PLAN_PLUS_LIBRARY", 100)?,
                 library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100)?,
-                // ~$1.20/month worst case against ~$4.55 net revenue (~26%).
-                ai_requests: parse_or("PLAN_PLUS_AI_REQUESTS", 20)?,
+                // Per person who can load the server (its managers, under
+                // REQUIRE_MANAGE_GUILD): ~$0.60/month each at list price if
+                // maxed every day.
+                ai_requests: paid_ai_requests(
+                    parse_or("PLAN_PLUS_AI_MEMBER_REQUESTS", 10)?,
+                    parse_or("PLAN_PLUS_AI_REQUESTS", 10)?,
+                ),
                 ai_tokens: parse_or("PLAN_PLUS_AI_TOKENS", 150_000)?,
-                ai_member_requests: parse_or("PLAN_PLUS_AI_MEMBER_REQUESTS", 10)?,
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
@@ -589,16 +608,17 @@ impl Config {
                 library: parse_or("PLAN_PRO_LIBRARY", 0)?,
                 library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0)?,
                 // Deliberately NOT unlimited: AI spends real provider money per
-                // request, so even Pro keeps a bounded daily allowance — sized
-                // so a server that maxes it EVERY day still costs a fraction of
-                // its subscription (~$2.40/month against ~$9.41 net, ~25%).
-                // Raising these is a direct, linear increase in provider spend:
-                // budget roughly $0.06/month per request-per-day granted.
-                ai_requests: parse_or("PLAN_PRO_AI_REQUESTS", 40)?,
+                // request, so even Pro keeps a bounded daily allowance per
+                // person (~$1.20/month each at list price if maxed every day).
+                // `AI_MONTHLY_TOKEN_BUDGET` bounds the total.
+                ai_requests: paid_ai_requests(
+                    parse_or("PLAN_PRO_AI_MEMBER_REQUESTS", 20)?,
+                    parse_or("PLAN_PRO_AI_REQUESTS", 20)?,
+                ),
                 ai_tokens: parse_or("PLAN_PRO_AI_TOKENS", 300_000)?,
-                ai_member_requests: parse_or("PLAN_PRO_AI_MEMBER_REQUESTS", 20)?,
             },
-        };
+        }
+        .keep_ai_rising();
 
         let groq_api_key = opt_env("GROQ_API_KEY");
         let ai_base_url =
@@ -967,12 +987,72 @@ fn valid_feedback_webhook_url(value: &str) -> bool {
             && token.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')))
 }
 
+impl PlanLimits {
+    /// Plans only ever raise a quota, whatever the env says: each tier's AI
+    /// allowance is at least the one below it.
+    fn keep_ai_rising(mut self) -> Self {
+        self.plus.ai_requests = at_least(self.plus.ai_requests, self.free.ai_requests);
+        self.plus.ai_tokens = at_least(self.plus.ai_tokens, self.free.ai_tokens);
+        self.pro.ai_requests = at_least(self.pro.ai_requests, self.plus.ai_requests);
+        self.pro.ai_tokens = at_least(self.pro.ai_tokens, self.plus.ai_tokens);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        bool_value, check_durable_store_paths, is_durable_path, normalize, origin_of, parse_value,
-        price_slots_value, valid_feedback_webhook_url, DurableStores,
+        bool_value, check_durable_store_paths, is_durable_path, normalize, origin_of,
+        paid_ai_requests, parse_value, price_slots_value, valid_feedback_webhook_url,
+        DurableStores, PlanLimits, TierLimits,
     };
+
+    fn ai(requests: i64, tokens: i64) -> TierLimits {
+        TierLimits {
+            schedules: 0,
+            permanent: 0,
+            custom_bots: 0,
+            coeditors: 0,
+            library: 0,
+            library_posted: 0,
+            ai_requests: requests,
+            ai_tokens: tokens,
+        }
+    }
+
+    #[test]
+    fn upgrading_can_never_lower_the_ai_allowance() {
+        let options = [0, 1, 8, 10, 20, 40];
+        let as_max = |n: i64| if n <= 0 { i64::MAX } else { n };
+        for free in options {
+            for plus in options {
+                for pro in options {
+                    let kept = PlanLimits {
+                        free: ai(free, free * 1_000),
+                        plus: ai(plus, plus * 1_000),
+                        pro: ai(pro, pro * 1_000),
+                    }
+                    .keep_ai_rising();
+                    let requests = |t: &TierLimits| as_max(t.ai_requests);
+                    let tokens = |t: &TierLimits| as_max(t.ai_tokens);
+                    assert_eq!(kept.free.ai_requests, free, "Free is never touched");
+                    assert!(requests(&kept.plus) >= requests(&kept.free));
+                    assert!(requests(&kept.pro) >= requests(&kept.plus));
+                    assert!(requests(&kept.plus) >= as_max(plus), "only ever raised");
+                    assert!(requests(&kept.pro) >= as_max(pro), "only ever raised");
+                    assert!(tokens(&kept.plus) >= tokens(&kept.free));
+                    assert!(tokens(&kept.pro) >= tokens(&kept.plus));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_member_share_is_each_persons_allowance() {
+        assert_eq!(paid_ai_requests(10, 20), 10);
+        // "No ceiling inside the pool" was never "unlimited".
+        assert_eq!(paid_ai_requests(0, 20), 20);
+    }
 
     #[test]
     fn a_malformed_price_slots_map_is_a_boot_error_not_an_empty_map() {
