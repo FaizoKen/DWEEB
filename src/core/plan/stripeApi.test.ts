@@ -148,3 +148,51 @@ describe("getStripe", () => {
     expect(loadStripeMock).toHaveBeenCalledWith("pk_test_dweeb");
   });
 });
+
+describe("plan changes and the portal", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hands over the proxy's plan-change link instead of a checkout", async () => {
+    const { createCheckout } = await freshApi();
+    fetchMock.mockResolvedValue(
+      jsonResponse(409, { error: "You already pay", portal_url: "https://billing.example/x" }),
+    );
+    await expect(createCheckout("pro", "month", RAW.guild_id)).resolves.toEqual({
+      ok: false,
+      error: "You already pay",
+      portalUrl: "https://billing.example/x",
+    });
+  });
+
+  it("reports a plain refusal with no link to follow", async () => {
+    const { createCheckout } = await freshApi();
+    fetchMock.mockResolvedValue(jsonResponse(409, { error: "Overdue" }));
+    await expect(createCheckout("plus", "month", RAW.guild_id)).resolves.toEqual({
+      ok: false,
+      error: "Overdue",
+    });
+  });
+
+  it("names the subscription whose billing account to open, when given one", async () => {
+    const { openBillingPortal } = await freshApi();
+    fetchMock.mockImplementation(async () => jsonResponse(200, { url: "https://billing.example" }));
+    await openBillingPortal();
+    expect(fetchMock.mock.lastCall?.[1].body).toBeUndefined();
+    await openBillingPortal("sub_2");
+    expect(JSON.parse(fetchMock.mock.lastCall?.[1].body)).toEqual({ subscription_id: "sub_2" });
+  });
+
+  it("carries each subscription's billing account", async () => {
+    const { fetchMySubscriptions } = await freshApi();
+    fetchMock.mockResolvedValue(jsonResponse(200, { items: [{ ...RAW, billing_account: 1 }] }));
+    const result = await fetchMySubscriptions();
+    expect(result.ok && result.subscriptions[0]?.billingAccount).toBe(1);
+  });
+});

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => ({ ads: false, checkout: true, activity: false }));
 const fetchGuildPlan = vi.fn();
+const fetchMySubscriptions = vi.fn();
 
 vi.mock("@/core/ads/config", () => ({ adsConfigured: () => env.ads }));
 vi.mock("./stripeConfig", () => ({ isCheckoutConfigured: () => env.checkout }));
@@ -11,6 +12,7 @@ vi.mock("@/core/guild/api", () => ({
   isAuthError: () => false,
 }));
 vi.mock("@/core/guild/config", () => ({ isProxyConfigured: () => true }));
+vi.mock("./stripeApi", () => ({ fetchMySubscriptions: () => fetchMySubscriptions() }));
 
 const offer = await import("./sendOffer");
 const { usePlanStore } = await import("./planStore");
@@ -25,6 +27,7 @@ let data: Map<string, string>;
 beforeEach(() => {
   Object.assign(env, { ads: false, checkout: true, activity: false });
   fetchGuildPlan.mockReset();
+  fetchMySubscriptions.mockReset().mockResolvedValue({ ok: true, subscriptions: [] });
   usePlanStore.setState({ guildId: null, plan: null, status: "idle" });
   data = new Map();
   vi.stubGlobal("localStorage", {
@@ -143,6 +146,28 @@ describe("canOfferPlus", () => {
       fetchGuildPlan.mockResolvedValue({ ...plan, limits: LIMITS });
       expect(await offer.canOfferPlus(GUILD)).toBe(false);
     }
+  });
+
+  it("never sells to someone whose own plan could cover it", async () => {
+    fetchGuildPlan.mockResolvedValue({ tier: "free", limits: LIMITS, billing: true });
+    for (const own of [
+      { guildId: GUILD, tier: "plus", status: "past_due" },
+      { guildId: null, tier: "pro", status: "active" },
+    ]) {
+      fetchMySubscriptions.mockResolvedValue({ ok: true, subscriptions: [own] });
+      expect(await offer.canOfferPlus(GUILD)).toBe(false);
+    }
+    const elsewhere = { guildId: "222222222222222222", tier: "plus", status: "active" };
+    fetchMySubscriptions.mockResolvedValue({ ok: true, subscriptions: [elsewhere] });
+    expect(await offer.canOfferPlus(GUILD)).toBe(true);
+  });
+
+  it("offers nothing when their plans can't be read", async () => {
+    fetchGuildPlan.mockResolvedValue({ tier: "free", limits: LIMITS, billing: true });
+    fetchMySubscriptions.mockResolvedValue({ ok: false, error: "offline" });
+    expect(await offer.canOfferPlus(GUILD)).toBe(false);
+    fetchMySubscriptions.mockRejectedValue(new Error("chunk"));
+    expect(await offer.canOfferPlus(GUILD)).toBe(false);
   });
 
   it("treats every doubt as no", async () => {

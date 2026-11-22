@@ -21,6 +21,7 @@
 
 import { loadStripe } from "@stripe/stripe-js/pure";
 import type { Stripe } from "@stripe/stripe-js";
+import type { PlanTier } from "@/core/guild/api";
 import { PROXY_BASE_URL } from "@/core/guild/config";
 import { STRIPE_PUBLISHABLE_KEY } from "./stripeConfig";
 
@@ -52,7 +53,13 @@ export type BillingInterval = "month" | "year";
 
 export type CheckoutResult =
   | { ok: true; clientSecret: string; noCardNeeded: boolean }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** They already pay for this server: Stripe's page to confirm changing
+       *  that subscription, in place of a second one. */
+      portalUrl?: string;
+    };
 
 /** `POST /api/stripe/checkout` `{ tier, interval, guild_id, promotion_code? }` →
  *  the embedded Checkout client secret. The subscription is bound to `guildId`
@@ -91,10 +98,14 @@ export async function createCheckout(
   const data = (await res.json().catch(() => null)) as {
     client_secret?: string;
     no_card_needed?: boolean;
+    portal_url?: string;
     error?: string;
   } | null;
   if (!res.ok || !data?.client_secret) {
-    return { ok: false, error: data?.error ?? `Couldn't start checkout (${res.status}).` };
+    const error = data?.error ?? `Couldn't start checkout (${res.status}).`;
+    return res.status === 409 && data?.portal_url
+      ? { ok: false, error, portalUrl: data.portal_url }
+      : { ok: false, error };
   }
   return {
     ok: true,
@@ -130,9 +141,13 @@ export interface PremiumSubscription {
   id: string;
   /** The server this subscription is bound to (null only for an unbound legacy sub). */
   guildId: string | null;
-  tier: PaidTier;
-  /** Stripe status — `active` | `trialing` | `past_due`. */
+  /** `free` for a RoleLogic plan below Plus, which grants nothing here. */
+  tier: PlanTier;
+  /** Stripe status — `active` | `trialing` | `past_due` | `unpaid` | `paused`. */
   status: string;
+  /** Which of the user's Stripe billing accounts it's on (an ordinal). Absent
+   *  from a proxy that predates the field. */
+  billingAccount?: number;
   /** Unix seconds when the current period ends. */
   currentPeriodEnd: number;
   /** True when it's set to end at the period boundary rather than renew. */
@@ -146,8 +161,9 @@ export interface PremiumSubscription {
 interface RawSubscription {
   id: string;
   guild_id: string | null;
-  tier: PaidTier;
+  tier: PlanTier;
   status: string;
+  billing_account?: number;
   current_period_end: number;
   cancel_at_period_end: boolean;
   movable_at: number | null;
@@ -195,6 +211,7 @@ export async function fetchMySubscriptions(): Promise<SubscriptionsResult> {
     currentPeriodEnd: s.current_period_end,
     cancelAtPeriodEnd: s.cancel_at_period_end,
     movableAt: s.movable_at ?? null,
+    billingAccount: s.billing_account,
   }));
   return { ok: true, subscriptions };
 }
@@ -226,13 +243,20 @@ export async function reassignSubscription(
 
 export type PortalResult = { ok: true; url: string } | { ok: false; error: string };
 
-/** `POST /api/stripe/portal` → a Stripe billing-portal URL (redirect to it). */
-export async function openBillingPortal(): Promise<PortalResult> {
+/** `POST /api/stripe/portal` → a Stripe billing-portal URL (redirect to it).
+ *  `subscriptionId` opens the billing account that subscription is on. */
+export async function openBillingPortal(subscriptionId?: string): Promise<PortalResult> {
   let res: Response;
   try {
     res = await fetch(`${PROXY_BASE_URL}/api/stripe/portal`, {
       method: "POST",
       credentials: "include",
+      ...(subscriptionId
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subscription_id: subscriptionId }),
+          }
+        : {}),
     });
   } catch {
     return { ok: false, error: "Couldn't reach the billing service." };

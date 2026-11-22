@@ -39,6 +39,7 @@ import {
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
 import { LIST_PRICES, ROLELOGIC_PLAN, ROLELOGIC_URL } from "@/core/plan/prices";
+import { ownPlanState, paidSubsHere } from "@/core/plan/ownSubscription";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
 import {
@@ -238,11 +239,17 @@ export function PricingModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [billing]);
 
+  // What their own subscriptions make of an Upgrade here. The proxy decides
+  // each click from fresh Stripe data; this only keeps the cards honest.
+  const ownPlan = ownPlanState(subs ?? [], guildId, currentTier);
+  const ownHere = paidSubsHere(subs ?? [], guildId);
+
   /** Whether this tier is an upgrade the buyer can purchase from here — the same
    *  test behind a card's Upgrade button and behind its campaign pricing, so the
    *  two can't drift apart. */
+  const blocked = ownPlan === "overdue" || ownPlan === "renew";
   const buyable = (id: PlanTier): boolean =>
-    canUpgradeHere && id !== "free" && RANK[currentTier ?? "free"] < RANK[id];
+    canUpgradeHere && !blocked && id !== "free" && RANK[currentTier ?? "free"] < RANK[id];
 
   // The running campaign priced per card, for the tiers it covers that this
   // buyer can actually act on. A "50% off" flash over a tier they already hold
@@ -252,7 +259,8 @@ export function PricingModal() {
   // buyer, and printing a code they don't have to type only invites typing it.
   const promoByTier = new Map<PlanTier, PromoPricing>();
   for (const t of TIERS) {
-    if (!buyable(t.id)) continue;
+    // A campaign prices a new subscription, never a change to an existing one.
+    if (!buyable(t.id) || ownPlan === "change") continue;
     const campaign = promoFor(t.id as PaidTier, period);
     if (campaign) promoByTier.set(t.id, promoPricing(t, period, campaign));
   }
@@ -273,6 +281,14 @@ export function PricingModal() {
     const res = await createCheckout(tier, period, guildId, code);
     if (!res.ok) {
       setStarting(null);
+      if (res.portalUrl) {
+        window.location.href = res.portalUrl;
+        return;
+      }
+      // The proxy re-read Stripe to answer, so show what it found: a plan of
+      // theirs may now cover this server, or need paying.
+      void reloadPlan(guildId, true);
+      loadSubs();
       // With a *typed* code in play the failure is almost always about that
       // code, and it belongs beside the field that caused it — a toast over a
       // modal reads as unrelated. A campaign code the buyer never typed has no
@@ -330,9 +346,9 @@ export function PricingModal() {
     })();
   };
 
-  const manageBilling = async () => {
+  const manageBilling = async (subscriptionId?: string) => {
     setPortalBusy(true);
-    const res = await openBillingPortal();
+    const res = await openBillingPortal(subscriptionId);
     setPortalBusy(false);
     if (res.ok) window.location.href = res.url;
     else pushToast(res.error, "error");
@@ -483,7 +499,7 @@ export function PricingModal() {
   // Whether one of *my* subscriptions covers this server. If the server is
   // already on a paid tier but none of my subs is bound to it, another member is
   // paying — surfaced below so a second mod doesn't stack a redundant sub.
-  const iCoverThisServer = (subs ?? []).some((s) => s.guildId === guildId);
+  const iCoverThisServer = ownHere.length > 0;
   const coveredByOther =
     subs != null && !!guildId && currentTier != null && currentTier !== "free" && !iCoverThisServer;
   const loading = view === "loading";
@@ -511,7 +527,12 @@ export function PricingModal() {
             Close
           </Button>
           {canManage ? (
-            <Button variant="secondary" onClick={() => void manageBilling()} disabled={portalBusy}>
+            <Button
+              variant="secondary"
+              // This server's subscription: with two billing accounts, its own.
+              onClick={() => void manageBilling(ownHere[0]?.id)}
+              disabled={portalBusy}
+            >
               {portalBusy ? "Opening…" : "Manage billing"}
             </Button>
           ) : subsFailed ? (
@@ -605,6 +626,23 @@ export function PricingModal() {
         </p>
       ) : null}
 
+      {ownPlan === "overdue" ? (
+        <p className={styles.coveredNote}>
+          <strong>Your payment is overdue.</strong> Pay or cancel that plan in Manage billing.
+          Buying again would charge you twice.
+        </p>
+      ) : ownPlan === "renew" ? (
+        <p className={styles.coveredNote}>
+          <strong>Your plan here is set to end.</strong> Renew it in Manage billing to upgrade, so
+          the time you’ve paid for counts toward the new plan.
+        </p>
+      ) : ownPlan === "change" ? (
+        <p className={styles.coveredNote}>
+          Upgrading <strong>changes your current subscription</strong> instead of adding another.
+          Stripe credits your unused time and shows the exact charge before you confirm.
+        </p>
+      ) : null}
+
       <div className={styles.toggleRow}>
         <div className={styles.periodToggle} role="group" aria-label="Billing interval">
           <button
@@ -626,7 +664,7 @@ export function PricingModal() {
           </button>
         </div>
 
-        {canUpgradeHere ? (
+        {canUpgradeHere && !blocked ? (
           <label className={cn(styles.promoField, promoError && styles.promoFieldError)}>
             <span className={styles.promoLabel}>Promo</span>
             <input
@@ -652,7 +690,7 @@ export function PricingModal() {
         ) : null}
       </div>
 
-      {canUpgradeHere ? (
+      {blocked ? null : canUpgradeHere ? (
         promoError ? (
           <p className={styles.promoError} id="promo-error" role="alert">
             {promoError}
@@ -702,6 +740,8 @@ export function PricingModal() {
         <PremiumServers
           subs={subs!}
           guilds={guilds}
+          billingBusy={portalBusy}
+          onBilling={(id) => void manageBilling(id)}
           onChanged={() => {
             loadSubs();
             if (guildId) void reloadPlan(guildId, true);
@@ -852,12 +892,18 @@ function LimitFocusNote({ focus }: { focus: LimitFocus }) {
 function PremiumServers({
   subs,
   guilds,
+  billingBusy,
+  onBilling,
   onChanged,
 }: {
   subs: PremiumSubscription[];
   guilds: PickerGuild[];
+  billingBusy: boolean;
+  onBilling: (subscriptionId: string) => void;
   onChanged: () => void;
 }) {
+  // One portal shows one billing account, so with two each row needs its own.
+  const separateBilling = new Set(subs.map((s) => s.billingAccount)).size > 1;
   const [movingId, setMovingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -911,6 +957,16 @@ function PremiumServers({
               </span>
             </span>
             <span className={styles.serverTierBadge}>{tierName(s.tier)}</span>
+            {separateBilling ? (
+              <button
+                type="button"
+                className={styles.moveBtn}
+                disabled={billingBusy}
+                onClick={() => onBilling(s.id)}
+              >
+                Billing
+              </button>
+            ) : null}
             {movingId === s.id ? (
               <select
                 className={styles.moveSelect}
@@ -953,7 +1009,8 @@ function PremiumServers({
 
 /** A one-line status note for a subscription (payment / cancellation state). */
 function subMeta(s: PremiumSubscription): string {
-  if (s.status === "past_due") return "Payment overdue";
+  if (s.status === "past_due" || s.status === "unpaid") return "Payment overdue";
+  if (s.status === "paused") return "Paused";
   const when = s.currentPeriodEnd ? new Date(s.currentPeriodEnd * 1000).toLocaleDateString() : null;
   if (s.cancelAtPeriodEnd) return when ? `Cancels ${when}` : "Cancels at period end";
   if (s.status === "trialing") return when ? `Trial until ${when}` : "Trialing";

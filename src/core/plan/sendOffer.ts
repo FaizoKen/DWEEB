@@ -5,9 +5,10 @@
  * third-party ad (`core/ads`), so the two can never share a receipt. It loads
  * nothing from anyone else, so the rules here are about not nagging:
  *
- * - **Only to someone who can take it.** Signed in, and the destination server
- *   is confirmed Free with checkout available. Anything unknown (no server, a
- *   failed lookup) shows nothing: a paying server must never be sold to.
+ * - **Only to someone who can take it.** Signed in, the destination server is
+ *   confirmed Free with checkout available, and they hold no plan (paid or
+ *   overdue) that could cover it. Anything unknown (no server, a failed lookup)
+ *   shows nothing: a paying server or person must never be sold to.
  * - **Never in the Discord Activity**, which can't run checkout.
  * - **Never a first impression.** The first successful send stays clean.
  * - **Once a day at most, and "Not now" buys a month of quiet.**
@@ -17,6 +18,7 @@
 import { isActivityMode } from "@/core/activity/runtime";
 import { adsConfigured } from "@/core/ads/config";
 import { fetchGuildPlan, type PlanInfo } from "@/core/guild/api";
+import { holdsPlanFor } from "./ownSubscription";
 import { usePlanStore } from "./planStore";
 import { LIST_PRICES } from "./prices";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "./promo";
@@ -133,8 +135,8 @@ export function takeSendOfferTicket(signedIn: boolean, now: number = Date.now())
   });
 }
 
-/** Whether the destination is confirmed Free and can be upgraded here. Every
- *  doubt is a no. Never rejects. */
+/** Whether the destination is confirmed Free, can be upgraded here, and isn't
+ *  already covered by what they pay or owe. Every doubt is a no. Never rejects. */
 export async function canOfferPlus(guildId: string | undefined): Promise<boolean> {
   const id = guildId?.trim();
   if (!id) return false;
@@ -147,7 +149,15 @@ export async function canOfferPlus(guildId: string | undefined): Promise<boolean
       return false;
     }
   }
-  return plan?.tier === "free" && plan.billing === true;
+  if (plan?.tier !== "free" || plan.billing !== true) return false;
+  try {
+    // On demand: `stripeApi` stays out of eagerly loaded graphs.
+    const { fetchMySubscriptions } = await import("./stripeApi");
+    const owned = await fetchMySubscriptions();
+    return owned.ok && !holdsPlanFor(owned.subscriptions, id);
+  } catch {
+    return false;
+  }
 }
 
 /** Plus's monthly price as the offer prints it. A first-payment discount names
