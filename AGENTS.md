@@ -2076,6 +2076,28 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   589,881 raw / 181,086 gzip to 588,538 / 180,872 with the prompts in. Never put an upgrade
   prompt inside a posted message, a plugin reply, the editor canvas, or the static SEO pages
   (their visitors have no server to upgrade yet).
+- **The send receipt's one slot is DWEEB's own Plus offer unless a build shows ads**
+  (maintainer, 2026-11-22, after AdSense's third rejection: at ~1,250 ad chances a month no
+  display network was worth more than one subscription). `core/plan/sendOffer.ts` +
+  `features/plan/SendOffer`, the sanctioned exception to "prompts live at limit moments". Rules:
+  (1) **one slot**: `sendOfferAvailable()` is false whenever `adsConfigured()`, so setting
+  `VITE_ADSENSE_SLOT` hands the slot back to the ad with no code change, and the offer only
+  shows in production once that variable is unset. (2) **Positive proof only**: signed in, the
+  destination's plan reads Free *and* `billing`; every doubt shows nothing (the opposite of
+  `adFree.ts`, where having nothing to ask with shows the ad). (3) Not on the first send, once a
+  day, 30 days' quiet after "Not now", and nothing when storage can't be written. (4) It loads
+  nothing third-party; `send_offer { result: shown|dismissed }` and
+  `pricing_opened { opened_from: send_offer }` measure it. (5) **Prices are before tax and say
+  so** (`core/plan/prices.ts`): live checkout charged $2.70 under a card reading $2.50 (8% SST),
+  and titles Plus "Medium", so the checkout view explains that name. (6) **Never promise the
+  RoleLogic bundle unconditionally**: RoleLogic's `upsertSubscription` skips a buyer with no
+  RoleLogic user row and has no backfill, so every mention says to sign in there *before* paying.
+  Drop that condition only after RoleLogic itself is fixed. (7) **It shows only if it fits
+  without moving the footer** (a layout effect measures before paint): at the dialog's height cap
+  a `below` strip squeezes the body and lifts Done from under the finger. The same test found
+  `.dialogTop`'s height cap losing to the phone rule's `max-height: 100%` since `ec1a260`, which
+  put the bottom of Send, Plans and checkout off-screen (586 px on a 568 px phone, live): keep
+  the `.dialog.dialogTop` rule inside that media query.
 - **DWEEB shows exactly one ad: under the send receipt, after the work is done — and never to
   a paid server** (maintainer, 2026-10-29: "put ads… less affected user experience… after send
   message"; "if user paid the ads is removed"). Google AdSense, `src/core/ads/` +
