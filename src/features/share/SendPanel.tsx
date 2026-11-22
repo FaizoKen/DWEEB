@@ -195,6 +195,8 @@ import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import { SendAd } from "@/features/ads/SendAd";
 import { takeSendAdTicket } from "@/core/ads/sendAd";
+import { SendOffer } from "@/features/plan/SendOffer";
+import { takeSendOfferTicket } from "@/core/plan/sendOffer";
 import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
@@ -249,6 +251,8 @@ interface SendSuccessInfo {
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
   /** This receipt may try to show an ad (`core/ads/sendAd.ts`). */
   adTicket: boolean;
+  /** This receipt may try DWEEB's own offer (`core/plan/sendOffer.ts`). */
+  offerTicket: boolean;
 }
 
 interface ScheduleRecovery {
@@ -1897,6 +1901,7 @@ export function SendPanel({
           messageId: postedMessageId,
           permanentStatus,
           adTicket: takeSendAdTicket(),
+          offerTicket: takeSendOfferTicket(authStatus === "authed"),
         });
         trackAnalytics("message_posted", { mode });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
@@ -3303,7 +3308,13 @@ export function SendPanel({
         editOnResend={success?.editOnResend ?? false}
         messageId={success?.messageId}
         permanentStatus={success?.permanentStatus}
-        ad={success?.adTicket ? <SendAd guildId={success.guildId} /> : undefined}
+        slot={
+          success?.adTicket ? (
+            <SendAd guildId={success.guildId} />
+          ) : success?.offerTicket ? (
+            <SendOffer guildId={success.guildId} />
+          ) : undefined
+        }
         onClose={(reason) => {
           setSuccess(null);
           // Armed as the receipt is dismissed, not as it opens: the prompt is a

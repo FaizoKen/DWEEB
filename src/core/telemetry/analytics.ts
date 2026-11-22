@@ -16,7 +16,8 @@ export type AnalyticsEvent =
   | "pricing_opened"
   | "checkout_started"
   | "checkout_completed"
-  | "ad_slot";
+  | "ad_slot"
+  | "send_offer";
 
 export type AnalyticsParams = Record<string, string | number | boolean>;
 
@@ -70,6 +71,9 @@ const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   // fill rate and the ad-blocked share can be read without anything about the
   // ad, the message or the server leaving the page.
   ad_slot: new Set(["result"]),
+  // DWEEB's own offer in that slot (`features/plan/SendOffer.tsx`): shown /
+  // dismissed. A click is `pricing_opened { opened_from: send_offer }`.
+  send_offer: new Set(["result"]),
 };
 
 /** Exposed for the test that keeps every allowlist clear of the reserved names. */

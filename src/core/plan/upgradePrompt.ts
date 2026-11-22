@@ -10,8 +10,9 @@
  *
  * A prompt is only ever shown where a limit is in reach, never as a banner: the
  * builder stays free-feeling for anyone who isn't bumping into a quota (see
- * `PlanBadge`'s rationale). The one exception to "a limit" is the send
- * receipt's ad, whose "Remove ads" sits beside the ad it removes.
+ * `PlanBadge`'s rationale). The exception to "a limit" is the send receipt's
+ * one slot: DWEEB's own Plus offer (`sendOffer.ts`), or, in a build that shows
+ * a third-party ad there instead, that ad's "Remove ads".
  */
 
 import type { PlanLimits } from "@/core/guild/api";
@@ -40,7 +41,9 @@ export type UpgradePrompt =
   /** The Activity's "see plans on web" hand-off, from its plan pill. */
   | "activity"
   /** "Remove ads" on the send receipt's ad — paid servers are ad-free. */
-  | "send_ad";
+  | "send_ad"
+  /** DWEEB's own Plus offer on the send receipt (`sendOffer.ts`). */
+  | "send_offer";
 
 /** The plan limit a prompt is about — the row the pricing modal points at. The
  *  general entries (the pill, the menu, the Activity hand-off) name none. */

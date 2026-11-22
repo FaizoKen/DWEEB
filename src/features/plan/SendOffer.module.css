@@ -1,0 +1,52 @@
+/* The receipt's offer, under the footer. A recessed surface keeps it apart from
+   the receipt's own controls, and its buttons stay quieter than Open in Discord. */
+.region {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+}
+
+.title,
+.text,
+.price {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.title {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.text,
+.price {
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+}
+
+.price {
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.link {
+  color: var(--app-accent-text);
+  text-decoration: underline;
+  border-radius: 3px;
+}
+.link:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}

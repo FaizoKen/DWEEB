@@ -16,6 +16,8 @@ describe("upgrade prompts", () => {
     expect(promptLimit("activity")).toBeNull();
     // Ads aren't a quota: the modal opens on its ad-free note instead.
     expect(promptLimit("send_ad")).toBeNull();
+    // The receipt's offer follows no limit either.
+    expect(promptLimit("send_offer")).toBeNull();
     expect(promptLimit(null)).toBeNull();
   });
 
