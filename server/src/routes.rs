@@ -2835,10 +2835,14 @@ mod tests {
         String::from_utf8_lossy(&buf).into_owned()
     }
 
-    /// An address nothing listens on: bound once for a free port, then let go.
-    fn refused_addr() -> std::net::SocketAddr {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap()
+    /// An address that refuses connections for as long as the socket is held:
+    /// bound, not listening. A port that was merely let go can be handed to a
+    /// parallel test's server, which then answers the dial.
+    fn refusing_socket() -> (tokio::net::TcpSocket, std::net::SocketAddr) {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = socket.local_addr().unwrap();
+        (socket, addr)
     }
 
     fn dispatcher_client() -> reqwest::Client {
@@ -2855,11 +2859,16 @@ mod tests {
     #[tokio::test]
     async fn a_dispatcher_restart_is_redialed_instead_of_failing() {
         use std::io::Write as _;
-        let addr = refused_addr();
+        let (socket, addr) = refusing_socket();
         let (tx, rx) = std::sync::mpsc::channel();
+        let runtime = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(600));
-            let l = std::net::TcpListener::bind(addr).unwrap();
+            let l = {
+                let _entered = runtime.enter();
+                socket.listen(16).unwrap().into_std().unwrap()
+            };
+            l.set_nonblocking(false).unwrap();
             let (mut sock, _) = l.accept().unwrap();
             tx.send(read_request(&mut sock)).unwrap();
             sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
@@ -2883,7 +2892,7 @@ mod tests {
     /// without repeating the address.
     #[tokio::test]
     async fn a_dispatcher_that_stays_down_fails_when_the_window_closes() {
-        let addr = refused_addr();
+        let (_socket, addr) = refusing_socket();
         let started = std::time::Instant::now();
         let req = dispatcher_client().get(format!("http://{addr}/permanent/1"));
         let e = send_redialing(req, Duration::from_millis(600), Duration::from_millis(100))

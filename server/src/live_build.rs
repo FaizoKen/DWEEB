@@ -536,10 +536,10 @@ mod tests {
         assert_eq!(LiveBuild::new(&not_found).unwrap().current().await, None);
 
         // Nothing listening at all.
-        let dead = {
-            let l = TcpListener::bind("127.0.0.1:0").unwrap();
-            format!("http://{}/", l.local_addr().unwrap())
-        };
+        // Held, not let go: a freed port can go to a parallel test's server.
+        let refusing = tokio::net::TcpSocket::new_v4().unwrap();
+        refusing.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let dead = format!("http://{}/", refusing.local_addr().unwrap());
         assert_eq!(LiveBuild::new(&dead).unwrap().current().await, None);
     }
 

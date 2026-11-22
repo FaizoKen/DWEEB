@@ -731,10 +731,10 @@ mod tests {
     #[tokio::test]
     async fn an_unreachable_post_never_records_the_webhook_token() {
         // Nothing listening: refused at the dial, like a network failure.
-        let refused = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap()
-        };
+        // Held, not let go: a freed port can go to a parallel test's server.
+        let refusing = tokio::net::TcpSocket::new_v4().unwrap();
+        refusing.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let refused = refusing.local_addr().unwrap();
         let e = reqwest::Client::new()
             .post(format!(
                 "http://{refused}/api/webhooks/123/SEKRIT-token?with_components=true&wait=true"
