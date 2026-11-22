@@ -327,6 +327,21 @@
   }
 }
 
+/* Above every embedded form: what Stripe's name for the plan means. */
+.billingNote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.billingNote strong {
+  color: var(--app-text);
+}
+.billingNote a {
+  color: var(--app-accent-text);
+  text-decoration: underline;
+}
+
 /* Shown above the embedded form when the applied code makes the plan free, so the
    missing card fields read as intended rather than as a broken form. */
 .noCardNote {

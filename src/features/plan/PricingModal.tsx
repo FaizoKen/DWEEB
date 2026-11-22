@@ -38,6 +38,7 @@ import {
 } from "@/core/plan/stripeApi";
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
+import { LIST_PRICES, ROLELOGIC_PLAN, ROLELOGIC_URL } from "@/core/plan/prices";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
 import {
@@ -66,8 +67,20 @@ interface TierDef {
 
 const TIERS: TierDef[] = [
   { id: "free", name: "Free", monthly: 0, yearly: 0, tagline: "Build & send" },
-  { id: "plus", name: "Plus", monthly: 5, yearly: 50, tagline: "Automate & persist" },
-  { id: "pro", name: "Pro", monthly: 10, yearly: 100, tagline: "Run a community" },
+  {
+    id: "plus",
+    name: "Plus",
+    monthly: LIST_PRICES.plus.month,
+    yearly: LIST_PRICES.plus.year,
+    tagline: "Automate & persist",
+  },
+  {
+    id: "pro",
+    name: "Pro",
+    monthly: LIST_PRICES.pro.month,
+    yearly: LIST_PRICES.pro.year,
+    tagline: "Run a community",
+  },
 ];
 
 /** Everything a card needs to advertise the running campaign. Computed once per
@@ -434,6 +447,17 @@ export function PricingModal() {
           </Button>
         }
       >
+        {/* Stripe's form prints the shared product's name, which reads as the
+            wrong plan unless it's explained before the buyer gets to it. */}
+        <p className={styles.billingNote}>
+          The form below calls DWEEB {tierName(checkout.tier)}{" "}
+          <strong>{ROLELOGIC_PLAN[checkout.tier]}</strong>, its name in RoleLogic. To use it there
+          too,{" "}
+          <a href={ROLELOGIC_URL} target="_blank" rel="noopener noreferrer">
+            sign in to RoleLogic
+          </a>{" "}
+          before you pay.
+        </p>
         {checkout.noCardNeeded ? (
           <p className={styles.noCardNote}>
             Your code covers this plan in full — <strong>no card details needed</strong>. Confirm
@@ -688,11 +712,12 @@ export function PricingModal() {
       <p className={styles.included}>{INCLUDED}</p>
       <p className={styles.downgradeNote}>{DOWNGRADE_NOTE}</p>
       <p className={styles.creatorNote}>
-        One subscription gives this server premium benefits across every Discord app built by{" "}
-        <a href="https://faizo.net" target="_blank" rel="noopener noreferrer">
-          Faizo
-        </a>
-        .
+        The same subscription works in{" "}
+        <a href={ROLELOGIC_URL} target="_blank" rel="noopener noreferrer">
+          RoleLogic
+        </a>{" "}
+        by Faizo, where Plus is {ROLELOGIC_PLAN.plus} and Pro is {ROLELOGIC_PLAN.pro}. Sign in there
+        before you buy.
       </p>
     </Modal>
   );
@@ -760,6 +785,8 @@ function PlanCard({
           headline it discounted — a first-payment price shown alone is a bait
           price, however clearly the fine print explains itself elsewhere. */}
       {promo?.thenNote ? <span className={styles.promoThen}>{promo.thenNote}</span> : null}
+      {/* Checkout adds tax on top: $2.50 here is $2.70 on the payment form. */}
+      {tier.id !== "free" ? <span className={styles.promoThen}>before tax</span> : null}
       <span className={styles.cardTagline}>{tier.tagline}</span>
 
       <div className={styles.cardCta}>
