@@ -714,7 +714,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Is the AI writer free?",
-        a: "Yes. The built-in DWEEB AI has a free daily allowance for everyone who signs in with Discord, and it resets at midnight UTC. Servers on Plus and Pro get bigger shared pools. If you use your own API key instead, those requests count against your account with that provider, not against DWEEB's allowance.",
+        a: "Yes. The built-in DWEEB AI has a free daily allowance for everyone who signs in with Discord, and it resets at midnight UTC. On a Plus or Pro server, each person who manages it gets a bigger allowance of their own. If you use your own API key instead, those requests count against your account with that provider, not against DWEEB's allowance.",
       },
       {
         q: "Do I need an API key?",
@@ -982,6 +982,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
  *  2026-10-22: Discord granted that intent, so the answer promises the
  *  conversation again.
  *  2026-10-23: the ticket bot can open private threads instead of channels. */
-export const FEATURES_LASTMOD = "2026-11-21";
+export const FEATURES_LASTMOD = "2026-11-22";
 
 export { ACCENT_BLURPLE };

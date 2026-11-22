@@ -27,6 +27,9 @@ import { usePlanStore } from "@/core/plan/planStore";
 import { AiSettingsForm } from "./AiSettingsForm";
 import styles from "./AiChatPanel.module.css";
 
+/** The meter's name: the allowance is the person's own, sized by the plan. */
+const AI_METER_LABEL = { free: "Free AI", plus: "Plus AI", pro: "Pro AI" } as const;
+
 const SUGGESTIONS = [
   "Build a welcome message in a blurple container with a title and a Join button.",
   "Add a row of link buttons to the docs and GitHub.",
@@ -262,7 +265,7 @@ export function AiChatPanel() {
                     usage.requests_used >= usage.requests_limit ? styles.usageLow : undefined
                   }
                 >
-                  {usage.scope === "guild" ? "Server AI pool" : "Free AI"} ·{" "}
+                  {AI_METER_LABEL[usage.tier]} ·{" "}
                   {Math.min(usage.requests_used, usage.requests_limit)}/{usage.requests_limit} today
                 </span>
                 {usage.tier !== "pro" &&

@@ -172,8 +172,8 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
           <div className={styles.builtInCard}>
             <span>
               <strong>DWEEB AI — ready out of the box.</strong> No API key to manage: DWEEB picks a
-              fast model and covers the usage. Free daily allowance for everyone, with bigger shared
-              pools on Plus and Pro servers.
+              fast model and covers the usage. Free daily allowance for everyone, and more per
+              person on Plus and Pro servers.
             </span>
             {authStatus === "anon" ? (
               <span>

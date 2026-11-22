@@ -45,13 +45,12 @@ export const QUOTA_ROWS: QuotaRow[] = [
   },
   { key: "custom_bots", label: "Custom bots", values: { free: "1", plus: "2", pro: "5" } },
   { key: "coeditors", label: "Live co-editors", values: { free: "2", plus: "6", pro: "25" } },
-  // Free's allowance is per user; on paid tiers it's a pool the whole server
-  // shares (with a per-member ceiling), hence the differing scope note.
+  // Each person's own allowance on every tier, unlike the per-server rows above.
   {
     key: "ai_requests",
     label: "AI requests / day",
-    values: { free: "8", plus: "20", pro: "40" },
-    notes: { free: "per person", plus: "server-wide", pro: "server-wide" },
+    values: { free: "8", plus: "10", pro: "20" },
+    notes: { free: "per person", plus: "per person", pro: "per person" },
   },
 ];
 

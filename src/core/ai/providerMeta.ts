@@ -24,7 +24,7 @@ export interface ProviderMeta {
   /**
    * True for the DWEEB-hosted relay: no key/model/base-url fields at all —
    * the proxy owns the credential and pins the model. Requires Discord
-   * sign-in; usage is quota'd per user (Free) or per server (Plus/Pro).
+   * sign-in; usage is quota'd per person, by the server's plan.
    */
   builtIn?: boolean;
   /**

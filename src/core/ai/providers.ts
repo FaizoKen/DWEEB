@@ -46,7 +46,7 @@ export interface AiTurn {
 export interface AiPrompt {
   system: string;
   context: string;
-  /** The connected server, so paid servers draw on their pooled allowance. */
+  /** The connected server, whose plan sets the person's daily allowance. */
   guildId?: string;
 }
 

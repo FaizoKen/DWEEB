@@ -35,7 +35,7 @@ const LIMIT_ROWS: { key: keyof PlanInfo["limits"]; label: string }[] = [
   { key: "library_posted", label: "Posted history" },
   { key: "custom_bots", label: "Custom bots" },
   { key: "coeditors", label: "Live co-editors" },
-  // Per user on Free, a pooled per-server allowance on paid tiers.
+  // Each person's own allowance, on every tier.
   { key: "ai_requests", label: "AI requests / day" },
 ];
 

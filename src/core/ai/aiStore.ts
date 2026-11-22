@@ -202,7 +202,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     const { settings } = get();
     // The connected server (if any) rides along so the built-in relay draws on
-    // a paid server's pooled allowance; BYOK providers ignore it.
+    // a paid server's bigger allowance; BYOK providers ignore it.
     const guildId = useGuildStore.getState().guildId.trim() || undefined;
     const makePrompt = (msg: WebhookMessage): AiPrompt => ({
       system: buildSystemPrompt(msg),

@@ -2,8 +2,8 @@
  * Built-in AI usage meter (per account).
  *
  * Mirrors `GET /api/ai/usage`: the signed-in user's remaining daily allowance
- * for the built-in relay — user-scoped on Free, the server's pooled allowance
- * when the connected server is Plus/Pro. Loaded lazily when the AI panel is
+ * for the built-in relay — always their own, sized by the connected server's
+ * plan. Loaded lazily when the AI panel is
  * open on the built-in provider and refreshed after each completed send.
  * Registered with the account-scoped reset so sign-out clears it, like every
  * other per-account cache.
@@ -16,15 +16,11 @@ import { proxyFetch } from "@/core/net/proxyFetch";
 
 export interface AiUsage {
   tier: "free" | "plus" | "pro";
-  /** Which scope binds the numbers below: the user (Free) or the server pool. */
-  scope: "user" | "guild";
   requests_used: number;
   /** `null` = unlimited on this deployment's config. */
   requests_limit: number | null;
   tokens_used: number;
   tokens_limit: number | null;
-  member_requests_used: number | null;
-  member_requests_limit: number | null;
   /** Unix time the daily window resets (midnight UTC). */
   resets_at: number;
 }

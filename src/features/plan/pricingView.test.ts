@@ -59,6 +59,19 @@ describe("splitQuota", () => {
   });
 });
 
+describe("QUOTA_ROWS", () => {
+  it("only ever goes up from plan to plan, counted the same way", () => {
+    const amount = (value: string) =>
+      value === "Unlimited" ? Infinity : (splitQuota(value)?.n ?? NaN);
+    for (const { label, values, notes } of QUOTA_ROWS) {
+      expect(amount(values.plus), label).toBeGreaterThan(amount(values.free));
+      expect(amount(values.pro), label).toBeGreaterThan(amount(values.plus));
+      // "8 per person" against "20 server-wide" is how upgrading cut AI.
+      expect(new Set([notes?.free, notes?.plus, notes?.pro]).size, label).toBe(1);
+    }
+  });
+});
+
 describe("limitFocus", () => {
   it("opens on the limit a prompt was about, with every higher plan's allowance", () => {
     expect(limitFocus("saved_messages", "free")).toEqual({
