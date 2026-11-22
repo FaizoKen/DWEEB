@@ -26,7 +26,8 @@ use crate::schedule::unix_now;
 use crate::stripe::StripeState;
 
 /// A DWEEB plan tier, derived from a user's entitlement slots.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Declared lowest to highest: the derived order is the plans' order.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Tier {
     Free,
     Plus,

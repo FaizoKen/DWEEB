@@ -1994,6 +1994,29 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   subscription still mirrors as `active`, so entitlement flows normally; if the coupon is
   ever deleted the next invoice fails and the tier drops on its own. Guarded by the
   `checkout_form_*`/`normalize_promo_code_*`/`parse_promotion_code_*` tests in stripe.rs.
+- **An Upgrade click never adds a subscription beside one that covers the same thing, and never
+  writes to an existing one** (`server/src/stripe/purchase.rs`, 2026-11-22). Checkout only ever
+  adds, and it used to open whatever the buyer held: Plus → Pro left both billing, and a past-due
+  Plus reads as Free, so it was sold again. Now, under a per-buyer gate, the proxy closes its own
+  open payment forms for that server (session `metadata[source|guild_id]`), **then** re-reads the
+  buyer's subscriptions on every customer of theirs (cache + mirror + search), and `decide`
+  answers checkout, switch or refuse. Keep all of this: (1) **a failed read never opens a
+  checkout**. (2) **A switch is only a link** (`subscription_update_confirm` in the billing
+  portal), where the customer sees the proration and confirms. Never `POST /v1/subscriptions/…`
+  from a purchase. It needs the portal's "switch plans" setting, with every price listed.
+  (3) **Several subscriptions on one person are normal**: RoleLogic stacks them by design, so never
+  refuse for holding many, merge them, or tell someone to cancel "extras". Below Plus (Small)
+  neither blocks nor gets switched. (4) **Overdue blocks** (it still retries and renews), an
+  **ending** plan asks for a renewal so its paid time counts, and an **unassigned** one points at
+  Move or the plan read's auto-apply. (5) Switch and refusals are **409s**, with `portal_url` for
+  a switch: never a 200 (an older client must print `error`) and never a 5xx (it pages).
+  (6) **Flexible billing cancels with `cancel_at`**, not the flag, and every subscription our
+  checkout creates is flexible, so `extract_sub_fields` reads both. (7) **Manage billing opens the
+  subscription's own customer**, never the cache's last write: a person can have one per app, and
+  the portal is the only cancel path. `core/plan/ownSubscription.ts` is presentation; the proxy
+  decides, so **deploy the proxy first**: the cards promise a change that an older proxy would
+  turn into a second subscription. Guarded by `stripe/purchase_tests.rs` (every pair of
+  subscriptions, plus a fake Stripe).
 - **An advertised promo campaign is presentation only, and must be kept true by hand**
   (`src/core/plan/promo.ts`, added 2026-08-01). `ACTIVE_PROMO` is what the pricing modal
   *claims* — the discount itself is a coupon in the shared live Stripe account, created by
@@ -2083,7 +2106,8 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (1) **one slot**: `sendOfferAvailable()` is false whenever `adsConfigured()`, so setting
   `VITE_ADSENSE_SLOT` hands the slot back to the ad with no code change, and the offer only
   shows in production once that variable is unset. (2) **Positive proof only**: signed in, the
-  destination's plan reads Free *and* `billing`; every doubt shows nothing (the opposite of
+  destination's plan reads Free *and* `billing`, and the person's own subscriptions loaded with
+  none, paid or overdue, that could cover it; every doubt shows nothing (the opposite of
   `adFree.ts`, where having nothing to ask with shows the ad). (3) Not on the first send, once a
   day, 30 days' quiet after "Not now", and nothing when storage can't be written. (4) It loads
   nothing third-party; `send_offer { result: shown|dismissed }` and

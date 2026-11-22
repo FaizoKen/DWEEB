@@ -935,7 +935,10 @@ async fn run() {
             "/api/stripe/reassign",
             post(stripe::reassign).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
         )
-        .route("/api/stripe/portal", post(stripe::portal))
+        .route(
+            "/api/stripe/portal",
+            post(stripe::portal).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
         .route(
             "/api/stripe/webhook",
             post(stripe::webhook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),

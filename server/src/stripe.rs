@@ -55,6 +55,12 @@ use crate::error::AppError;
 use crate::routes::{current_session, AppState};
 use crate::schedule::unix_now;
 
+mod purchase;
+#[cfg(test)]
+mod purchase_tests;
+
+pub use purchase::PurchaseStart;
+
 type HmacSha256 = Hmac<Sha256>;
 
 /// Stripe API base. All calls are form-encoded POSTs / query GETs under the
@@ -527,6 +533,11 @@ pub enum CheckoutError {
     /// property of the coupon, i.e. the visitor's problem: it must stay a 4xx.
     /// Carries Stripe's own explanation for the log, not for the visitor.
     PromoRejected(String),
+    /// What they already pay for rules this purchase out (see `purchase.rs`).
+    /// A 4xx, worded for the visitor.
+    Refused(&'static str),
+    /// A Stripe read or write the purchase check needs failed. No checkout opens.
+    Stripe(StripeErr),
     /// Our configuration is wrong, or Stripe is unreachable.
     Other(String),
 }
@@ -566,6 +577,8 @@ pub struct CheckoutStart {
 pub struct StripeClient {
     secret: String,
     http: reqwest::Client,
+    /// [`STRIPE_API`], except in tests.
+    api: String,
     /// DWEEB tier ("plus"/"pro") → the price id its checkout buys.
     checkout_price: HashMap<String, String>,
     tax_rate_id: Option<String>,
@@ -583,6 +596,8 @@ pub struct StripeClient {
 /// to tell those apart. `None` = never got a response at all.
 pub struct StripeErr {
     pub status: Option<StatusCode>,
+    /// Stripe's machine-readable `error.code`, when it sent one.
+    pub code: Option<String>,
     pub message: String,
 }
 
@@ -591,6 +606,40 @@ impl StripeErr {
     /// failing or being unreachable).
     fn is_client_error(&self) -> bool {
         self.status.is_some_and(|s| s.is_client_error())
+    }
+
+    fn is_rate_limited(&self) -> bool {
+        self.status == Some(StatusCode::TOO_MANY_REQUESTS)
+    }
+
+    /// The object named doesn't exist (a deleted customer).
+    fn is_missing(&self) -> bool {
+        self.code.as_deref() == Some("resource_missing")
+    }
+
+    /// An error Stripe answered with, read out of its body.
+    fn answered(status: StatusCode, body: &Value) -> Self {
+        let field = |name: &str| {
+            body.get("error")
+                .and_then(|e| e.get(name))
+                .and_then(Value::as_str)
+        };
+        StripeErr {
+            status: Some(status),
+            code: field("code").map(String::from),
+            message: field("message")
+                .unwrap_or("Stripe request failed")
+                .to_string(),
+        }
+    }
+
+    /// No answer at all. Described without the URL, whose query names customers.
+    fn unanswered(e: reqwest::Error) -> Self {
+        StripeErr {
+            status: None,
+            code: None,
+            message: crate::discord::describe(e),
+        }
     }
 }
 
@@ -605,47 +654,35 @@ impl std::fmt::Display for StripeErr {
 
 impl StripeClient {
     async fn post_form(&self, path: &str, form: &[(String, String)]) -> Result<Value, StripeErr> {
-        let fail = |message: String| StripeErr {
-            status: None,
-            message,
-        };
         let resp = self
             .http
-            .post(format!("{STRIPE_API}{path}"))
+            .post(format!("{}{path}", self.api))
             .bearer_auth(&self.secret)
             .form(form)
             .send()
             .await
-            .map_err(|e| fail(e.to_string()))?;
+            .map_err(StripeErr::unanswered)?;
         let status = resp.status();
-        let body: Value = resp.json().await.map_err(|e| fail(e.to_string()))?;
+        let body: Value = resp.json().await.map_err(StripeErr::unanswered)?;
         if !status.is_success() {
-            let msg = body
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("Stripe request failed");
-            return Err(StripeErr {
-                status: Some(status),
-                message: msg.to_string(),
-            });
+            return Err(StripeErr::answered(status, &body));
         }
         Ok(body)
     }
 
-    async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Value, String> {
+    async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Value, StripeErr> {
         let resp = self
             .http
-            .get(format!("{STRIPE_API}{path}"))
+            .get(format!("{}{path}", self.api))
             .bearer_auth(&self.secret)
             .query(query)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(StripeErr::unanswered)?;
         let status = resp.status();
-        let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+        let body: Value = resp.json().await.map_err(StripeErr::unanswered)?;
         if !status.is_success() {
-            return Err(format!("stripe {status}"));
+            return Err(StripeErr::answered(status, &body));
         }
         Ok(body)
     }
@@ -678,28 +715,6 @@ impl StripeClient {
         id_of(&body["id"]).ok_or_else(|| "customer create: no id".into())
     }
 
-    /// The user's customer id, reusing the cached / shared one when possible and
-    /// creating one only as a last resort. Caches the result in the store.
-    async fn get_or_create_customer(
-        &self,
-        store: &StripeStore,
-        uid: &str,
-        name: &str,
-    ) -> Result<String, String> {
-        if let Some((cid, _)) = store.get_customer(uid) {
-            if !cid.is_empty() {
-                return Ok(cid);
-            }
-        }
-        if let Some(cid) = self.find_customer(uid).await {
-            store.put_customer(uid, &cid, unix_now());
-            return Ok(cid);
-        }
-        let cid = self.create_customer(uid, name).await?;
-        store.put_customer(uid, &cid, unix_now());
-        Ok(cid)
-    }
-
     /// Resolve a customer-typed promotion code to the live Stripe object behind it.
     /// The `code` filter is case-insensitive, `active=true` narrows the search to
     /// redeemable codes, and [`parse_promotion_code`] re-checks expiry, redemption
@@ -726,7 +741,13 @@ impl StripeClient {
                 ],
             )
             .await
-            .map_err(PromoError::Upstream)?;
+            .map_err(|e| {
+                // Shown to the visitor, so Stripe's own wording stays out of it.
+                PromoError::Upstream(match e.status {
+                    Some(status) => format!("stripe {status}"),
+                    None => e.message,
+                })
+            })?;
         parse_promotion_code(&body).ok_or_else(|| {
             // Without this the only trace of a refused code was the visitor's own
             // error message — which is how a *live* code reading as expired (the
@@ -751,22 +772,18 @@ impl StripeClient {
     /// the sub even before the customer link is cached. `promo`, when present, is
     /// applied server-side — see [`checkout_form`] for why that is the only way a
     /// 100%-off code can skip the card form.
-    pub async fn create_embedded_checkout(
+    ///
+    /// This always *adds* a subscription, so it is reached only through
+    /// [`StripeState::start_purchase`], which first rules out a second charge.
+    async fn create_embedded_checkout(
         &self,
-        store: &StripeStore,
+        price: &str,
+        customer: &str,
         req: CheckoutRequest<'_>,
     ) -> Result<CheckoutStart, CheckoutError> {
-        let key = checkout_key(req.tier, req.interval);
-        let price = self.checkout_price.get(&key).ok_or_else(|| {
-            CheckoutError::Other(format!("no checkout price configured for '{key}'"))
-        })?;
-        let customer = self
-            .get_or_create_customer(store, req.uid, req.name)
-            .await
-            .map_err(CheckoutError::Other)?;
         let form = checkout_form(
             price,
-            &customer,
+            customer,
             req.uid,
             req.guild_id,
             self.tax_rate_id.as_deref(),
@@ -797,9 +814,17 @@ impl StripeClient {
 
     /// A Stripe billing-portal URL so the user can manage/cancel/upgrade. Errors
     /// when they have no customer (nothing to manage) — never creates one.
-    pub async fn create_portal(&self, store: &StripeStore, uid: &str) -> Result<String, String> {
-        let customer = match store.get_customer(uid) {
-            Some((cid, _)) if !cid.is_empty() => cid,
+    /// `customer` is the one their subscription is on: the cache holds one per
+    /// user, last write wins, and a person can have one from each app.
+    async fn create_portal(
+        &self,
+        store: &StripeStore,
+        uid: &str,
+        customer: Option<String>,
+    ) -> Result<String, String> {
+        let customer = match (customer, store.get_customer(uid)) {
+            (Some(cid), _) => cid,
+            (None, Some((cid, _))) if !cid.is_empty() => cid,
             _ => self
                 .find_customer(uid)
                 .await
@@ -825,25 +850,22 @@ impl StripeClient {
     /// "Stripe rejected this" (retrying won't help) from "Stripe didn't answer"
     /// (retry later).
     async fn retrieve_subscription(&self, id: &str) -> Result<Value, StripeErr> {
-        let fail = |message: String| StripeErr {
-            status: None,
-            message,
-        };
         let resp = self
             .http
-            .get(format!("{STRIPE_API}/v1/subscriptions/{id}"))
+            .get(format!("{}/v1/subscriptions/{id}", self.api))
             .bearer_auth(&self.secret)
             .send()
             .await
-            .map_err(|e| fail(e.to_string()))?;
+            .map_err(StripeErr::unanswered)?;
         let status = resp.status();
         if !status.is_success() {
             return Err(StripeErr {
                 status: Some(status),
+                code: None,
                 message: format!("stripe {status}"),
             });
         }
-        resp.json().await.map_err(|e| fail(e.to_string()))
+        resp.json().await.map_err(StripeErr::unanswered)
     }
 
     /// Every subscription bound to a server, via Stripe's search on the
@@ -1190,6 +1212,10 @@ fn checkout_form(
             "subscription_data[metadata][guild_id]".into(),
             guild_id.to_string(),
         ),
+        // On the session itself, so a later click can find and close this form
+        // if it's still open (see `purchase.rs`).
+        ("metadata[source]".into(), APP_SOURCE.to_string()),
+        ("metadata[guild_id]".into(), guild_id.to_string()),
         // Stay in our modal; the FE refreshes the plan on completion.
         ("redirect_on_completion".into(), "never".into()),
     ];
@@ -1232,10 +1258,17 @@ fn extract_sub_fields(
                 .and_then(Value::as_i64)
         })
         .unwrap_or(0);
+    // Flexible billing (every subscription our checkout creates) records a portal
+    // cancellation as `cancel_at` = the period's end, leaving the flag false. A
+    // date further out still renews, so it isn't one.
     let cancel = sub
         .get("cancel_at_period_end")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || sub
+            .get("cancel_at")
+            .and_then(Value::as_i64)
+            .is_some_and(|at| period_end == 0 || at <= period_end);
     let customer_id = id_of(&sub["customer"]).unwrap_or_default();
     // The server this sub grants premium to (stamped at checkout / reassignment).
     // Absent on legacy or foreign (e.g. sibling-app) subs — they bind no guild.
@@ -1325,6 +1358,7 @@ pub struct StripeState {
     pub store: StripeStore,
     price_slots: HashMap<String, i64>,
     backfill_ttl: i64,
+    purchase_gates: [tokio::sync::Mutex<()>; purchase::PURCHASE_GATES],
 }
 
 impl StripeState {
@@ -1337,6 +1371,7 @@ impl StripeState {
         let store = StripeStore::open(&config.stripe_db_path)?;
         let client = StripeClient {
             secret,
+            api: STRIPE_API.to_string(),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
@@ -1351,6 +1386,7 @@ impl StripeState {
             store,
             price_slots: config.stripe_price_slots.clone(),
             backfill_ttl: config.stripe_backfill_ttl_secs,
+            purchase_gates: Default::default(),
         }))
     }
 
@@ -1493,6 +1529,11 @@ pub struct CheckoutBody {
 /// subscription is bound to `guild_id`, so the caller must manage that server
 /// (same gate as the other per-server features); the signed-in Discord user
 /// owns/pays for it.
+///
+/// A buyer whose own subscription already covers the server never gets a second
+/// one: they get a 409, carrying `portal_url` when the answer is to change that
+/// subscription. Not a 200, so a client from before this rule shows the message
+/// instead of reading it as a checkout.
 pub async fn checkout(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -1561,36 +1602,72 @@ pub async fn checkout(
             }
         }
     };
-    let start = stripe
-        .client
-        .create_embedded_checkout(
-            &stripe.store,
-            CheckoutRequest {
-                uid: &session.uid,
-                name: &session.name,
-                tier: &tier,
-                interval: &interval,
-                guild_id: &guild,
-                promo: promo.as_ref(),
-            },
-        )
-        .await
-        .map_err(|e| match e {
-            CheckoutError::PromoRejected(why) => {
-                // Stripe's wording can name coupons/products, so it goes to the log
-                // (at info — a visitor's unusable code is nothing to page over) and
-                // the visitor gets a plain sentence.
-                tracing::info!(target: "stripe_promo", %guild, "promo code rejected: {why}");
-                AppError::Status {
-                    status: StatusCode::BAD_REQUEST,
-                    message: "That promo code can't be used on this plan.".into(),
-                    retry_after: None,
-                }
+    let outcome = stripe
+        .start_purchase(CheckoutRequest {
+            uid: &session.uid,
+            name: &session.name,
+            tier: &tier,
+            interval: &interval,
+            guild_id: &guild,
+            promo: promo.as_ref(),
+        })
+        .await;
+    // The check just re-read Stripe; the tier the client reloads must follow it.
+    st.entitlements.invalidate(&guild);
+    purchase_response(outcome, &guild)
+}
+
+/// The route's answer to a purchase. The status is the paging decision: what the
+/// buyer already pays for is a 409, never a failure of ours.
+fn purchase_response(
+    outcome: Result<PurchaseStart, CheckoutError>,
+    guild: &str,
+) -> Result<Response, AppError> {
+    let start = outcome.map_err(|e| match e {
+        CheckoutError::PromoRejected(why) => {
+            // Stripe's wording can name coupons/products, so it goes to the log
+            // (at info — a visitor's unusable code is nothing to page over) and
+            // the visitor gets a plain sentence.
+            tracing::info!(target: "stripe_promo", %guild, "promo code rejected: {why}");
+            AppError::Status {
+                status: StatusCode::BAD_REQUEST,
+                message: "That promo code can't be used on this plan.".into(),
+                retry_after: None,
             }
-            CheckoutError::Other(e) => {
-                AppError::BadGateway(format!("Couldn't start checkout: {e}"))
+        }
+        CheckoutError::Refused(why) => AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: why.into(),
+            retry_after: None,
+        },
+        CheckoutError::Stripe(e) => {
+            // Stripe's wording can quote ids or a masked key, so only the log gets it.
+            tracing::warn!(target: "stripe_purchase", %guild, "purchase check failed: {e}");
+            let message = match e.status {
+                Some(status) => format!("Couldn't start checkout: Stripe answered {status}."),
+                None => "Couldn't start checkout: Stripe didn't answer.".to_string(),
+            };
+            // Stripe's outage or rate limit is theirs; a request it refused is ours.
+            if e.is_client_error() && !e.is_rate_limited() {
+                AppError::BadGateway(message)
+            } else {
+                AppError::upstream(message)
             }
-        })?;
+        }
+        CheckoutError::Other(e) => AppError::BadGateway(format!("Couldn't start checkout: {e}")),
+    })?;
+    let start = match start {
+        PurchaseStart::Checkout(start) => start,
+        PurchaseStart::Switch { portal_url } => {
+            let body = json!({ "error": purchase::CHANGE_PLAN, "portal_url": portal_url });
+            return Ok((
+                StatusCode::CONFLICT,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(body),
+            )
+                .into_response());
+        }
+    };
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({
@@ -1664,11 +1741,22 @@ pub async fn subscriptions(
         AppError::Unauthorized("Sign in with Discord to view your subscriptions.".into())
     })?;
     let rows = stripe.store.list_subscriptions_for_user(&session.uid);
+    let mut accounts: Vec<&str> = Vec::new();
     let items: Vec<Value> = rows
         .iter()
-        // Only subs that still grant something — hide canceled/incomplete clutter.
-        .filter(|s| matches!(s.status.as_str(), "active" | "trialing" | "past_due"))
+        // Everything that still bills or could again (it all blocks a purchase,
+        // so it all needs Manage billing) — hide canceled/incomplete clutter.
+        .filter(|s| purchase::UNFINISHED.contains(&s.status.as_str()))
         .map(|s| {
+            // Which of the user's billing accounts it's on: an ordinal, enough
+            // for the UI to offer each its own portal.
+            let account = accounts
+                .iter()
+                .position(|c| *c == s.customer_id)
+                .unwrap_or_else(|| {
+                    accounts.push(&s.customer_id);
+                    accounts.len() - 1
+                });
             let tier = crate::entitlement::Tier::from_slots(stripe.slots_of_price(&s.price_id));
             json!({
                 "id": s.id,
@@ -1677,6 +1765,7 @@ pub async fn subscriptions(
                 "status": s.status,
                 "current_period_end": s.current_period_end,
                 "cancel_at_period_end": s.cancel_at_period_end,
+                "billing_account": account,
                 // Unix seconds this sub can next be moved; null once freely movable
                 // (never moved, or the cooldown has elapsed). Keeps the cooldown
                 // length server-owned — the client just compares it to now.
@@ -1790,18 +1879,35 @@ pub async fn reassign(
         .into_response())
 }
 
-/// `POST /api/stripe/portal` → `{ url }` for Stripe's billing portal (manage /
-/// cancel). Cookie-gated. 400 when the user has no billing account yet.
+#[derive(Deserialize)]
+pub struct PortalBody {
+    /// The subscription whose billing account to open.
+    #[serde(default)]
+    pub subscription_id: Option<String>,
+}
+
+/// `POST /api/stripe/portal` `{ subscription_id? }` → `{ url }` for Stripe's
+/// billing portal (manage / cancel). Cookie-gated. 400 when the user has no
+/// billing account yet. The body is optional: older clients send none.
 pub async fn portal(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
+    body: Option<Json<PortalBody>>,
 ) -> Result<Response, AppError> {
     let stripe = require_stripe(&st)?;
     let session = current_session(&jar)
         .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to manage billing.".into()))?;
+    let wanted = body.and_then(|Json(b)| b.subscription_id);
+    let customer = stripe
+        .portal_customer(&session.uid, wanted.as_deref())
+        .map_err(|()| AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "No such subscription.".into(),
+            retry_after: None,
+        })?;
     let url = stripe
         .client
-        .create_portal(&stripe.store, &session.uid)
+        .create_portal(&stripe.store, &session.uid, customer)
         .await
         .map_err(|e| AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -2356,6 +2462,7 @@ mod tests {
         let client = StripeClient {
             secret: "sk_test".into(),
             http: reqwest::Client::new(),
+            api: STRIPE_API.into(),
             checkout_price: HashMap::new(),
             tax_rate_id: None,
             webhook_secret: Some("whsec_test".into()),
