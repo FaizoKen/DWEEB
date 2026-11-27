@@ -143,6 +143,11 @@ function mergeEntry(
 
 const EMPTY_BUCKET: LibraryBucketUsage = { used: 0, quota: null };
 
+/** The Posted shelf's note for history kept past a lower limit. */
+export function hiddenPostsLabel(count: number): string {
+  return `${count} older ${count === 1 ? "post" : "posts"} hidden on this plan`;
+}
+
 /** A posted entry whose Discord message was found deleted. It is kept (for
  * `deletedRetentionSecs`) so the content can be posted again, but there's no
  * message left to update, and it doesn't count against the history window. */

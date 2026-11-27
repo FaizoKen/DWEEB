@@ -39,6 +39,7 @@ import {
   isDeletedOnDiscord,
   libraryEntryHasDetails,
   libraryEntryMessage,
+  hiddenPostsLabel,
   libraryEntrySearchText,
   pendingLibraryDetailIds,
   useLibraryStore,
@@ -800,10 +801,15 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
                     {activeFilter === POSTED_FILTER ? (
                       <p
                         className={styles.tabMeter}
-                        title="Posted messages sync automatically — the newest posts, oldest roll off."
+                        title={
+                          libPosted.hidden
+                            ? "Older posts over this plan's limit are kept, not deleted, and come back when the server upgrades. Each new post still replaces the oldest."
+                            : "Posted messages sync automatically — the newest posts, oldest roll off."
+                        }
                       >
                         <strong>Posted history:</strong> {libPosted.used}
                         {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
+                        {libPosted.hidden ? ` · ${hiddenPostsLabel(libPosted.hidden)}` : ""}
                       </p>
                     ) : null}
                     {activeFilter === SERVER_DRAFTS_FILTER ? (

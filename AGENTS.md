@@ -2221,6 +2221,21 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
   throws if the patterns vanish. Marketing claims there must match the plans model
   (quota-raising only — never claim "no usage limit" or "no paywall").
+- **A lower plan hides Posted history; it never trims it** (2026-11-27). The window used to be
+  trimmed to the new limit on the next post, so a downgrade, a single failed renewal (past_due
+  reads as Free at once) or a plan lookup that failed open to Free permanently deleted a paying
+  server's history down to 10, while the Plans dialog promised "nothing is deleted". Now
+  `LibraryStore::upsert` keeps whatever the history held before the post (`keep =
+  max(window, before)`), so one post evicts at most one entry, the oldest, exactly as a full
+  window does on every plan. The list leaves out the entries past the window
+  (`hidden_posted_ids`, ranked exactly as `upsert` rolls them) and reports them as
+  `posted.hidden`, which both galleries name ("N older posts hidden on this plan"); an
+  upgrade, or deleting a shown post, shows them again. The stored count never grows past what
+  the server already held. The never-expire lookup runs only when a server holds more posts
+  than its window. The Terms (§4), the Privacy Policy (§5, §12) and `DOWNGRADE_NOTE` describe
+  this rule, so change them together. No deploy ordering: an older proxy sends no `hidden`, and
+  an older client ignores it. Guarded by `a_lower_window_hides_history_and_an_upgrade_shows_it_again`
+  and `hidden_history_skips_pinned_and_deleted_posts` in library.rs.
 - **Message library is metadata-first.** "Posted" is a server-only rolling history window (no
   local fallback); drafts have hard per-plan caps. Gallery open uses
   `/library?metadata_only=true`, whose SQL excludes both sealed payload columns; visible cards

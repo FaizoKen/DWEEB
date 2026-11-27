@@ -123,10 +123,12 @@ const ROWS = QUOTA_ROWS;
 const INCLUDED =
   "Every plan includes the full builder, all templates, unlimited webhooks, unlimited tickets, link plugins, and share links. Premium applies to one server — buy it again (or move it) for another.";
 
-// Reassurance for the downgrade/cancel path — nothing is destroyed, over-limit
-// items are just paused and auto-restored (see server/src/reconcile.rs).
+// Reassurance for the downgrade/cancel path — nothing over a lower limit is
+// destroyed: over-limit items are paused and auto-restored (server/src/
+// reconcile.rs), and posted history past it is hidden, not trimmed (library.rs
+// `upsert`). History still rolls one post at a time once full, on every plan.
 const DOWNGRADE_NOTE =
-  "Change or cancel anytime — nothing is deleted. If a server ends up over a lower plan’s limit, the extra items are paused (not removed) and come back automatically, oldest first, when you upgrade again.";
+  "Change or cancel anytime. If a server ends up over a lower plan’s limit, nothing over it is deleted: the extra items are paused and come back automatically, oldest first, when you upgrade again. Posted history keeps rolling as always: once it’s full, each new post replaces the oldest.";
 
 const RANK: Record<PlanTier, number> = { free: 0, plus: 1, pro: 2 };
 

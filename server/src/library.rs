@@ -33,7 +33,10 @@
 //!    through DWEEB (`TierLimits::library_posted`). It syncs automatically —
 //!    recording a post past the window evicts the oldest entry instead of
 //!    failing, so the history is always current and auto-record can't be
-//!    starved by a full shelf. Never-expire messages are the exception: their
+//!    starved by a full shelf. A window that shrinks (a downgrade, a failed
+//!    renewal) never deletes the surplus: one post still evicts one entry,
+//!    and the entries past the new window are hidden from the list until it
+//!    grows again. Never-expire messages are the exception: their
 //!    ids (fetched from the dispatcher's permanent slots, see
 //!    [`permanent_message_ids`]) ride above the window — never evicted and not
 //!    counted against it — so pinning a message on Discord also pins its
@@ -425,10 +428,11 @@ impl LibraryStore {
     /// two labels enforce it differently:
     ///
     ///  - **posted** is a rolling history window: a refresh is never gated (it
-    ///    doesn't grow anything), and an insert past the window *evicts the
-    ///    oldest posted rows* instead of failing — so recording a post always
-    ///    succeeds and a downgraded server's surplus history simply trims on
-    ///    its next post. Draft rows are never touched by eviction.
+    ///    doesn't grow anything), and an insert into a full window *evicts the
+    ///    oldest posted row* instead of failing, so recording a post always
+    ///    succeeds. It evicts at most one: a server over a lower window (after
+    ///    a downgrade) keeps its surplus hidden rather than losing it on its
+    ///    next post. Draft rows are never touched by eviction.
     ///  - **draft** is a hard cap: at the cap, the insert is refused with
     ///    [`CreateError::PerGuildFull`]. Posted rows don't count against it.
     ///
@@ -543,40 +547,30 @@ impl LibraryStore {
         if n.label == "posted" {
             let window = limit_override.unwrap_or(self.posted_per_guild);
             if window < i64::MAX {
-                // Trim the history to its window, newest first (rowid breaks
-                // same-second ties in insertion order). Runs after the insert
-                // so "window = N" always means "the N most recent posts,
-                // including this one". Walked in Rust rather than one DELETE so
-                // `protected` rows (never-expire messages) can be skipped —
-                // they neither evict nor count; the per-guild set is small
-                // (window + permanent slots), so this stays cheap. A message
-                // deleted on Discord is outside the window too: kept for its
-                // retention period, then purged by age.
-                let rows: Vec<(String, Option<String>)> = {
-                    let mut stmt = conn
-                        .prepare_cached(
-                            "SELECT id, message_id FROM library_messages \
-                             WHERE guild_id=?1 AND label='posted' AND deleted_at IS NULL \
-                             ORDER BY updated_at DESC, rowid DESC",
-                        )
+                // Roll the history, newest first. Runs after the insert so
+                // "window = N" means "the N most recent posts, including this
+                // one". `protected` rows (never-expire messages) neither evict
+                // nor count, and a message deleted on Discord is outside the
+                // window too: kept for its retention period, then purged by age.
+                //
+                // The history never *shrinks* to a lower window: it keeps
+                // whatever it held before this post, so one post deletes at
+                // most one entry, the oldest, exactly as a full window does.
+                // A downgrade, a failed renewal or a plan lookup that fell back
+                // to Free therefore hides the surplus (see
+                // [`Self::hidden_posted_ids`]) instead of deleting it, and an
+                // upgrade shows it again. The stored count can't grow past what
+                // the server already held, so this stays bounded.
+                let ranked = ranked_posted(&conn, &n.guild_id, protected)
+                    .map_err(|e| CreateError::Storage(e.to_string()))?;
+                let before = ranked.iter().filter(|id| id.as_str() != n_id).count();
+                let keep = usize::try_from(window.max(0))
+                    .unwrap_or(usize::MAX)
+                    .max(before);
+                for id in ranked.iter().skip(keep) {
+                    evicted += conn
+                        .execute("DELETE FROM library_messages WHERE id=?1", [id])
                         .map_err(|e| CreateError::Storage(e.to_string()))?;
-                    let iter = stmt
-                        .query_map([&n.guild_id], |r| Ok((r.get(0)?, r.get(1)?)))
-                        .map_err(|e| CreateError::Storage(e.to_string()))?;
-                    iter.collect::<rusqlite::Result<_>>()
-                        .map_err(|e| CreateError::Storage(e.to_string()))?
-                };
-                let mut kept: i64 = 0;
-                for (id, mid) in rows {
-                    if mid.is_some_and(|m| protected.contains(&m)) {
-                        continue;
-                    }
-                    kept += 1;
-                    if kept > window.max(0) {
-                        evicted += conn
-                            .execute("DELETE FROM library_messages WHERE id=?1", [&id])
-                            .map_err(|e| CreateError::Storage(e.to_string()))?;
-                    }
                 }
             }
         }
@@ -886,6 +880,50 @@ impl LibraryStore {
         )
         .map_err(e2s)
     }
+
+    /// The posted rows a `window`-sized history doesn't show: the live,
+    /// unpinned ones past the newest `window`, ranked exactly as
+    /// [`Self::upsert`] rolls them. They're what a lower limit left over —
+    /// kept, not deleted — and the list leaves them out until the window
+    /// grows again (an upgrade, or deletions making room).
+    pub fn hidden_posted_ids(
+        &self,
+        guild: &str,
+        window: i64,
+        protected: &HashSet<String>,
+    ) -> Result<HashSet<String>, String> {
+        let conn = self.lock();
+        let ranked = ranked_posted(&conn, guild, protected).map_err(e2s)?;
+        let window = usize::try_from(window.max(0)).unwrap_or(usize::MAX);
+        Ok(ranked.into_iter().skip(window).collect())
+    }
+}
+
+/// A server's live posted rows that the history window counts — not deleted
+/// on Discord, not a never-expire message — newest first. `rowid` breaks
+/// same-second ties in insertion order. Walked in Rust rather than in SQL so
+/// `protected` can be skipped; the per-guild set is small.
+fn ranked_posted(
+    conn: &Connection,
+    guild: &str,
+    protected: &HashSet<String>,
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, message_id FROM library_messages \
+         WHERE guild_id=?1 AND label='posted' AND deleted_at IS NULL \
+         ORDER BY updated_at DESC, rowid DESC",
+    )?;
+    let rows = stmt.query_map([guild], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+    })?;
+    let mut ranked = Vec::new();
+    for row in rows {
+        let (id, message_id) = row?;
+        if !message_id.is_some_and(|m| protected.contains(&m)) {
+            ranked.push(id);
+        }
+    }
+    Ok(ranked)
 }
 
 fn e2s<E: std::fmt::Display>(e: E) -> String {
@@ -1148,16 +1186,38 @@ pub async fn library_list(
     let draft_cap = draft_cap(&st, store.as_ref(), &guild).await;
     let g = guild.clone();
     let s = Arc::clone(&store);
-    let (posted_used, draft_used) = tokio::task::spawn_blocking(move || s.counts_for_guild(&g))
+    let (posted_stored, draft_used) = tokio::task::spawn_blocking(move || s.counts_for_guild(&g))
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?;
+    // History a lower limit left over is kept but not shown (see
+    // `LibraryStore::upsert`). Only a server holding more posts than its
+    // window can have any, so only then is the never-expire set fetched.
+    let hidden = match posted_cap {
+        Some(window) if posted_stored > window => {
+            let protected = permanent_message_ids(st.dispatcher.as_ref(), &guild).await;
+            let g = guild.clone();
+            let s = Arc::clone(&store);
+            tokio::task::spawn_blocking(move || s.hidden_posted_ids(&g, window, &protected))
+                .await
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .map_err(AppError::Internal)?
+        }
+        _ => HashSet::new(),
+    };
+    let posted_used = posted_stored - hidden.len() as i64;
+    let hidden_count = hidden.len();
     let g = guild.clone();
     let (items, listed) = if query.metadata_only {
         tokio::task::spawn_blocking(move || {
             let rows = store.list_summaries_for_guild(&g, LIST_LIMIT, query.include_deleted)?;
-            let listed = rows.len();
-            Ok::<_, String>((rows.iter().map(summary_view).collect::<Vec<_>>(), listed))
+            let shown: Vec<_> = rows
+                .iter()
+                .filter(|r| !hidden.contains(&r.id))
+                .map(summary_view)
+                .collect();
+            let listed = shown.len();
+            Ok::<_, String>((shown, listed))
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -1168,11 +1228,13 @@ pub async fn library_list(
         let key = st.key.clone();
         tokio::task::spawn_blocking(move || {
             let rows = store.list_for_guild(&g, LIST_LIMIT)?;
-            let listed = rows.len();
-            Ok::<_, String>((
-                rows.iter().map(|r| view(&key, r)).collect::<Vec<_>>(),
-                listed,
-            ))
+            let shown: Vec<_> = rows
+                .iter()
+                .filter(|r| !hidden.contains(&r.id))
+                .map(|r| view(&key, r))
+                .collect();
+            let listed = shown.len();
+            Ok::<_, String>((shown, listed))
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -1189,7 +1251,11 @@ pub async fn library_list(
                 (Some(p), Some(d)) => json!(p + d),
                 _ => Value::Null,
             },
-            "posted": { "used": posted_used, "quota": cap_json(posted_cap) },
+            "posted": {
+                "used": posted_used,
+                "quota": cap_json(posted_cap),
+                "hidden": hidden_count,
+            },
             "drafts": { "used": draft_used, "quota": cap_json(draft_cap) },
             "deleted_retention_secs": DELETED_RETENTION_SECS,
         })),
@@ -2010,7 +2076,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
-        // A downgrade (window 2 → 1) trims on the NEXT post, not before.
+        // A downgrade (window 2 → 1) doesn't trim the history down to the new
+        // window: the next post evicts only the oldest (m3), and m2 is kept,
+        // past the window of 1, until the window grows again.
         upsert(
             &store,
             &entry("g1", "posted", Some("m4")),
@@ -2020,11 +2088,18 @@ mod tests {
         )
         .unwrap();
         let rows = store.list_for_guild("g1", 100).unwrap();
-        let posted: Vec<_> = rows.iter().filter(|r| r.label == "posted").collect();
-        assert_eq!(posted.len(), 1);
-        assert_eq!(posted[0].message_id.as_deref(), Some("m4"));
-        // The eviction kept the global counter honest: 1 posted + 1 draft.
-        assert_eq!(store.counts_for_guild("g1").unwrap(), (1, 1));
+        let posted: Vec<_> = rows
+            .iter()
+            .filter(|r| r.label == "posted")
+            .filter_map(|r| r.message_id.as_deref())
+            .collect();
+        assert_eq!(posted, ["m4", "m2"]);
+        assert_eq!(
+            store.hidden_posted_ids("g1", 1, &HashSet::new()).unwrap(),
+            HashSet::from(["id-p2".to_string()])
+        );
+        // The eviction kept the global counter honest: 2 posted + 1 draft.
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
         let _ = std::fs::remove_file(path);
     }
 
@@ -2082,8 +2157,13 @@ mod tests {
         assert!(!message_ids.contains(&"m2".to_string()));
         assert!(message_ids.contains(&"m3".to_string()));
         assert!(message_ids.contains(&"m4".to_string()));
-        // Once the pin is gone (slot freed), the row rejoins the window and the
-        // next post trims it like any other.
+        // Once the pin is gone (slot freed), the row rejoins the window as its
+        // oldest entry. The window then holds one row more than it shows; the
+        // next post evicts one row, the oldest (m1), never two.
+        assert_eq!(
+            store.hidden_posted_ids("g1", 2, &HashSet::new()).unwrap(),
+            HashSet::from(["id-p1".to_string()])
+        );
         store
             .upsert(
                 &entry("g1", "posted", Some("m5")),
@@ -2099,9 +2179,83 @@ mod tests {
             .iter()
             .filter_map(|r| r.message_id.clone())
             .collect();
-        assert_eq!(message_ids.len(), 2);
-        assert!(message_ids.contains(&"m4".to_string()));
-        assert!(message_ids.contains(&"m5".to_string()));
+        assert_eq!(message_ids, ["m5", "m4", "m3"]);
+        assert_eq!(
+            store.hidden_posted_ids("g1", 2, &HashSet::new()).unwrap(),
+            HashSet::from(["id-p3".to_string()])
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_lower_window_hides_history_and_an_upgrade_shows_it_again() {
+        let (store, path) = temp_store("downgrade", 100, 10, 100);
+        let none = HashSet::new();
+        // A paid server with a full window of 5.
+        for i in 1..=5 {
+            upsert(
+                &store,
+                &entry("g1", "posted", Some(&format!("m{i}"))),
+                &format!("id-p{i}"),
+                i * 1_000,
+                Some(5),
+            )
+            .unwrap();
+        }
+        // The plan drops to a window of 2 (a downgrade, a failed renewal, or a
+        // plan lookup that fell back to Free). Two posts later the server still
+        // holds 5 posts: each post evicted exactly one, the oldest, as it
+        // would have at the old window, and nothing was trimmed to fit.
+        for i in 6..=7 {
+            upsert(
+                &store,
+                &entry("g1", "posted", Some(&format!("m{i}"))),
+                &format!("id-p{i}"),
+                i * 1_000,
+                Some(2),
+            )
+            .unwrap();
+        }
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (5, 0));
+        // Only the newest 2 are shown; the other 3 are kept, hidden.
+        assert_eq!(
+            store.hidden_posted_ids("g1", 2, &none).unwrap(),
+            HashSet::from(["id-p3", "id-p4", "id-p5"].map(String::from))
+        );
+        // Back on the old plan, every kept post is shown again.
+        assert!(store.hidden_posted_ids("g1", 5, &none).unwrap().is_empty());
+        // Deleting a shown post makes room: the newest hidden one is shown.
+        assert!(store.delete("g1", "id-p7").unwrap());
+        assert_eq!(
+            store.hidden_posted_ids("g1", 2, &none).unwrap(),
+            HashSet::from(["id-p3", "id-p4"].map(String::from))
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn hidden_history_skips_pinned_and_deleted_posts() {
+        let (store, path) = temp_store("hidden-skip", 100, 10, 100);
+        for i in 1..=4 {
+            upsert(
+                &store,
+                &entry("g1", "posted", Some(&format!("m{i}"))),
+                &format!("id-p{i}"),
+                i * 1_000,
+                None,
+            )
+            .unwrap();
+        }
+        // m4 is never-expire and m3 was deleted on Discord: neither takes a
+        // window slot, so a window of 1 shows m2 and hides only m1.
+        assert!(store
+            .mark_deleted_on_discord("g1", "id-p3", "m3", 9_000)
+            .unwrap());
+        let pins = HashSet::from(["m4".to_string()]);
+        assert_eq!(
+            store.hidden_posted_ids("g1", 1, &pins).unwrap(),
+            HashSet::from(["id-p1".to_string()])
+        );
         let _ = std::fs::remove_file(path);
     }
 

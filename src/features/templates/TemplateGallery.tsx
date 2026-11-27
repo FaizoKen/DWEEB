@@ -64,6 +64,7 @@ import {
   libraryEntryHasDetails,
   libraryEntryMessage,
   libraryEntryOrigin,
+  hiddenPostsLabel,
   libraryEntrySearchText,
   pendingLibraryDetailIds,
   useLibraryStore,
@@ -1300,16 +1301,39 @@ export function TemplateGallery() {
                     {activeFilter === POSTED_FILTER ? (
                       <p
                         className={styles.tabMeter}
-                        title="Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
+                        title={
+                          libPosted.hidden
+                            ? "Older posts over this plan's limit are kept, not deleted, and come back when you upgrade. Each new post still replaces the oldest."
+                            : "Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
+                        }
                       >
                         <strong>Posted history:</strong>{" "}
                         {Math.max(0, libPosted.used - pinnedPostedCount)}
                         {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
-                        {/* A full window drops the oldest post on every send, with
-                        nothing to say so — the one moment this limit costs
-                        anything, so it's the one to name it in. */}
-                        {libPosted.quota != null &&
-                        libPosted.used - pinnedPostedCount >= libPosted.quota ? (
+                        {/* History a lower limit left over is kept but not
+                        listed. Say so, or a downgrade reads as lost posts. */}
+                        {libPosted.hidden ? (
+                          <>
+                            {" · "}
+                            {hiddenPostsLabel(libPosted.hidden)}
+                            {canUpgrade ? (
+                              <>
+                                {" · "}
+                                <button
+                                  type="button"
+                                  className={styles.meterUpgrade}
+                                  onClick={() => openPlans("posted_history")}
+                                >
+                                  Show them
+                                </button>
+                              </>
+                            ) : null}
+                          </>
+                        ) : /* A full window drops the oldest post on every send,
+                        with nothing to say so — the one moment this limit
+                        costs anything, so it's the one to name it in. */
+                        libPosted.quota != null &&
+                          libPosted.used - pinnedPostedCount >= libPosted.quota ? (
                           <>
                             {" · "}each new post drops the oldest
                             {canUpgrade ? (

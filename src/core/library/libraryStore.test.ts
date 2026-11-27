@@ -475,6 +475,24 @@ describe("libraryStore.verifyPosted", () => {
     expect(createLibraryEntryMock).toHaveBeenCalledOnce();
   });
 
+  it("a new post keeps the count of history hidden past a lower limit", async () => {
+    useLibraryStore.setState({
+      entries: [postedEntry("posted-01", "901")],
+      posted: { used: 1, quota: 1, hidden: 4 },
+    });
+    createLibraryEntryMock.mockResolvedValue({ ok: true, entry: postedEntry("posted-06", "906") });
+    await useLibraryStore.getState().recordPosted(GUILD_A, {
+      messageId: "906",
+      webhookUrl: "https://discord.com/api/webhooks/1/tok",
+      message: simpleTextMessage("Newest"),
+    });
+    // The server rolled one out of view and deleted its oldest hidden post,
+    // so one post is shown and four are still kept.
+    const state = useLibraryStore.getState();
+    expect(state.entries.map((entry) => entry.id)).toEqual(["posted-06"]);
+    expect(state.posted).toEqual({ used: 1, quota: 1, hidden: 4 });
+  });
+
   it("the window never evicts a deleted post locally", async () => {
     useLibraryStore.setState({
       entries: [postedEntry("posted-01", "901"), postedEntry("posted-03", "903", 5)],

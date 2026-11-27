@@ -86,6 +86,10 @@ export interface LibraryPatchInput {
 export interface LibraryBucketUsage {
   used: number;
   quota: number | null;
+  /** Posted history kept past a lower limit (after a downgrade or a failed
+   *  renewal): not listed, not deleted, shown again when the limit rises.
+   *  Absent from drafts and from a proxy that predates it. */
+  hidden?: number;
 }
 
 export type LibraryListResult =
@@ -172,6 +176,7 @@ export async function listLibrary(
   ): LibraryBucketUsage => ({
     used: sent?.used ?? items.filter((e) => e.label === label && !e.deleted_at).length,
     quota: sent?.quota ?? null,
+    ...(typeof sent?.hidden === "number" && sent.hidden > 0 ? { hidden: sent.hidden } : {}),
   });
   const retention = data?.deleted_retention_secs;
   return {
