@@ -36,6 +36,7 @@ import {
   useLibraryStore,
 } from "./libraryStore";
 import { deletedPostsMessage } from "./usePostedVerify";
+import { useAuthStore } from "@/core/auth/authStore";
 import type { LibraryEntryResult, LibraryEntryView } from "./api";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "@/core/serialization/normalize";
@@ -346,6 +347,7 @@ describe("libraryStore.verifyPosted", () => {
   beforeEach(() => {
     useLibraryStore.getState().reset();
     resetStore();
+    useAuthStore.setState({ status: "authed" });
     verifyLibraryPostedMock.mockReset();
     createLibraryEntryMock.mockReset();
     deleteLibraryEntryMock.mockReset();
@@ -448,6 +450,29 @@ describe("libraryStore.verifyPosted", () => {
     const state = useLibraryStore.getState();
     expect(isDeletedOnDiscord(state.entries[0])).toBe(false);
     expect(state.posted).toEqual({ used: 1, quota: 10 });
+  });
+
+  it.each(["anon", "unknown", "loading"] as const)(
+    "a send while %s uploads nothing to the server",
+    async (status) => {
+      useAuthStore.setState({ status });
+      await useLibraryStore.getState().recordPosted(GUILD_A, {
+        messageId: "905",
+        webhookUrl: "https://discord.com/api/webhooks/1/tok",
+        message: simpleTextMessage("Private"),
+      });
+      expect(createLibraryEntryMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("a signed-in send records the post", async () => {
+    createLibraryEntryMock.mockResolvedValue({ ok: true, entry: postedEntry("posted-05", "905") });
+    await useLibraryStore.getState().recordPosted(GUILD_A, {
+      messageId: "905",
+      webhookUrl: "https://discord.com/api/webhooks/1/tok",
+      message: simpleTextMessage("Shared"),
+    });
+    expect(createLibraryEntryMock).toHaveBeenCalledOnce();
   });
 
   it("the window never evicts a deleted post locally", async () => {

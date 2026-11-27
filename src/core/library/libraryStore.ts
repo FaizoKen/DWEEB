@@ -14,6 +14,7 @@
 
 import { create } from "zustand";
 import { registerAccountStateReset } from "@/core/auth/accountScopedState";
+import { useAuthStore } from "@/core/auth/authStore";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
 import type { RestoredOrigin } from "@/core/state/messageStore";
@@ -424,6 +425,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   async recordPosted(guildId, input) {
     if (!isLibraryConfigured() || !guildId) return;
+    // Signed out, the server is bound to refuse the record, so don't hand it
+    // the message and its webhook URL at all. The privacy policy relies on this.
+    if (useAuthStore.getState().status !== "authed") return;
     const generation = accountGeneration;
     const res = await createLibraryEntry(guildId, {
       label: "posted",
@@ -438,7 +442,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const merged = mergeEntry(get(), res.entry);
       if (merged) set(merged);
     }
-    // Quota-full / signed-out / network trouble: silently drop the record.
+    // Quota-full / expired session / network trouble: silently drop the record.
     // The send already landed; the library is best-effort.
   },
 
