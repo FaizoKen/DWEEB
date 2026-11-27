@@ -349,10 +349,12 @@
           <strong>Server message library.</strong> Server drafts and a rolling history of messages
           posted through DWEEB store the message, its destination, the Discord ID of the person who
           saved or posted it and, where needed for later editing, the webhook URL. Messages and
-          webhook URLs are sealed at rest. Drafts remain until deleted. Posted history evicts older
-          entries beyond the server's plan limit, except those of never-expire messages. We check
-          with Discord whether posted messages still exist and keep history of deleted ones for 30
-          days. People who can manage that server's webhooks can access its library.
+          webhook URLs are sealed at rest. Drafts remain until deleted. Once posted history reaches
+          the server's plan limit, each new post deletes its oldest entry; entries for never-expire
+          messages are always kept. If the limit drops, entries over it are hidden, not deleted,
+          until it rises again. We check with Discord whether posted messages still exist and keep
+          history of deleted ones for 30 days. People who can manage that server's webhooks can
+          access its library.
         </li>
         <li>
           <strong>Discord Activity.</strong> Collaborative room state and presence are relayed in
@@ -664,8 +666,8 @@
         Local data persists until you remove it or clear this site's browser storage. Short links
         expire after 7 days. Activity drafts normally expire after 7 inactive days. Completed or
         failed schedules are normally swept after 7 days; active schedules remain until completion
-        or cancellation. Server-library drafts remain until deleted, while posted history is a
-        rolling plan-sized window, with history of messages deleted on Discord kept for 30 days.
+        or cancellation. Server-library drafts remain until deleted, while posted history rolls as
+        described in section 5, with history of messages deleted on Discord kept for 30 days.
         Stateful plugin configuration, giveaway entries, poll votes and one-response records remain
         in that plugin service until removed by a user action or its operator; DWEEB currently has
         no automatic plugin-record deletion when you remove a component. Revoking the Discord
