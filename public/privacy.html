@@ -65,7 +65,7 @@
         "@id": "https://dweeb.faizo.net/privacy#webpage",
         "name": "Privacy Policy — DWEEB",
         "url": "https://dweeb.faizo.net/privacy",
-        "dateModified": "2026-11-22",
+        "dateModified": "2026-11-27",
         "inLanguage": "en",
         "isPartOf": { "@id": "https://dweeb.faizo.net/#website" }
       }
@@ -130,6 +130,10 @@
         line-height: 1.2;
         margin: 0 0 0.35rem;
       }
+      h3 {
+        font-size: 1.05rem;
+        margin: 1.5rem 0 0.4rem;
+      }
       h2 {
         font-size: 1.25rem;
         margin: 2.25rem 0 0.75rem;
@@ -188,19 +192,24 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 22 November 2026</p>
+      <p class="meta">Last updated: 27 November 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> The core editor is local by default and does not require
         an account. Your current draft, locally saved messages, recent webhook URLs, attachments,
-        preferences, and any AI API keys are kept in your browser. Data leaves your device only when
-        you use a feature that needs it: sending to Discord, creating a short link or schedule,
-        saving to a server library, joining a collaborative Activity, using AI or a plugin, sending
-        feedback, signing in, or managing a paid plan. Those choices and their retention are
-        explained below. After you send a message, the confirmation may show an offer for DWEEB's
-        own paid plans or, if third-party ads are switched on, one non-personalized ad from Google
-        instead. Neither is shown when DWEEB knows the server is on a paid plan. We do not sell your
-        data.
+        preferences, and any AI API keys are kept in your browser. Apart from analytics, crash
+        reports and normal web requests, what you create leaves your device when you use a feature
+        that needs it: sending, short links, schedules, server libraries, the Discord Activity,
+        avatar uploads, AI, plugins, feedback, or connecting an AI app. When you're signed in,
+        sending to a server also uploads the message and webhook URL to us for that server's
+        history.
+        <strong
+          >Built-in AI sends your prompt and current message through our server to Groq.</strong
+        >
+        Signing in and paid plans share the account details described below. After you send a
+        message, the confirmation may show an offer for DWEEB's own paid plans or, if third-party
+        ads are switched on, one non-personalized ad from Google instead. Neither is shown when
+        DWEEB knows the server is on a paid plan. We do not sell your data.
       </div>
 
       <p>
@@ -224,7 +233,7 @@
         <li>Webhook URLs you enter and your list of recently used webhooks.</li>
         <li>Messages you explicitly save as <em>Browser drafts</em>.</li>
         <li>Attachments/images you add while building, until you send or upload them.</li>
-        <li>API keys for the optional AI assistant (bring-your-own-key).</li>
+        <li>API keys you add to use your own AI provider. Built-in AI doesn't need one.</li>
         <li>Interface preferences (e.g. the last server you connected to).</li>
       </ul>
       <p>
@@ -234,9 +243,9 @@
       </p>
       <p>
         Choosing an action can transmit the relevant data. For example, Send uploads the message and
-        attachments to Discord; AI sends your prompt, draft context, and key to your selected
-        provider; and a server draft uploads the message to DWEEB's server library. The sections
-        below describe each case.
+        attachments to Discord and may record the message with us, built-in AI sends your prompt and
+        message through our server, and a server draft uploads the message to DWEEB's server
+        library. The sections below describe each case.
       </p>
       <p>
         <strong>Plugins.</strong> A plugin configuration iframe may request only the editor
@@ -244,11 +253,16 @@
         If a plugin needs a webhook credential, DWEEB names the plugin and destination and asks you
         before sharing that one URL. A stateful plugin retains an approved URL in its own
         configuration so it can keep handling interactions. Removing the component or clearing
-        browser data does not delete that server-side plugin record. The bundled Modal Form and Self
-        Role services store these plugin configurations in their SQLite databases; treat the plugin
-        operator as a recipient of the credential. Delete or replace the webhook in Discord to
-        revoke access. Plugin configuration and interaction services process the other data needed
-        for the action, so attach and configure only plugins you trust.
+        browser data does not delete that server-side plugin record. DWEEB's bundled plugins store
+        their configurations, which can include message content, form questions and webhook URLs, in
+        databases on our server. Delete or replace the webhook in Discord to revoke a stored URL.
+        Plugin configuration and interaction services process the other data needed for the action,
+        so attach and configure only plugins you trust.
+      </p>
+      <p>
+        With a server connected, the plugin library and link-plugin panels ask that plugin's
+        operator, such as RoleLogic, whether it is set up. That request carries the server's ID and
+        normal web-request information, but no cookies or message content.
       </p>
 
       <h2>2. Share links</h2>
@@ -269,18 +283,35 @@
         may still process request metadata as described below. Don't create one for a message you
         wouldn't want on our server — use the default hash link instead.
       </p>
+      <p>
+        DWEEB creates a short link by itself in two cases where a message is too large for a normal
+        link: <strong>Open on web</strong> in the Discord Activity, and DWEEB's message commands in
+        Discord.
+      </p>
 
       <h2>3. Sending messages to Discord</h2>
       <p>
         In the web app, clicking <strong>Send</strong>, <strong>Restore</strong>, or update normally
         makes your browser talk directly to Discord's webhook API. Your webhook URL, message
-        content, and any uploaded files go to Discord. Activity publishing and scheduled posts must
-        instead pass through our proxy so they can work while embedded or after your browser closes.
-        This is governed by
+        content, and any uploaded files go to Discord. Activity publishing, scheduled posts and
+        posts from a connected AI app instead pass through our server. So do webhook URLs that DWEEB
+        looks up or creates for a server you connect. Discord's handling is governed by
         <a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer"
           >Discord's Privacy Policy</a
         >. A webhook URL is a credential — treat it like a password and only share it with people
         you trust.
+      </p>
+      <p id="posted-history">
+        <strong>Posted history.</strong> If you're signed in, after a successful send or update to a
+        server your browser also sends the message, webhook URL and destination to our server for
+        that server's Posted history. We store it only if you can manage that server's webhooks.
+        Otherwise we refuse it without storing or logging its contents. If you aren't signed in,
+        your browser doesn't send it.
+      </p>
+      <p>
+        <strong>Message commands in Discord.</strong> When someone uses one of DWEEB's commands on a
+        message, Discord sends us that message and who used the command so we can reply. We don't
+        store the message unless the reply needs a short link, as described above.
       </p>
       <p>
         Messages can contain image, video, and other media URLs. Opening a preview or shared design
@@ -290,14 +321,18 @@
 
       <h2>4. Signing in with Discord (optional)</h2>
       <p>
-        If you choose to sign in with Discord to load a server's roles, channels, and emojis, we use
-        Discord's OAuth flow. From it we receive your Discord user ID, your username/display name,
-        your avatar, an access token, and the list of servers you can manage. This information is
-        stored in an <strong>encrypted, HttpOnly session cookie</strong> kept in your browser — we
-        do not maintain a server-side account database. The access token is used only to confirm you
-        belong to a server before returning its data, and that data is briefly cached on our proxy
-        to reduce calls to Discord. Signing out clears the session. If you never sign in, none of
-        this applies.
+        If you choose to sign in, we use Discord's OAuth flow and receive your Discord user ID,
+        username or display name, avatar, an access token, and the list of servers you're in, with
+        your permissions in each. Your ID, name, avatar and token are kept in an
+        <strong>encrypted, HttpOnly session cookie</strong> that normally lasts up to 7 days. We use
+        the token to identify you and check which servers you can use. Server lists and data are
+        briefly cached on our server to reduce calls to Discord. The Discord Activity uses a token
+        from Discord in the same way, without that cookie.
+      </p>
+      <p>
+        We don't keep account profiles, but features you use can store your Discord ID, as described
+        in this policy. Signing out clears the session cookie. It doesn't delete those records or
+        disconnect an AI app.
       </p>
 
       <h2>5. Server-backed features (optional)</h2>
@@ -306,15 +341,18 @@
         <li>
           <strong>Scheduled posts.</strong> We store the Discord webhook URL, message payload,
           schedule, destination identifiers, and ownership/management data. Sensitive payloads and
-          webhook URLs are sealed at rest. Active schedules remain until they run or are cancelled;
-          completed and failed rows are normally removed after 7 days.
+          webhook URLs are sealed at rest. Active schedules, including paused and repeating ones,
+          remain until they finish or are cancelled; completed and failed rows are normally removed
+          after 7 days.
         </li>
         <li>
           <strong>Server message library.</strong> Server drafts and a rolling history of messages
-          posted through DWEEB store the message payload and, where needed for later editing, the
-          webhook URL. Sensitive values are sealed at rest. Drafts remain until a server manager
-          deletes them; posted history evicts older entries as the server's plan window fills.
-          People who can manage that Discord server can access its library.
+          posted through DWEEB store the message, its destination, the Discord ID of the person who
+          saved or posted it and, where needed for later editing, the webhook URL. Messages and
+          webhook URLs are sealed at rest. Drafts remain until deleted. Posted history evicts older
+          entries beyond the server's plan limit, except those of never-expire messages. We check
+          with Discord whether posted messages still exist and keep history of deleted ones for 30
+          days. People who can manage that server's webhooks can access its library.
         </li>
         <li>
           <strong>Discord Activity.</strong> Collaborative room state and presence are relayed in
@@ -342,6 +380,36 @@
           transcripts, so write in a ticket as you would in any channel the server's staff can see.
         </li>
         <li>
+          <strong>Other bundled plugins.</strong> Besides their configurations, Giveaway stores
+          entrants' and winners' Discord IDs, Poll stores each voter's ID and choices, Modal Form
+          stores who submitted when a form allows one response, and Self Role stores temporary role
+          grants until they expire. Form answers are processed and forwarded to the destination the
+          form's creator chose, not stored by the plugin.
+        </li>
+        <li>
+          <strong>Never-expire messages and custom bots.</strong> For a never-expire message we
+          store its message, channel and server IDs and who added it. For a custom bot we store its
+          name, application ID, public key, who added it, and any client secret or webhook URL in
+          encrypted form. To run component expiry, we also record when a message's buttons or menus
+          were last used, without who used them.
+        </li>
+        <li>
+          <strong>Avatar uploads.</strong> An avatar you upload is resized in your browser, then
+          stored on our server <strong>indefinitely at a public URL</strong>, because Discord loads
+          it every time it shows the message. The image record doesn't include your Discord ID.
+        </li>
+        <li>
+          <strong>Ratings.</strong> If you rate DWEEB, we store your Discord ID, score and when you
+          rated. Only the combined score and count are published.
+        </li>
+        <li>
+          <strong>Connected AI apps (MCP).</strong> If you authorize an app such as Claude, we store
+          its registration and, for up to 7 days, your Discord ID and encrypted Discord access token
+          so it can act as you in DWEEB. The app receives what it requests, such as your servers,
+          their channels and messages posted through DWEEB, and handles it under its own privacy
+          policy. You can end access sooner by removing DWEEB under Discord's Authorized Apps.
+        </li>
+        <li>
           <strong>Feedback.</strong> When you submit the feedback form, we receive the category,
           summary, details, and optional contact you enter. Normal proxy logs may also contain
           request metadata such as an IP address and browser user agent. The report is relayed to
@@ -351,21 +419,75 @@
           secrets.
         </li>
         <li>
-          <strong>Plans and billing.</strong> Stripe processes checkout and payment details. We keep
-          a limited subscription mirror containing the identifiers and status needed to bind a plan
-          to a Discord server and enforce its quotas; DWEEB does not receive or store full card
-          details.
+          <strong>Plans and billing.</strong> Stripe processes checkout and payment details. We send
+          Stripe your Discord user ID and display name and the server's ID, and keep a subscription
+          mirror containing the identifiers and status needed to bind a plan to a server and enforce
+          its quotas. RoleLogic, also operated by Faizo, uses the same Stripe account, so it can
+          read those subscription details to honor the plan there. DWEEB does not receive or store
+          full card details.
         </li>
       </ul>
 
-      <h2>6. The AI assistant (optional)</h2>
+      <h2 id="ai">6. The AI assistant (optional)</h2>
+      <p>The assistant works in two ways, and they handle your data differently.</p>
+
+      <h3>Built-in DWEEB AI (the default)</h3>
+      <ul>
+        <li>
+          <strong>What is sent.</strong> When you use it, your browser sends our server your prompt,
+          recent chat (up to 12 turns, including the AI's replies) and the message in the editor,
+          including its webhook name, avatar URL, text and links. It also sends the connected
+          server's ID and your sign-in. DWEEB may send a follow-up request automatically to repair a
+          reply. Uploaded files and the webhook URL you send through aren't included, but anything
+          you type into the message or chat is.
+        </li>
+        <li>
+          <strong>Who receives it.</strong> Our server passes the prompt, chat and message to
+          <a href="https://groq.com/" target="_blank" rel="noopener noreferrer">Groq</a>, which runs
+          the model. We don't send Groq your Discord ID, server ID, sign-in token or IP address.
+          Anything personal you write in the text is still sent.
+        </li>
+        <li>
+          <strong>What Groq keeps.</strong> Groq may store inputs and replies for
+          <strong>up to 30 days</strong> for reliability, abuse and compliance purposes, or longer
+          where the law requires it. It stores them in the United States and may process them in
+          other countries. Its agreement doesn't let it train models on them unless we permit it,
+          and we don't. See Groq's
+          <a
+            href="https://console.groq.com/docs/your-data"
+            target="_blank"
+            rel="noopener noreferrer"
+            >data practices</a
+          >
+          and
+          <a
+            href="https://console.groq.com/docs/legal/services-agreement"
+            target="_blank"
+            rel="noopener noreferrer"
+            >services agreement</a
+          >.
+        </li>
+        <li>
+          <strong>What we keep.</strong> We don't store your prompts, chat or the AI's replies, or
+          use them for analytics, advertising or training. We store a daily count of your requests
+          and tokens under your Discord ID for about 35 days. Our server logs record your Discord
+          ID, the connected server's ID, plan, model, token counts and timing for each request. If
+          Groq returns an error, we also log the start of its error response.
+        </li>
+      </ul>
+
+      <h3>Your own provider</h3>
       <p>
-        The optional AI assistant is bring-your-own-key. When you use it, your prompt and your API
-        key are sent <strong>directly from your browser</strong> to the provider or compatible
-        gateway you selected (e.g. OpenAI, Anthropic, Google, Groq, OpenRouter, or your Ollama
-        endpoint). DWEEB does not proxy or store those prompts or keys. Your use of a provider is
-        subject to that provider's privacy policy and terms. A custom endpoint is controlled by
-        whoever operates it.
+        If you choose your own provider instead, such as OpenAI, Anthropic, Google, Groq,
+        OpenRouter, a compatible endpoint or Ollama, your prompt, chat, current message and any API
+        key go
+        <strong>directly from your browser</strong> to that provider. They don't pass through our
+        server. That provider's privacy policy and terms apply, and a custom endpoint is controlled
+        by whoever operates it.
+      </p>
+      <p>
+        In both cases the chat is kept only in the open tab's memory. An API key is saved in your
+        browser's storage until you remove it.
       </p>
 
       <h2>7. Analytics and advertising</h2>
@@ -376,8 +498,8 @@
         device and browser type, and may set cookies. This is governed by
         <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer"
           >Google's Privacy Policy</a
-        >. DWEEB sends a page's public canonical URL rather than the live address bar (keeping
-        only a tag that names the AI assistant whose link you followed, such as ChatGPT), reduces a
+        >. DWEEB sends a page's public canonical URL rather than the live address bar (keeping only
+        a tag that names the AI assistant whose link you followed, such as ChatGPT), reduces a
         referring URL to its site origin, and limits product events to fixed public fields. Draft
         hashes, webhook and OAuth values, Discord identifiers, and message text are not analytics
         fields. DWEEB does not load Google Analytics when your browser sends Do Not Track or Global
@@ -398,19 +520,18 @@
       <p>
         <strong>Advertising.</strong> DWEEB can show a third-party advertisement in that same place
         instead of its own offer. When that is switched on, the confirmation may show
-        <strong>one advertisement</strong>, served by
-        <strong>Google AdSense</strong>. That is the only place DWEEB shows an ad: never in the
-        editor, the guides or templates, or the Discord Activity; never for a message sent to a
-        server on a paid plan (Plus or Pro); not on your first send; and not when your browser sends
-        Do Not Track or Global Privacy Control or asks to save data. DWEEB requests
-        <strong>non-personalized ads</strong> and tells Google's tags that consent to advertising
-        storage and ad personalization is denied, so the ad is chosen from the page's context, not
-        from a profile of you. To deliver and measure the ad and to prevent fraud, Google receives
-        the information any web request carries — such as your IP address, browser details and the
-        page address (<code>dweeb.faizo.net</code>) — and may use limited identifiers for frequency
-        capping and fraud prevention. DWEEB never gives the ad network your message content, webhook
-        URLs, Discord identifiers or server names, and it skips the ad whenever the address bar
-        still holds app state. See
+        <strong>one advertisement</strong>, served by <strong>Google AdSense</strong>. That is the
+        only place DWEEB shows an ad: never in the editor, the guides or templates, or the Discord
+        Activity; never for a message sent to a server on a paid plan (Plus or Pro); not on your
+        first send; and not when your browser sends Do Not Track or Global Privacy Control or asks
+        to save data. DWEEB requests <strong>non-personalized ads</strong> and tells Google's tags
+        that consent to advertising storage and ad personalization is denied, so the ad is chosen
+        from the page's context, not from a profile of you. To deliver and measure the ad and to
+        prevent fraud, Google receives the information any web request carries — such as your IP
+        address, browser details and the page address (<code>dweeb.faizo.net</code>) — and may use
+        limited identifiers for frequency capping and fraud prevention. DWEEB never gives the ad
+        network your message content, webhook URLs, Discord identifiers or server names, and it
+        skips the ad whenever the address bar still holds app state. See
         <a
           href="https://policies.google.com/technologies/partner-sites"
           target="_blank"
@@ -423,24 +544,33 @@
       <p>
         Because DWEEB's editor UI runs in your browser, a bug that breaks it is otherwise invisible
         to us. When an unexpected runtime error occurs, DWEEB sends a small, automatic
-        <strong>crash report</strong> to our proxy so we can find and fix it. A report contains only
-        technical diagnostics: the error message and a few lines of the code stack trace, the app
-        version, and the page <em>path</em> (for example <code>/templates</code>). It
-        <strong>never includes your message content</strong> — in particular it never includes the
-        <code>#</code> hash fragment where a draft or share link lives — and it carries no account,
-        webhook URL, API key, or other input you typed. Reports are de-duplicated and rate-limited
-        so a single bug can't flood us, and they're written to our short-lived server logs, not a
-        user profile. Because they contain no personal data and are essential to keeping the app
-        working, crash reports aren't separately opt-in. DWEEB suppresses them when your browser
-        sends Do Not Track or Global Privacy Control; a content blocker can suppress them too.
+        <strong>crash report</strong> to our server so we can find and fix it. A report contains the
+        type of error, its message and a few lines of the code stack trace, the app's version and
+        build, which surface you were using, and the page <em>path</em> (for example
+        <code>/templates</code>). It does not attach your message, account, webhook URL, API key or
+        the <code>#</code> hash fragment, although an error message can occasionally quote part of
+        the value that caused it. Reports are rate-limited and written to our server logs, and
+        serious ones are forwarded to a private maintainer channel on Discord. They aren't
+        separately opt-in. DWEEB suppresses them when your browser sends Do Not Track or Global
+        Privacy Control; a content blocker can suppress them too.
+      </p>
+      <p>
+        The Discord Activity also reports how its launch went: the step, outcome, timing, platform,
+        Activity instance ID and, on failure, the error.
       </p>
 
       <h2>9. Hosting and server logs</h2>
       <p>
-        The site is hosted on GitHub Pages. Like most web infrastructure, our hosting and the
-        Discord login proxy process technical data such as IP addresses to deliver the service,
-        apply per-IP rate limiting, and protect against abuse. We don't use this to build user
-        profiles.
+        The website is hosted on GitHub Pages. Our server, its databases and the bundled plugins run
+        on a server rented from Contabo. Both process technical data such as IP addresses to deliver
+        the service. We also use IP addresses to rate-limit and protect against abuse.
+      </p>
+      <p>
+        Our server logs can contain Discord user, server, channel and message IDs, and error entries
+        can contain IP addresses, browser details and request addresses. Logs are deleted as they
+        rotate, currently after about six weeks, though this can vary with volume. Error entries may
+        be forwarded to a private maintainer channel on Discord, where they can remain longer. We
+        don't use any of this to build advertising or behavioral profiles.
       </p>
 
       <h2>10. Cookies</h2>
@@ -450,6 +580,10 @@
           HttpOnly), plus a short-lived OAuth state cookie for security. Cleared on sign-out.
         </li>
         <li><strong>Analytics cookies</strong> — set by Google Analytics, as described above.</li>
+        <li>
+          <strong>Payment cookies</strong> — set by Stripe, for payment and fraud prevention, only
+          once you start checkout or open billing.
+        </li>
         <li>
           <strong>Ad delivery</strong> — when an ad is shown after a send, Google AdSense may use
           limited, non-personalizing storage for frequency capping and fraud prevention.
@@ -493,10 +627,31 @@
           — hosting and content delivery.
         </li>
         <li>
+          <a href="https://contabo.com/en/legal/privacy/" target="_blank" rel="noopener noreferrer"
+            >Contabo</a
+          >
+          — hosting for our server, databases, logs and bundled plugins.
+        </li>
+        <li>
           <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">Stripe</a>
           — optional checkout and subscription management.
         </li>
-        <li>Whichever AI provider you select, if you use the AI assistant.</li>
+        <li>
+          <a
+            href="https://console.groq.com/docs/your-data"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Groq</a
+          >
+          — runs built-in DWEEB AI.
+        </li>
+        <li>Any other AI provider you select, and any AI app you connect to DWEEB.</li>
+        <li>
+          <a href="https://rolelogic.faizo.net/" target="_blank" rel="noopener noreferrer"
+            >RoleLogic</a
+          >
+          — shared subscriptions, and the setup checks of its link plugins.
+        </li>
         <li>
           Any plugin you choose to attach to a component — each runs as an independent service with
           its own privacy policy.
@@ -510,15 +665,24 @@
         expire after 7 days. Activity drafts normally expire after 7 inactive days. Completed or
         failed schedules are normally swept after 7 days; active schedules remain until completion
         or cancellation. Server-library drafts remain until deleted, while posted history is a
-        rolling plan-sized window. Stateful plugin configuration remains in that plugin service
-        until its operator removes it; DWEEB currently has no automatic plugin-record deletion when
-        you remove a component. Revoking the Discord webhook immediately makes a retained URL
-        unusable. Ticket records stay in the Tickets service, which uses them to number tickets and
-        apply a panel's limits, until its operator removes them; ticket transcripts exist only as
-        Discord attachments and are deleted the way any Discord message is. Subscription records are
-        retained as needed to administer plans, resolve disputes, and meet legal obligations.
-        Operational, security, feedback, and crash-report logs are retained only as long as
-        reasonably needed for those purposes.
+        rolling plan-sized window, with history of messages deleted on Discord kept for 30 days.
+        Stateful plugin configuration, giveaway entries, poll votes and one-response records remain
+        in that plugin service until removed by a user action or its operator; DWEEB currently has
+        no automatic plugin-record deletion when you remove a component. Revoking the Discord
+        webhook immediately makes a retained URL unusable. Ticket records stay in the Tickets
+        service, which uses them to number tickets and apply a panel's limits, until its operator
+        removes them; ticket transcripts exist only as Discord attachments and are deleted the way
+        any Discord message is.
+      </p>
+      <p>
+        AI usage counts are deleted after about 35 days. A connected AI app's access expires within
+        7 days, and its unused registration is removed after about 30. Component-use times are
+        removed once they can no longer affect expiry. Never-expire and custom-bot records remain
+        until removed. Avatar uploads and ratings are kept until you ask us to delete them.
+        Subscription records are retained as needed to administer plans, resolve disputes, and meet
+        legal obligations. Feedback is kept as long as it is useful for improving DWEEB, and server
+        logs as described in section 9. Our hosting provider's backups can hold copies of deleted
+        data until those backups are replaced.
       </p>
 
       <h2>13. Children</h2>
