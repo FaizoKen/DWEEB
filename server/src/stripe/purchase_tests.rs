@@ -1,5 +1,6 @@
 //! Tests for `purchase.rs`: the rule over every combination of subscriptions,
-//! then the real client against an in-process fake Stripe.
+//! then the real client against an in-process fake Stripe (which the webhook's
+//! failed-payment tests at the end share).
 //!
 //! Two promises are pinned throughout: an Upgrade click never opens a second
 //! charge for the same thing, and it never writes to an existing subscription.
@@ -186,6 +187,11 @@ struct Fake {
     sessions: Vec<Value>,
     /// Requests whose path ends with this answer with this status instead.
     fail: Option<(&'static str, u16)>,
+    /// What Search answers, when its index lags behind `subs`.
+    stale_search: Option<Vec<Value>>,
+    /// The next request with this method and path is answered with what Stripe
+    /// held when it was asked, but only once the gate opens: a slow reply.
+    hold: Option<(&'static str, String, Arc<tokio::sync::Notify>)>,
     calls: Vec<Call>,
 }
 
@@ -201,10 +207,25 @@ async fn fake_stripe(
 ) -> Response {
     // A real round trip yields; without this two clicks could never interleave.
     tokio::time::sleep(std::time::Duration::from_millis(3)).await;
-    let mut f = fake.lock().unwrap();
+    let (response, gate) = {
+        let mut f = fake.lock().unwrap();
+        let response = answer(&mut f, &method, &uri, &body);
+        let held = f
+            .hold
+            .as_ref()
+            .is_some_and(|(m, p, _)| *m == method.as_str() && *p == uri.path());
+        (response, held.then(|| f.hold.take().unwrap().2))
+    };
+    if let Some(gate) = gate {
+        gate.notified().await;
+    }
+    response
+}
+
+fn answer(f: &mut Fake, method: &Method, uri: &Uri, body: &[u8]) -> Response {
     let path = uri.path().to_string();
     let query = pairs(uri.query().unwrap_or_default().as_bytes());
-    let form = pairs(&body);
+    let form = pairs(body);
     f.calls.push(Call {
         method: method.clone(),
         path: path.clone(),
@@ -238,7 +259,9 @@ async fn fake_stripe(
             .map(|(id, _)| json!({ "id": id }))
             .collect::<Vec<_>>() })),
         ("GET", "/v1/subscriptions/search") => ok(json!({ "data": f
-            .subs
+            .stale_search
+            .as_ref()
+            .unwrap_or(&f.subs)
             .iter()
             .filter(|s| s["metadata"]["guild_id"]
                 .as_str()
@@ -301,6 +324,31 @@ async fn fake_stripe(
             let id = p.trim_start_matches("/v1/subscriptions/");
             match f.subs.iter().find(|s| s["id"] == id) {
                 Some(sub) => ok(sub.clone()),
+                None => error(404, "resource_missing"),
+            }
+        }
+        ("POST", p) if p.starts_with("/v1/subscriptions/") => {
+            let id = p.trim_start_matches("/v1/subscriptions/");
+            match f.subs.iter_mut().find(|s| s["id"] == id) {
+                Some(sub) => {
+                    if let Some(guild) = form.get("metadata[guild_id]") {
+                        sub["metadata"]["guild_id"] = json!(guild);
+                    }
+                    ok(sub.clone())
+                }
+                None => error(404, "resource_missing"),
+            }
+        }
+        // Stripe answers a deleted customer with a stub, and one it never had
+        // with a 404.
+        ("GET", p) if p.starts_with("/v1/customers/") => {
+            let id = p.trim_start_matches("/v1/customers/");
+            if f.deleted.iter().any(|d| d == id) {
+                return ok(json!({ "id": id, "object": "customer", "deleted": true }));
+            }
+            match f.customers.iter().find(|(c, _)| c == id) {
+                Some((_, uid)) if uid.is_empty() => ok(json!({ "id": id, "metadata": {} })),
+                Some((_, uid)) => ok(json!({ "id": id, "metadata": { "discord_user_id": uid } })),
                 None => error(404, "resource_missing"),
             }
         }
@@ -394,9 +442,10 @@ impl Harness {
             purchase_gates: Default::default(),
         };
         for s in &subs {
+            let seen = state.store.revision().unwrap();
             state
                 .client
-                .upsert_from_sub(&state.store, s, None)
+                .mirror_listed(&state.store, s, seen, None)
                 .await
                 .unwrap();
         }
@@ -953,4 +1002,471 @@ async fn a_refusal_is_never_our_failure() {
     let body = axum::body::to_bytes(leaky.into_body(), 4096).await.unwrap();
     let shown = String::from_utf8_lossy(&body);
     assert!(!shown.contains("sk_live"), "{shown}");
+}
+
+// ── A failed payment's webhook ───────────────────────────────────────────────
+
+fn payment_failed(invoice: Value) -> Value {
+    json!({ "type": "invoice.payment_failed", "data": { "object": invoice } })
+}
+
+/// An invoice as Stripe has rendered it since API 2025-03-31.basil.
+fn invoice_billing(subscription: Value) -> Value {
+    json!({
+        "id": "in_1",
+        "object": "invoice",
+        "parent": {
+            "type": "subscription_details",
+            "quote_details": null,
+            "subscription_details": { "metadata": {}, "subscription": subscription },
+        },
+    })
+}
+
+/// A mirror saying `active` of a subscription Stripe now holds as `status`.
+async fn active_here_but_now(status: &str) -> Harness {
+    let h = Harness::new(vec![sub("sub_1", "cus_1", "medium", "active", Some(HERE))]).await;
+    h.fake.lock().unwrap().subs[0]["status"] = json!(status);
+    h
+}
+
+impl Harness {
+    async fn deliver(&self, event: &Value) -> Result<Option<String>, AppError> {
+        self.state
+            .client
+            .handle_event(&self.state.store, event)
+            .await
+    }
+
+    fn mirrored_status(&self) -> String {
+        self.state.store.get_subscription("sub_1").unwrap().status
+    }
+}
+
+#[tokio::test]
+async fn a_failed_payment_is_mirrored_from_either_invoice_shape() {
+    // An expanded object is only a snapshot: its status must not be what's kept.
+    let expanded = json!({ "id": "sub_1", "object": "subscription", "status": "active" });
+    for (shape, invoice) in [
+        ("current", invoice_billing(json!("sub_1"))),
+        ("current, expanded", invoice_billing(expanded.clone())),
+        ("legacy", json!({ "subscription": "sub_1" })),
+        ("legacy, expanded", json!({ "subscription": expanded })),
+        (
+            "legacy beside a null parent",
+            json!({ "parent": null, "subscription": "sub_1" }),
+        ),
+        ("both, where the current one wins", {
+            let mut both = invoice_billing(json!("sub_1"));
+            both["subscription"] = json!("sub_other");
+            both
+        }),
+    ] {
+        let h = active_here_but_now("past_due").await;
+        let event = payment_failed(invoice);
+        // Stripe redelivers: the second time must land on the same one row.
+        for _ in 0..2 {
+            let bound = h.deliver(&event).await.ok();
+            assert_eq!(bound, Some(Some(HERE.to_string())), "{shape}");
+            assert_eq!(h.mirrored_status(), "past_due", "{shape}");
+            assert_eq!(h.state.store.active_slots(HERE, &slots()), 0, "{shape}");
+            assert_eq!(h.state.store.list_subscriptions_for_user(UID).len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_invoice_without_a_subscription_reads_and_writes_nothing() {
+    for invoice in [
+        json!({ "id": "in_1" }),
+        json!({ "parent": null }),
+        json!({ "subscription": null }),
+        json!({ "parent": {
+            "type": "quote_details",
+            "quote_details": { "quote": "qt_1" },
+            "subscription_details": null,
+        } }),
+        invoice_billing(Value::Null),
+        invoice_billing(json!("")),
+    ] {
+        let h = active_here_but_now("past_due").await;
+        let bound = h.deliver(&payment_failed(invoice.clone())).await.ok();
+        assert_eq!(bound, Some(None), "{invoice}");
+        assert!(h.fake.lock().unwrap().calls.is_empty(), "{invoice}");
+        assert_eq!(h.mirrored_status(), "active", "{invoice}");
+    }
+}
+
+#[tokio::test]
+async fn a_late_failed_payment_takes_stripes_current_status() {
+    let event = payment_failed(invoice_billing(json!("sub_1")));
+    // Paid since the event was sent, or cancelled since.
+    for now in ["active", "canceled"] {
+        let h = active_here_but_now("past_due").await;
+        assert!(h.deliver(&event).await.is_ok());
+        h.fake.lock().unwrap().subs[0]["status"] = json!(now);
+        assert!(h.deliver(&event).await.is_ok());
+        assert_eq!(h.mirrored_status(), now);
+    }
+}
+
+#[tokio::test]
+async fn a_failed_payment_we_cant_apply_pages_only_when_it_is_ours() {
+    let event = payment_failed(invoice_billing(json!("sub_1")));
+    let fault = |result: Result<Option<String>, AppError>| {
+        let response = result.err()?.into_response();
+        Some((response.status(), response.extensions().get().copied()))
+    };
+    let theirs = Some((StatusCode::BAD_GATEWAY, Some(Fault::Upstream)));
+
+    let mut h = active_here_but_now("past_due").await;
+    for status in [500, 503] {
+        h.fake.lock().unwrap().fail = Some(("/sub_1", status));
+        assert_eq!(fault(h.deliver(&event).await), theirs, "{status}");
+    }
+    // A subscription Stripe doesn't have: acknowledged, retrying can't help.
+    h.fake.lock().unwrap().fail = None;
+    let held = std::mem::take(&mut h.fake.lock().unwrap().subs);
+    assert_eq!(h.deliver(&event).await.ok(), Some(None));
+    h.fake.lock().unwrap().subs = held;
+
+    let api = std::mem::replace(&mut h.state.client.api, "http://127.0.0.1:1".into());
+    assert_eq!(fault(h.deliver(&event).await), theirs, "no answer");
+    h.state.client.api = api;
+
+    // Our own mirror refusing the write is ours.
+    let sql = |sql: &str| h.state.store.lock().execute_batch(sql).unwrap();
+    sql("CREATE TRIGGER refuse BEFORE INSERT ON stripe_subscriptions
+         BEGIN SELECT RAISE(ABORT, 'refused'); END;");
+    let ours = Some((StatusCode::INTERNAL_SERVER_ERROR, Some(Fault::Ours)));
+    assert_eq!(fault(h.deliver(&event).await), ours);
+    assert_eq!(
+        h.mirrored_status(),
+        "active",
+        "a failure never half-applies"
+    );
+
+    // And the retry Stripe then sends applies it.
+    sql("DROP TRIGGER refuse;");
+    assert!(h.deliver(&event).await.is_ok());
+    assert_eq!(h.mirrored_status(), "past_due");
+}
+
+// ── A read that failed, and whose it was ─────────────────────────────────────
+
+/// The status and fault of a failed delivery; `None` when it was applied or
+/// acknowledged.
+async fn failure(result: Result<Option<String>, AppError>) -> Option<(StatusCode, Option<Fault>)> {
+    let response = result.err()?.into_response();
+    let status = response.status();
+    let fault = response.extensions().get().copied();
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    // Stripe's own wording can quote a masked key; the page only gets the status.
+    assert!(!String::from_utf8_lossy(&body).contains("fake says no"));
+    Some((status, fault))
+}
+
+const THEIRS: Option<(StatusCode, Option<Fault>)> =
+    Some((StatusCode::BAD_GATEWAY, Some(Fault::Upstream)));
+const OURS: Option<(StatusCode, Option<Fault>)> =
+    Some((StatusCode::BAD_GATEWAY, Some(Fault::Ours)));
+
+#[tokio::test]
+async fn a_refused_read_is_retried_and_pages_only_when_the_fault_is_ours() {
+    let event = payment_failed(invoice_billing(json!("sub_1")));
+    for (status, expected) in [
+        // Stripe throttling us: theirs to clear, and the next try works.
+        (429, THEIRS),
+        // Our request, our key, or a path that isn't Stripe's: ours.
+        (400, OURS),
+        (401, OURS),
+        (403, OURS),
+        (404, OURS),
+        (409, OURS),
+    ] {
+        let h = active_here_but_now("past_due").await;
+        h.fake.lock().unwrap().fail = Some(("/sub_1", status));
+        assert_eq!(failure(h.deliver(&event).await).await, expected, "{status}");
+        assert_eq!(h.mirrored_status(), "active", "{status}");
+        // Stripe's retry, once the cause is gone, applies the event.
+        h.fake.lock().unwrap().fail = None;
+        assert!(h.deliver(&event).await.is_ok(), "{status}");
+        assert_eq!(h.mirrored_status(), "past_due", "{status}");
+    }
+}
+
+/// Stripe holds `sub_1` with no Discord id on it, on `cus_1`, whose own
+/// metadata says `owner`; the mirror has never seen it.
+async fn only_its_customer_knows(owner: &str) -> Harness {
+    let h = Harness::new(vec![]).await;
+    let mut unowned = sub("sub_1", "cus_1", "medium", "past_due", Some(HERE));
+    unowned["metadata"] = json!({ "guild_id": HERE });
+    let mut fake = h.fake.lock().unwrap();
+    fake.subs.push(unowned);
+    fake.customers.push(("cus_1".into(), owner.into()));
+    drop(fake);
+    h
+}
+
+#[tokio::test]
+async fn a_failed_owner_lookup_is_retried_and_a_missing_owner_is_acknowledged() {
+    let event = payment_failed(invoice_billing(json!("sub_1")));
+    for (status, expected) in [(500, THEIRS), (429, THEIRS), (401, OURS)] {
+        let h = only_its_customer_knows(UID).await;
+        h.fake.lock().unwrap().fail = Some(("/customers/cus_1", status));
+        assert_eq!(failure(h.deliver(&event).await).await, expected, "{status}");
+        assert!(h.state.store.get_subscription("sub_1").is_none());
+        h.fake.lock().unwrap().fail = None;
+        assert_eq!(h.deliver(&event).await.ok(), Some(Some(HERE.to_string())));
+        assert_eq!(
+            h.state.store.get_subscription("sub_1").unwrap().user_id,
+            UID
+        );
+    }
+
+    // Nobody to attribute it to, now or on any retry: acknowledged, unwritten.
+    let deleted = only_its_customer_knows(UID).await;
+    deleted.fake.lock().unwrap().deleted = vec!["cus_1".into()];
+    let unknown = only_its_customer_knows(UID).await;
+    unknown.fake.lock().unwrap().customers.clear();
+    let anonymous = only_its_customer_knows("").await;
+    for h in [deleted, unknown, anonymous] {
+        assert_eq!(h.deliver(&event).await.ok(), Some(None));
+        assert!(h.state.store.get_subscription("sub_1").is_none());
+    }
+}
+
+#[tokio::test]
+async fn the_mirrored_owner_is_used_before_asking_the_customer() {
+    let h = active_here_but_now("past_due").await;
+    h.fake.lock().unwrap().subs[0]["metadata"] = json!({ "guild_id": HERE });
+    h.fake.lock().unwrap().fail = Some(("/customers/cus_1", 500));
+    let event = payment_failed(invoice_billing(json!("sub_1")));
+    assert_eq!(h.deliver(&event).await.ok(), Some(Some(HERE.to_string())));
+    let row = h.state.store.get_subscription("sub_1").unwrap();
+    assert_eq!(
+        (row.status.as_str(), row.user_id.as_str()),
+        ("past_due", UID)
+    );
+    let asked = h
+        .fake
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .any(|c| c.path.starts_with("/v1/customers"));
+    assert!(!asked, "the mirror already knew whose it is");
+}
+
+// ── Overlapping writers ──────────────────────────────────────────────────────
+
+fn sub_event(kind: &str) -> Value {
+    json!({ "type": kind, "data": { "object": { "id": "sub_1" } } })
+}
+
+impl Harness {
+    /// Stripe's next answer to `method path` reflects the moment it was asked,
+    /// but arrives only once the returned gate opens.
+    fn hold(&self, method: &'static str, path: &str) -> Arc<tokio::sync::Notify> {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        self.fake.lock().unwrap().hold = Some((method, path.into(), gate.clone()));
+        gate
+    }
+
+    /// Wait until Stripe has been asked for `path` at least once. Bounded: code
+    /// that stops asking (an event it no longer reads, say) must fail the test,
+    /// not stall the suite.
+    async fn asked(&self, path: &str) {
+        let wait = async {
+            while !self
+                .fake
+                .lock()
+                .unwrap()
+                .calls
+                .iter()
+                .any(|c| c.path == path)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        };
+        if tokio::time::timeout(std::time::Duration::from_secs(5), wait)
+            .await
+            .is_err()
+        {
+            panic!("Stripe was never asked for {path}");
+        }
+    }
+
+    fn stripe_now(&self, status: &str) {
+        self.fake.lock().unwrap().subs[0]["status"] = json!(status);
+    }
+
+    /// `slow` reads Stripe; the subscription then turns `after`, `fast` reads
+    /// and is applied; only then does the reply to `slow` arrive.
+    async fn overlap<F: std::future::Future>(
+        &self,
+        slow: F,
+        after: &str,
+        fast: &Value,
+    ) -> F::Output {
+        let gate = self.hold("GET", "/v1/subscriptions/sub_1");
+        let (out, ()) = tokio::join!(slow, async {
+            self.asked("/v1/subscriptions/sub_1").await;
+            self.stripe_now(after);
+            assert!(self.deliver(fast).await.is_ok());
+            gate.notify_one();
+        });
+        out
+    }
+}
+
+#[tokio::test]
+async fn a_late_reply_never_revives_a_cancelled_plan() {
+    let h = Harness::new(vec![
+        sub("sub_1", "cus_1", "medium", "active", Some(HERE)),
+        sub("sub_2", "cus_1", "medium", "active", Some(HERE)),
+    ])
+    .await;
+    let stacked = h.state.store.get_subscription("sub_2").unwrap();
+    let first = payment_failed(invoice_billing(json!("sub_1")));
+    let deleted = sub_event("customer.subscription.deleted");
+    assert!(h
+        .overlap(h.deliver(&first), "canceled", &deleted)
+        .await
+        .is_ok());
+    assert_eq!(h.mirrored_status(), "canceled");
+    // The other subscription of the stack is left exactly as it was.
+    let after = h.state.store.get_subscription("sub_2").unwrap();
+    assert_eq!(
+        (after.status, after.guild_id),
+        (stacked.status, stacked.guild_id)
+    );
+    assert_eq!(h.state.store.active_slots(HERE, &slots()), 36);
+}
+
+#[tokio::test]
+async fn a_late_reply_never_marks_a_paid_plan_past_due() {
+    let h = active_here_but_now("past_due").await;
+    let first = payment_failed(invoice_billing(json!("sub_1")));
+    let updated = sub_event("customer.subscription.updated");
+    assert!(h
+        .overlap(h.deliver(&first), "active", &updated)
+        .await
+        .is_ok());
+    assert_eq!(h.mirrored_status(), "active");
+}
+
+#[tokio::test]
+async fn a_late_reply_loses_even_before_the_mirror_has_a_row() {
+    let h = Harness::new(vec![]).await;
+    {
+        let mut fake = h.fake.lock().unwrap();
+        fake.subs
+            .push(sub("sub_1", "cus_1", "medium", "active", Some(HERE)));
+        fake.customers.push(("cus_1".into(), UID.into()));
+    }
+    let first = payment_failed(invoice_billing(json!("sub_1")));
+    let deleted = sub_event("customer.subscription.deleted");
+    assert!(h
+        .overlap(h.deliver(&first), "canceled", &deleted)
+        .await
+        .is_ok());
+    assert_eq!(h.mirrored_status(), "canceled");
+}
+
+#[tokio::test]
+async fn a_late_reply_never_undoes_a_move() {
+    let h = Harness::new(vec![sub("sub_1", "cus_1", "medium", "active", Some(HERE))]).await;
+    h.state.store.mark_reassigned("sub_1");
+    let stamped = h
+        .state
+        .store
+        .get_subscription("sub_1")
+        .unwrap()
+        .reassigned_at;
+    let gate = h.hold("GET", "/v1/subscriptions/sub_1");
+    let event = sub_event("customer.subscription.updated");
+    let (late, ()) = tokio::join!(h.deliver(&event), async {
+        h.asked("/v1/subscriptions/sub_1").await;
+        let moved = h
+            .state
+            .client
+            .reassign_subscription(&h.state.store, "sub_1", ELSEWHERE)
+            .await;
+        assert!(moved.is_ok());
+        gate.notify_one();
+    });
+    assert!(late.is_ok());
+    let row = h.state.store.get_subscription("sub_1").unwrap();
+    assert_eq!(row.guild_id.as_deref(), Some(ELSEWHERE));
+    assert_eq!(row.reassigned_at, stamped);
+}
+
+#[tokio::test]
+async fn a_slow_customer_list_never_revives_a_cancelled_plan() {
+    let h = Harness::new(vec![sub("sub_1", "cus_1", "medium", "active", Some(HERE))]).await;
+    let gate = h.hold("GET", "/v1/subscriptions");
+    let deleted = sub_event("customer.subscription.deleted");
+    let refresh = h
+        .state
+        .client
+        .refresh_user_subscriptions(&h.state.store, UID);
+    let ((), ()) = tokio::join!(refresh, async {
+        h.asked("/v1/subscriptions").await;
+        h.stripe_now("canceled");
+        assert!(h.deliver(&deleted).await.is_ok());
+        gate.notify_one();
+    });
+    assert_eq!(h.mirrored_status(), "canceled");
+}
+
+#[tokio::test]
+async fn a_lagging_search_never_revives_a_cancelled_plan() {
+    let h = Harness::new(vec![sub(
+        "sub_1",
+        "cus_1",
+        "medium",
+        "canceled",
+        Some(HERE),
+    )])
+    .await;
+    {
+        // Search's index still has it active, and only it has seen sub_2 so far.
+        let mut fake = h.fake.lock().unwrap();
+        let fresh = sub("sub_2", "cus_1", "medium", "active", Some(HERE));
+        fake.stale_search = Some(vec![
+            sub("sub_1", "cus_1", "medium", "active", Some(HERE)),
+            fresh.clone(),
+        ]);
+        fake.subs.push(fresh);
+    }
+    h.state.client.backfill_guild(&h.state.store, HERE).await;
+    assert_eq!(h.mirrored_status(), "canceled");
+    assert_eq!(
+        h.state.store.get_subscription("sub_2").unwrap().status,
+        "active"
+    );
+}
+
+#[tokio::test]
+async fn a_moves_late_reply_never_revives_a_plan_cancelled_meanwhile() {
+    let h = Harness::new(vec![sub("sub_1", "cus_1", "medium", "active", Some(HERE))]).await;
+    let gate = h.hold("POST", "/v1/subscriptions/sub_1");
+    let deleted = sub_event("customer.subscription.deleted");
+    let reassign = h
+        .state
+        .client
+        .reassign_subscription(&h.state.store, "sub_1", ELSEWHERE);
+    let (moved, ()) = tokio::join!(reassign, async {
+        h.asked("/v1/subscriptions/sub_1").await;
+        h.stripe_now("canceled");
+        assert!(h.deliver(&deleted).await.is_ok());
+        gate.notify_one();
+    });
+    assert!(moved.is_ok());
+    let row = h.state.store.get_subscription("sub_1").unwrap();
+    assert_eq!(row.status, "canceled");
+    assert_eq!(row.guild_id.as_deref(), Some(ELSEWHERE));
 }

@@ -218,6 +218,23 @@ impl StripeStore {
             )
             .map_err(|e| format!("migrate reassigned_at: {e}"))?;
         }
+        // Write ordering (see `write_unless_changed`), added 2026-11-22. Additive
+        // with a default, so a mirror created before it keeps every row, and the
+        // previous image, which neither reads nor writes it, still runs on it.
+        let has_rev: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('stripe_subscriptions') \
+                 WHERE name = 'rev'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_rev == 0 {
+            conn.execute_batch(
+                "ALTER TABLE stripe_subscriptions ADD COLUMN rev INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(|e| format!("migrate rev: {e}"))?;
+        }
         drop(conn);
         Ok(StripeStore { pool })
     }
@@ -271,30 +288,63 @@ impl StripeStore {
             .unwrap_or_default()
     }
 
+    /// Write a row whatever has happened to it (seeding, tests). Every write
+    /// that comes from reading Stripe goes through [`Self::write_unless_changed`].
     pub fn upsert_subscription(&self, s: &SubRow) -> Result<(), String> {
+        self.write_unless_changed(s, i64::MAX).map(|_| ())
+    }
+
+    /// The mirror's write counter. Take it **before** reading Stripe, then hand
+    /// it to [`Self::write_unless_changed`].
+    pub fn revision(&self) -> Result<i64, String> {
         let conn = self.lock();
-        conn.execute(
-            "INSERT INTO stripe_subscriptions \
-             (id, user_id, customer_id, price_id, status, current_period_end, \
-              cancel_at_period_end, updated_at, guild_id) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) \
-             ON CONFLICT(id) DO UPDATE SET \
-               user_id=?2, customer_id=?3, price_id=?4, status=?5, \
-               current_period_end=?6, cancel_at_period_end=?7, updated_at=?8, guild_id=?9",
-            params![
-                s.id,
-                s.user_id,
-                s.customer_id,
-                s.price_id,
-                s.status,
-                s.current_period_end,
-                s.cancel_at_period_end as i64,
-                unix_now(),
-                s.guild_id,
-            ],
+        conn.query_row(
+            "SELECT COALESCE(MAX(rev), 0) FROM stripe_subscriptions",
+            [],
+            |r| r.get(0),
         )
-        .map_err(|e| e.to_string())?;
-        Ok(())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Write a row unless another write to it landed after `seen` was taken.
+    /// `Ok(false)` means one did: our read may be older than it, so the caller
+    /// reads Stripe again instead.
+    ///
+    /// Each write stamps the row with the next value of one counter for the
+    /// whole table, in the statement that writes it. A writer that took `seen`
+    /// before reading Stripe therefore loses to any write that committed after
+    /// that, including one that created the row: the last write to land is
+    /// always from a read made after every earlier write. Whole seconds in
+    /// `updated_at` couldn't say that; two writes in one second look the same.
+    pub fn write_unless_changed(&self, s: &SubRow, seen: i64) -> Result<bool, String> {
+        let conn = self.lock();
+        let written = conn
+            .execute(
+                "INSERT INTO stripe_subscriptions \
+                 (id, user_id, customer_id, price_id, status, current_period_end, \
+                  cancel_at_period_end, updated_at, guild_id, rev) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9, \
+                   (SELECT COALESCE(MAX(rev), 0) + 1 FROM stripe_subscriptions)) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   user_id=?2, customer_id=?3, price_id=?4, status=?5, \
+                   current_period_end=?6, cancel_at_period_end=?7, updated_at=?8, guild_id=?9, \
+                   rev=(SELECT COALESCE(MAX(rev), 0) + 1 FROM stripe_subscriptions) \
+                 WHERE stripe_subscriptions.rev <= ?10",
+                params![
+                    s.id,
+                    s.user_id,
+                    s.customer_id,
+                    s.price_id,
+                    s.status,
+                    s.current_period_end,
+                    s.cancel_at_period_end as i64,
+                    unix_now(),
+                    s.guild_id,
+                    seen,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(written > 0)
     }
 
     /// All columns, in the order [`sub_from_row`] reads them.
@@ -340,7 +390,9 @@ impl StripeStore {
     pub fn set_subscription_guild(&self, id: &str, guild_id: &str) -> Result<(), String> {
         let conn = self.lock();
         conn.execute(
-            "UPDATE stripe_subscriptions SET guild_id = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE stripe_subscriptions SET guild_id = ?2, updated_at = ?3, \
+             rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM stripe_subscriptions) \
+             WHERE id = ?1",
             params![id, guild_id, unix_now()],
         )
         .map_err(|e| e.to_string())?;
@@ -594,6 +646,7 @@ pub struct StripeClient {
 /// "Stripe didn't answer" (a 5xx or a transport error — ours). 5xx is the paging
 /// channel, so callers that can be reached by an ordinary user action must be able
 /// to tell those apart. `None` = never got a response at all.
+#[derive(Debug)]
 pub struct StripeErr {
     pub status: Option<StatusCode>,
     /// Stripe's machine-readable `error.code`, when it sent one.
@@ -615,6 +668,25 @@ impl StripeErr {
     /// The object named doesn't exist (a deleted customer).
     fn is_missing(&self) -> bool {
         self.code.as_deref() == Some("resource_missing")
+    }
+
+    /// Stripe's to clear, so a retry can work and nobody need be woken: it
+    /// didn't answer, answered 5xx, or is throttling us. Anything else it
+    /// refused is ours (our key, our request), apart from a missing object,
+    /// which each caller decides.
+    fn is_theirs(&self) -> bool {
+        self.status
+            .is_none_or(|s| s.is_server_error() || s == StatusCode::TOO_MANY_REQUESTS)
+    }
+
+    /// The status and code only, for a line that can reach the paging channel:
+    /// Stripe's own wording can quote a masked key.
+    fn summary(&self) -> String {
+        match (self.status, &self.code) {
+            (None, _) => self.message.clone(),
+            (Some(status), Some(code)) => format!("stripe {status} ({code})"),
+            (Some(status), None) => format!("stripe {status}"),
+        }
     }
 
     /// An error Stripe answered with, read out of its body.
@@ -850,22 +922,9 @@ impl StripeClient {
     /// "Stripe rejected this" (retrying won't help) from "Stripe didn't answer"
     /// (retry later).
     async fn retrieve_subscription(&self, id: &str) -> Result<Value, StripeErr> {
-        let resp = self
-            .http
-            .get(format!("{}/v1/subscriptions/{id}", self.api))
-            .bearer_auth(&self.secret)
-            .send()
-            .await
-            .map_err(StripeErr::unanswered)?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(StripeErr {
-                status: Some(status),
-                code: None,
-                message: format!("stripe {status}"),
-            });
-        }
-        resp.json().await.map_err(StripeErr::unanswered)
+        // Through `get`, so a refusal keeps Stripe's code: `resource_missing` is
+        // the one 404 that means the subscription isn't there.
+        self.get(&format!("/v1/subscriptions/{id}"), &[]).await
     }
 
     /// Every subscription bound to a server, via Stripe's search on the
@@ -913,9 +972,17 @@ impl StripeClient {
                 }
             },
         };
+        // Taken before the list, which answers as Stripe holds things then.
+        let seen = match store.revision() {
+            Ok(seen) => seen,
+            Err(e) => {
+                tracing::warn!("stripe mirror unreadable: {e}");
+                return;
+            }
+        };
         for sub in self.list_customer_subscriptions(&customer).await {
-            if let Err(e) = self.upsert_from_sub(store, &sub, Some(uid)).await {
-                tracing::warn!("stripe mirror upsert failed: {e}");
+            if let Err(e) = self.mirror_listed(store, &sub, seen, Some(uid)).await {
+                tracing::warn!("stripe mirror of a listed subscription failed: {e}");
             }
         }
         store.put_customer(uid, &customer, unix_now());
@@ -932,14 +999,16 @@ impl StripeClient {
         new_guild: &str,
     ) -> Result<Option<String>, String> {
         let prev = store.get_subscription(sub_id).and_then(|s| s.guild_id);
+        // Before the write, so an event read before the move can't land after it.
+        let seen = store.revision()?;
         let form = vec![("metadata[guild_id]".to_string(), new_guild.to_string())];
         let sub = self
             .post_form(&format!("/v1/subscriptions/{sub_id}"), &form)
             .await
             .map_err(|e| e.to_string())?;
         // Re-mirror from Stripe's response so status/period/guild all stay in step.
-        if let Err(e) = self.upsert_from_sub(store, &sub, None).await {
-            tracing::warn!("stripe mirror upsert failed: {e}");
+        if let Err(e) = self.mirror_listed(store, &sub, seen, None).await {
+            tracing::warn!("stripe mirror of a moved subscription failed: {e}");
         }
         // Defensive: guarantee the local guild matches even if the response was
         // missing the metadata echo for any reason.
@@ -948,15 +1017,20 @@ impl StripeClient {
     }
 
     /// The `discord_user_id` recorded on a customer (fallback attribution when a
-    /// subscription itself carries no metadata).
-    async fn customer_uid(&self, customer: &str) -> Option<String> {
-        let body = self
-            .get(&format!("/v1/customers/{customer}"), &[])
-            .await
-            .ok()?;
-        body.pointer("/metadata/discord_user_id")
-            .and_then(Value::as_str)
-            .map(String::from)
+    /// subscription itself carries no metadata). `Ok(None)` only when Stripe
+    /// says there is none: the customer has no id on it, or is deleted or gone.
+    /// A read that failed is an `Err`, never "nobody's".
+    async fn customer_uid(&self, customer: &str) -> Result<Option<String>, StripeErr> {
+        match self.get(&format!("/v1/customers/{customer}"), &[]).await {
+            // A deleted customer comes back as a stub with no metadata.
+            Ok(body) => Ok(body
+                .pointer("/metadata/discord_user_id")
+                .and_then(Value::as_str)
+                .filter(|u| !u.is_empty())
+                .map(String::from)),
+            Err(e) if e.is_missing() => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Verify a Stripe webhook signature and return the parsed event. Recomputes
@@ -1015,9 +1089,14 @@ impl StripeClient {
     /// Every subscription is mirrored from Stripe's **current** copy, never the
     /// event's snapshot: Stripe doesn't promise delivery order, so a redelivered
     /// `updated` (active) landing after `deleted` would otherwise resurrect a
-    /// cancelled plan in the mirror — premium for free, indefinitely. An `Err`
-    /// means the event wasn't applied and must be answered with a 5xx so Stripe
-    /// retries it; acknowledging it would lose it for good.
+    /// cancelled plan in the mirror — premium for free, indefinitely. Two
+    /// deliveries can also overlap, so the write is ordered too (see
+    /// [`StripeStore::write_unless_changed`]): a read answered late loses to any
+    /// write that landed after it began. An `Err` means the event wasn't
+    /// applied and must be answered with a 5xx so Stripe retries it;
+    /// acknowledging it would lose it for good. Only a subscription Stripe says
+    /// it doesn't have, or one nobody can be named as the owner of, is
+    /// acknowledged unapplied: no retry can change either.
     pub async fn handle_event(
         &self,
         store: &StripeStore,
@@ -1049,73 +1128,121 @@ impl StripeClient {
             "customer.subscription.created"
             | "customer.subscription.updated"
             | "customer.subscription.deleted" => (id_of(&obj["id"]), None),
-            "invoice.payment_failed" => (id_of(&obj["subscription"]), None),
+            "invoice.payment_failed" => (invoice_subscription(&obj), None),
             _ => return Ok(None),
         };
         let Some(sub_id) = sub_id else {
             return Ok(None);
         };
-        let sub = match self.retrieve_subscription(&sub_id).await {
-            Ok(sub) => sub,
-            // Stripe answered and refused (a sub of another account or mode):
-            // a retry would be refused the same way.
-            Err(e) if e.is_client_error() => {
-                tracing::warn!(%sub_id, "stripe refused the subscription read; event skipped: {e}");
-                return Ok(None);
+        match self.mirror_fresh(store, &sub_id, uid.as_deref()).await {
+            Ok(bound) => Ok(bound),
+            // Not in Stripe (another account or mode): no retry can change that.
+            Err(MirrorError::Subscription(e)) if e.is_missing() => {
+                tracing::warn!(%sub_id, "stripe has no such subscription; event acknowledged");
+                Ok(None)
             }
-            Err(e) => {
-                return Err(AppError::upstream(format!(
-                    "couldn't read subscription {sub_id} from Stripe: {e}"
-                )))
-            }
-        };
-        self.upsert_from_sub(store, &sub, uid.as_deref())
-            .await
-            .map_err(|e| AppError::Internal(format!("stripe mirror upsert failed: {e}")))
+            Err(e) => Err(e.into_webhook_error(&sub_id)),
+        }
     }
 
     /// Ask Stripe for a server's subscriptions (matched on `guild_id` metadata)
     /// and seed the mirror — for a server whose subs predate (or missed) the
     /// webhook. Records that we checked so a server with none doesn't re-hit the
     /// API on every read.
+    ///
+    /// Search lags behind Stripe (by up to a minute, more in an outage), so a
+    /// hit only says which subscriptions to look at: one the mirror already
+    /// holds exactly as found is left alone, and any other is read afresh. A
+    /// lagging hit written as found would bring back a cancelled plan.
     pub async fn backfill_guild(&self, store: &StripeStore, guild_id: &str) {
         for sub in self.search_subscriptions_by_guild(guild_id).await {
-            if let Err(e) = self.upsert_from_sub(store, &sub, None).await {
-                tracing::warn!("stripe mirror upsert failed: {e}");
+            let Some(id) = id_of(&sub["id"]) else {
+                continue;
+            };
+            if store
+                .get_subscription(&id)
+                .is_some_and(|row| mirrors_as_found(&row, &sub))
+            {
+                continue;
+            }
+            if let Err(e) = self.mirror_fresh(store, &id, None).await {
+                tracing::warn!(sub_id = %id, "stripe backfill mirror failed: {e}");
             }
         }
         store.put_guild_checked(guild_id, unix_now());
     }
 
-    /// Mirror one subscription, returning the `guild_id` it binds (for the
-    /// caller's reconcile). `Ok(None)` when the sub isn't mirrorable or binds
-    /// no guild; `Err` only when the mirror itself couldn't be written.
-    async fn upsert_from_sub(
+    /// Mirror `id` as Stripe holds it now, returning the `guild_id` it binds
+    /// (for the caller's reconcile). Each attempt takes the mirror's counter,
+    /// then reads Stripe, then writes only if nothing else wrote the row since;
+    /// when something did, it reads again.
+    async fn mirror_fresh(
+        &self,
+        store: &StripeStore,
+        id: &str,
+        fallback_uid: Option<&str>,
+    ) -> Result<Option<String>, MirrorError> {
+        for _ in 0..MIRROR_ATTEMPTS {
+            let seen = store.revision().map_err(MirrorError::Store)?;
+            let sub = self
+                .retrieve_subscription(id)
+                .await
+                .map_err(MirrorError::Subscription)?;
+            if let Written::Done(bound) =
+                self.write_snapshot(store, &sub, seen, fallback_uid).await?
+            {
+                return Ok(bound);
+            }
+        }
+        Err(MirrorError::Busy)
+    }
+
+    /// Mirror a subscription a consistent read just returned (a customer's
+    /// list, our own update's response), where `seen` was taken before that
+    /// read. If the row was written since, it is read afresh instead.
+    async fn mirror_listed(
         &self,
         store: &StripeStore,
         sub: &Value,
+        seen: i64,
         fallback_uid: Option<&str>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, MirrorError> {
+        match self.write_snapshot(store, sub, seen, fallback_uid).await? {
+            Written::Done(bound) => Ok(bound),
+            Written::Stale => match id_of(&sub["id"]) {
+                Some(id) => self.mirror_fresh(store, &id, fallback_uid).await,
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// Write one subscription read from Stripe after `seen` was taken.
+    /// `Done(None)` when it isn't one we mirror or nobody can be named as its
+    /// owner; `Stale` when another write to the row landed since `seen`.
+    async fn write_snapshot(
+        &self,
+        store: &StripeStore,
+        sub: &Value,
+        seen: i64,
+        fallback_uid: Option<&str>,
+    ) -> Result<Written, MirrorError> {
         let Some((id, customer_id, price_id, status, period_end, cancel, guild_id)) =
             extract_sub_fields(sub)
         else {
-            return Ok(None);
+            return Ok(Written::Done(None));
         };
         if price_id.is_empty() {
-            return Ok(None);
+            return Ok(Written::Done(None));
         }
-        let uid = match self.resolve_user_id(sub, fallback_uid, &customer_id).await {
-            Some(u) => u,
-            None => {
-                tracing::warn!(%id, "stripe sub has no attributable discord user; skipping");
-                return Ok(None);
-            }
+        let owner = self
+            .resolve_user_id(store, sub, &id, fallback_uid, &customer_id)
+            .await
+            .map_err(MirrorError::Customer)?;
+        let Some(uid) = owner else {
+            tracing::warn!(%id, "stripe sub has no attributable discord user; skipping");
+            return Ok(Written::Done(None));
         };
-        if !customer_id.is_empty() {
-            store.put_customer(&uid, &customer_id, unix_now());
-        }
-        let bound_guild = guild_id.clone();
-        store.upsert_subscription(&SubRow {
+        let row = SubRow {
             id,
             user_id: uid,
             customer_id,
@@ -1124,33 +1251,129 @@ impl StripeClient {
             current_period_end: period_end,
             cancel_at_period_end: cancel,
             guild_id,
-            // upsert_subscription's SQL never writes reassigned_at, so this is
-            // ignored — an existing move-stamp is preserved across re-mirrors.
+            // The write never touches reassigned_at, so an existing move-stamp
+            // is preserved across re-mirrors.
             reassigned_at: None,
-        })?;
-        Ok(bound_guild)
+        };
+        if !store
+            .write_unless_changed(&row, seen)
+            .map_err(MirrorError::Store)?
+        {
+            return Ok(Written::Stale);
+        }
+        if !row.customer_id.is_empty() {
+            store.put_customer(&row.user_id, &row.customer_id, unix_now());
+        }
+        Ok(Written::Done(row.guild_id))
     }
 
+    /// Whose subscription this is: its own metadata, then what the caller knows
+    /// (the checkout's buyer, the user being refreshed), then the mirror's
+    /// existing owner, and only then its customer's metadata, which costs a
+    /// read. `Ok(None)` means Stripe says nobody; a failed read is an `Err`.
     async fn resolve_user_id(
         &self,
+        store: &StripeStore,
         sub: &Value,
+        id: &str,
         fallback_uid: Option<&str>,
         customer_id: &str,
-    ) -> Option<String> {
-        if let Some(u) = sub
+    ) -> Result<Option<String>, StripeErr> {
+        let named = sub
             .pointer("/metadata/discord_user_id")
             .and_then(Value::as_str)
-        {
-            return Some(u.to_string());
+            .filter(|u| !u.is_empty())
+            .or(fallback_uid.filter(|u| !u.is_empty()));
+        if let Some(u) = named {
+            return Ok(Some(u.to_string()));
         }
-        if let Some(u) = fallback_uid {
-            return Some(u.to_string());
+        if let Some(row) = store.get_subscription(id).filter(|r| !r.user_id.is_empty()) {
+            return Ok(Some(row.user_id));
         }
-        if !customer_id.is_empty() {
-            return self.customer_uid(customer_id).await;
+        if customer_id.is_empty() {
+            return Ok(None);
         }
-        None
+        self.customer_uid(customer_id).await
     }
+}
+
+/// How many times a mirror write re-reads Stripe while other writes keep
+/// landing on the same row. Each extra try means another write came in between,
+/// so running out takes a burst no real subscription produces.
+const MIRROR_ATTEMPTS: usize = 4;
+
+/// What a snapshot write did.
+enum Written {
+    /// The row holds it now, or it isn't a subscription we mirror; carries the
+    /// server it binds.
+    Done(Option<String>),
+    /// Another write landed on the row after our read began.
+    Stale,
+}
+
+/// Why a subscription couldn't be mirrored.
+#[derive(Debug)]
+enum MirrorError {
+    /// Reading the subscription failed.
+    Subscription(StripeErr),
+    /// Reading its customer, to learn whose it is, failed.
+    Customer(StripeErr),
+    /// Our own store refused.
+    Store(String),
+    /// Other writes kept landing between each read and its write.
+    Busy,
+}
+
+impl MirrorError {
+    /// The webhook's answer. A 5xx makes Stripe retry, so nothing is lost; the
+    /// fault decides whether it pages. Stripe's own wording is left out: it can
+    /// quote a masked key, and this line reaches the paging channel.
+    fn into_webhook_error(self, sub_id: &str) -> AppError {
+        let (what, e) = match self {
+            MirrorError::Subscription(e) => ("subscription", e),
+            MirrorError::Customer(e) => ("customer of subscription", e),
+            MirrorError::Store(e) => {
+                return AppError::Internal(format!("stripe mirror upsert failed: {e}"))
+            }
+            MirrorError::Busy => {
+                return AppError::upstream(format!(
+                    "subscription {sub_id} kept changing while it was mirrored"
+                ))
+            }
+        };
+        let message = format!(
+            "couldn't read the {what} {sub_id} from Stripe: {}",
+            e.summary()
+        );
+        if e.is_theirs() {
+            AppError::upstream(message)
+        } else {
+            AppError::BadGateway(message)
+        }
+    }
+}
+
+impl std::fmt::Display for MirrorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MirrorError::Subscription(e) => write!(f, "couldn't read the subscription: {e}"),
+            MirrorError::Customer(e) => write!(f, "couldn't read its customer: {e}"),
+            MirrorError::Store(e) => write!(f, "mirror write failed: {e}"),
+            MirrorError::Busy => write!(f, "it kept changing while it was mirrored"),
+        }
+    }
+}
+
+/// Whether the mirror already holds a subscription exactly as `sub` shows it.
+fn mirrors_as_found(row: &SubRow, sub: &Value) -> bool {
+    extract_sub_fields(sub).is_some_and(|(_, customer, price, status, end, cancel, guild)| {
+        row.customer_id == customer
+            && row.price_id == price
+            && row.status == status
+            && row.current_period_end == end
+            && row.cancel_at_period_end == cancel
+            && row.guild_id == guild
+    })
 }
 
 /// Build the `POST /v1/checkout/sessions` form. Pure, because the discount half
@@ -1341,6 +1564,14 @@ fn id_of(v: &Value) -> Option<String> {
     }
 }
 
+/// The subscription an invoice bills, if any. An event has its endpoint's API
+/// version: since 2025-03-31.basil the id is under `parent`, before that it was
+/// a top-level field.
+fn invoice_subscription(invoice: &Value) -> Option<String> {
+    id_of(&invoice["parent"]["subscription_details"]["subscription"])
+        .or_else(|| id_of(&invoice["subscription"]))
+}
+
 /// The `stripe_checkout_price` map key for a (tier, interval): monthly is the
 /// bare tier, yearly appends `_year` (e.g. "pro" → monthly, "pro_year" → annual).
 fn checkout_key(tier: &str, interval: &str) -> String {
@@ -1409,15 +1640,8 @@ impl StripeState {
                 return slots;
             }
             for sub_id in lapsed {
-                match self.client.retrieve_subscription(&sub_id).await {
-                    Ok(sub) => {
-                        if let Err(e) = self.client.upsert_from_sub(&self.store, &sub, None).await {
-                            tracing::warn!("stripe mirror upsert failed: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::info!(%sub_id, "couldn't re-check a lapsed subscription: {e}")
-                    }
+                if let Err(e) = self.client.mirror_fresh(&self.store, &sub_id, None).await {
+                    tracing::info!(%sub_id, "couldn't re-check a lapsed subscription: {e}")
                 }
             }
             self.store.put_guild_checked(guild_id, unix_now());
@@ -2494,5 +2718,140 @@ mod tests {
         let foreign = format!("t={ts},v1={other},v1={}", "b".repeat(v1.len()));
         assert!(client.verify_webhook(payload, &foreign).is_err());
         assert!(client.verify_webhook(payload, &format!("t={ts}")).is_err());
+    }
+
+    /// The mirror as every image before the write counter created it.
+    const SCHEMA_BEFORE_REV: &str = "CREATE TABLE stripe_subscriptions (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, customer_id TEXT NOT NULL,
+            price_id TEXT NOT NULL, status TEXT NOT NULL,
+            current_period_end INTEGER NOT NULL,
+            cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL, guild_id TEXT, reassigned_at INTEGER);
+        CREATE INDEX idx_stripe_sub_user ON stripe_subscriptions(user_id, status);
+        CREATE INDEX idx_stripe_sub_guild ON stripe_subscriptions(guild_id, status);
+        CREATE TABLE stripe_customers (user_id TEXT PRIMARY KEY,
+            customer_id TEXT NOT NULL, checked_at INTEGER NOT NULL);
+        CREATE TABLE stripe_guild_checks (guild_id TEXT PRIMARY KEY,
+            checked_at INTEGER NOT NULL);";
+
+    /// The previous image's write, verbatim: what runs after a rollback.
+    const WRITE_BEFORE_REV: &str = "INSERT INTO stripe_subscriptions \
+         (id, user_id, customer_id, price_id, status, current_period_end, \
+          cancel_at_period_end, updated_at, guild_id) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) \
+         ON CONFLICT(id) DO UPDATE SET \
+           user_id=?2, customer_id=?3, price_id=?4, status=?5, \
+           current_period_end=?6, cancel_at_period_end=?7, updated_at=?8, guild_id=?9";
+
+    fn old_write(conn: &Connection, id: &str, status: &str) {
+        conn.execute(
+            WRITE_BEFORE_REV,
+            params![
+                id,
+                "u1",
+                "cus_1",
+                "p_medium",
+                status,
+                4_000_000_000i64,
+                0,
+                1,
+                "g1"
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_mirror_from_before_the_counter_keeps_its_rows_and_runs_both_images() {
+        let path = std::env::temp_dir().join(format!(
+            "dweeb-stripe-test-{}-old-schema.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(SCHEMA_BEFORE_REV).unwrap();
+        old_write(&old, "sub_moved", "active");
+        old_write(&old, "sub_ended", "canceled");
+        old.execute("UPDATE stripe_subscriptions SET reassigned_at = 123", [])
+            .unwrap();
+
+        // Opening migrates, and opening again changes nothing.
+        let store = StripeStore::open(path.to_str().unwrap()).unwrap();
+        drop(store);
+        let store = StripeStore::open(path.to_str().unwrap()).unwrap();
+        let moved = store.get_subscription("sub_moved").unwrap();
+        assert_eq!(moved.status, "active");
+        assert_eq!(moved.guild_id.as_deref(), Some("g1"));
+        assert_eq!(moved.reassigned_at, Some(123));
+        assert_eq!(
+            store.get_subscription("sub_ended").unwrap().status,
+            "canceled"
+        );
+        assert_eq!(store.revision().unwrap(), 0);
+
+        // Writes are ordered on the old rows: a read older than the last write loses.
+        let seen = store.revision().unwrap();
+        let ended = SubRow {
+            status: "canceled".into(),
+            ..row("sub_moved", "u1", "g1", "p_medium", "canceled")
+        };
+        assert!(store.write_unless_changed(&ended, seen).unwrap());
+        let late = row("sub_moved", "u1", "g1", "p_medium", "active");
+        assert!(!store.write_unless_changed(&late, seen).unwrap());
+        // So does a row that didn't exist yet when the read began.
+        let fresh = row("sub_new", "u1", "g1", "p_medium", "canceled");
+        assert!(store.write_unless_changed(&fresh, seen).unwrap());
+        let stale_new = row("sub_new", "u1", "g1", "p_medium", "active");
+        assert!(!store.write_unless_changed(&stale_new, seen).unwrap());
+        assert_eq!(
+            store.get_subscription("sub_new").unwrap().status,
+            "canceled"
+        );
+        let moved = store.get_subscription("sub_moved").unwrap();
+        assert_eq!(
+            (moved.status.as_str(), moved.reassigned_at),
+            ("canceled", Some(123))
+        );
+
+        // Rolled back, the previous image writes and reads the migrated file as before.
+        old_write(&old, "sub_moved", "past_due");
+        let status: String = old
+            .query_row(
+                "SELECT status FROM stripe_subscriptions WHERE id = 'sub_moved'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "past_due");
+        // Rolled forward again, the counter still orders writes.
+        let seen = store.revision().unwrap();
+        let next = row("sub_moved", "u1", "g1", "p_medium", "active");
+        assert!(store.write_unless_changed(&next, seen).unwrap());
+        assert!(store.revision().unwrap() > seen);
+        assert_eq!(
+            store.get_subscription("sub_moved").unwrap().reassigned_at,
+            Some(123)
+        );
+        drop(old);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_move_counts_as_a_write() {
+        let (store, path) = temp_store("move-rev");
+        store
+            .upsert_subscription(&row("sub_a", "u1", "g1", "p_pro", "active"))
+            .unwrap();
+        let seen = store.revision().unwrap();
+        store.set_subscription_guild("sub_a", "g2").unwrap();
+        // A read that began before the move can't put the old server back.
+        let late = row("sub_a", "u1", "g1", "p_pro", "active");
+        assert!(!store.write_unless_changed(&late, seen).unwrap());
+        assert_eq!(
+            store.get_subscription("sub_a").unwrap().guild_id.as_deref(),
+            Some("g2")
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

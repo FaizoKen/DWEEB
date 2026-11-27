@@ -3008,11 +3008,32 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   at its mute's expiry posts once, as "still occurring".
   **Billing.** Stripe events are mirrored from the subscription as Stripe holds it *now* (event
   order isn't promised, so a late `updated` resurrected a cancelled plan); an event we couldn't
-  apply answers 5xx so Stripe retries (Stripe unreachable = Upstream warn, our store = page);
-  any matching `v1` verifies (a secret roll sends several); an `active` row past its period by a
-  day is re-read from Stripe on the backfill throttle; `STRIPE_PRICE_SLOTS` that doesn't parse is
-  a boot error; a cache fill that straddles an invalidation isn't stored (`EntitlementCache`
-  epoch).
+  apply answers 5xx so Stripe retries (our store refusing the write = 500, pages); any matching
+  `v1` verifies (a secret roll sends several); an `active` row past its period by a day is
+  re-read from Stripe on the backfill throttle; `STRIPE_PRICE_SLOTS` that doesn't parse is a
+  boot error; a cache fill that straddles an invalidation isn't stored (`EntitlementCache`
+  epoch). An invoice names its subscription at `parent.subscription_details.subscription` since
+  API 2025-03-31.basil (`invoice_subscription` falls back to the older top-level field). Reading
+  only the old one silently acknowledged every `invoice.payment_failed` (found 2026-11-22).
+  **A failed read is retried, never acknowledged** (2026-11-22): no answer, 5xx or 429 is
+  Stripe's (502, WARN), any other refusal is ours (502, pages: our key, our request), and only
+  two things are acknowledged unapplied, because no retry can change them: `resource_missing` on
+  the subscription itself, and a subscription nobody can be named as the owner of. Ownership is
+  its metadata, the caller's user, the mirrored row's owner, then its customer's metadata; a
+  customer read that fails is an error, and only a customer that is gone, deleted or carries no
+  id means nobody. The error line carries Stripe's status and code, never its wording, which can
+  quote a masked key. **Mirror writes are ordered** (`rev`, one counter across
+  `stripe_subscriptions`): a writer takes `StripeStore::revision()` *before* reading Stripe and
+  writes through `write_unless_changed`, which refuses if any write to that row (creating it
+  included) landed since; `mirror_fresh` then reads again (4 tries). Without it, two overlapping
+  deliveries, a slow customer list, a move's own reply or a backfill let the older read land
+  last: reproduced reviving a cancelled plan, saving a paid one as past_due and undoing a move.
+  Every writer goes through it (webhook, lapsed re-read, user refresh, purchase check, move), and
+  `set_subscription_guild` counts as a write. Search lags (up to a minute, longer in an outage),
+  so a Search hit is never written as found: one the mirror already holds exactly is skipped,
+  any other is read afresh. `updated_at` is whole seconds and can't order two writes in one
+  second, so don't build on it. The column is additive (`DEFAULT 0`): the previous image runs on a
+  migrated mirror unchanged, so a rollback needs no migration back (rehearsed old → new → old).
   **Schedules/library.** PATCH is a compare-and-swap on worker-owned state (409 on conflict, no
   edits while `sending`); a plan suspension preserves the user's pause
   (`paused_before_suspend`); a run cap at or below the runs made finishes the series;

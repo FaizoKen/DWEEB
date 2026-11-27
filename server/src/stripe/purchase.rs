@@ -14,8 +14,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use serde_json::Value;
 
 use super::{
-    checkout_key, id_of, CheckoutError, CheckoutRequest, CheckoutStart, StripeClient, StripeErr,
-    StripeState, StripeStore, SubRow, APP_SOURCE,
+    checkout_key, id_of, CheckoutError, CheckoutRequest, CheckoutStart, MirrorError, StripeClient,
+    StripeErr, StripeState, StripeStore, SubRow, APP_SOURCE,
 };
 use crate::entitlement::Tier;
 use crate::schedule::unix_now;
@@ -221,6 +221,9 @@ impl StripeClient {
         customer: &str,
         uid: &str,
     ) -> Result<Vec<SubRow>, CheckoutError> {
+        // Taken before the list, so a webhook landing meanwhile wins (see
+        // `StripeStore::write_unless_changed`).
+        let seen = store.revision().map_err(CheckoutError::Other)?;
         let query = [("customer", customer), ("status", "all"), ("limit", "100")];
         let body = match self.get("/v1/subscriptions", &query).await {
             Ok(body) => body,
@@ -229,9 +232,17 @@ impl StripeClient {
         };
         let mut mine = Vec::new();
         for sub in list_of(&body) {
-            self.upsert_from_sub(store, &sub, Some(uid))
-                .await
-                .map_err(CheckoutError::Other)?;
+            match self.mirror_listed(store, &sub, seen, Some(uid)).await {
+                Ok(_) => {}
+                // Gone by the time it was read again: nothing of theirs to weigh.
+                Err(MirrorError::Subscription(e)) if e.is_missing() => continue,
+                Err(MirrorError::Subscription(e) | MirrorError::Customer(e)) => {
+                    return Err(CheckoutError::Stripe(e))
+                }
+                Err(MirrorError::Store(e)) => return Err(CheckoutError::Other(e)),
+                // Changing as we read it: most likely a payment finishing.
+                Err(MirrorError::Busy) => return Err(CheckoutError::Refused(FINISHING)),
+            }
             let row = id_of(&sub["id"]).and_then(|id| store.get_subscription(&id));
             mine.extend(row.filter(|r| r.user_id == uid));
         }
